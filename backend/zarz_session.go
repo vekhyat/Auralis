@@ -153,6 +153,68 @@ func zarzSessionPath() (string, error) {
 	return filepath.Join(dir, "zarz_session.json"), nil
 }
 
+func legacyZarzSessionPath() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(homeDir, ".spotiflac", "zarz_session.json"), nil
+}
+
+func parseZarzStoreData(data []byte) *zarzSessionStore {
+	store := &zarzSessionStore{Sessions: map[string]zarzSessionRecord{}}
+	_ = json.Unmarshal(data, store)
+	if store.Sessions == nil {
+		store.Sessions = map[string]zarzSessionRecord{}
+	}
+	if len(store.Sessions) > 0 {
+		return store
+	}
+	var legacy zarzSessionRecord
+	if json.Unmarshal(data, &legacy) == nil && strings.TrimSpace(legacy.SessionID) != "" {
+		if strings.TrimSpace(store.InstallID) == "" {
+			store.InstallID = legacy.InstallID
+		}
+		legacy.AppVersion = "tidal-web@1.1.0"
+		store.Sessions["tidal-web@1.1.0"] = legacy
+	}
+	return store
+}
+
+func zarzStoreHasValidSession(store *zarzSessionStore) bool {
+	if store == nil {
+		return false
+	}
+	for _, record := range store.Sessions {
+		item := record
+		if zarzSessionValid(&item) {
+			return true
+		}
+	}
+	return false
+}
+
+func importZarzStore(primary []byte, primaryOK bool, legacy []byte, legacyOK bool) (*zarzSessionStore, bool) {
+	store := &zarzSessionStore{Sessions: map[string]zarzSessionRecord{}}
+	if primaryOK {
+		store = parseZarzStoreData(primary)
+	}
+	if zarzStoreHasValidSession(store) {
+		return store, false
+	}
+	if !legacyOK {
+		return store, false
+	}
+	legacyStore := parseZarzStoreData(legacy)
+	if zarzStoreHasValidSession(legacyStore) {
+		return legacyStore, true
+	}
+	if strings.TrimSpace(store.InstallID) == "" && strings.TrimSpace(legacyStore.InstallID) != "" {
+		return legacyStore, true
+	}
+	return store, false
+}
+
 func loadZarzStore() (*zarzSessionStore, error) {
 	if zarzStoreMem != nil && strings.TrimSpace(zarzStoreMem.InstallID) != "" {
 		if zarzStoreMem.Sessions == nil {
@@ -164,32 +226,33 @@ func loadZarzStore() (*zarzSessionStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	store := &zarzSessionStore{Sessions: map[string]zarzSessionRecord{}}
-	data, readErr := os.ReadFile(path)
-	if readErr == nil {
-		if json.Unmarshal(data, store) != nil || (store.InstallID == "" && store.Sessions == nil) {
-			var legacy zarzSessionRecord
-			if json.Unmarshal(data, &legacy) == nil && legacy.SessionID != "" {
-				store.InstallID = legacy.InstallID
-				if store.Sessions == nil {
-					store.Sessions = map[string]zarzSessionRecord{}
-				}
-				legacy.AppVersion = "tidal-web@1.1.0"
-				store.Sessions["tidal-web@1.1.0"] = legacy
-			}
+	primary, primaryErr := os.ReadFile(path)
+	var legacy []byte
+	legacyOK := false
+	if legacyPath, legacyPathErr := legacyZarzSessionPath(); legacyPathErr == nil {
+		if data, readErr := os.ReadFile(legacyPath); readErr == nil {
+			legacy = data
+			legacyOK = true
 		}
 	}
+	store, migrated := importZarzStore(primary, primaryErr == nil, legacy, legacyOK)
 	if store.Sessions == nil {
 		store.Sessions = map[string]zarzSessionRecord{}
 	}
+	created := false
 	if strings.TrimSpace(store.InstallID) == "" {
 		store.InstallID = zarzRandomHex(16)
-		zarzStoreMem = store
+		created = true
+	}
+	zarzStoreMem = store
+	if migrated || created || primaryErr != nil {
 		if err := saveZarzStore(store); err != nil {
 			return nil, err
 		}
+		if migrated {
+			fmt.Println("Imported Zarz session from existing SpotiFLAC data folder")
+		}
 	}
-	zarzStoreMem = store
 	return store, nil
 }
 
@@ -348,7 +411,7 @@ func completeZarzChallenge(_ *zarzSessionRecord, challenge string) (string, erro
 
 	callbackState := zarzRandomHex(16)
 	query := parsed.Query()
-	query.Set("cb", "auralis://session-grant?cb_version=v2grant&state="+callbackState)
+	query.Set("cb", "spotiflac://session-grant?cb_version=v2grant&state="+callbackState)
 	parsed.RawQuery = query.Encode()
 
 	communityBrowserMu.RLock()
