@@ -1,0 +1,28 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "Auralis",
+  "outputfilename": "Auralis",
+  "frontend:install": "pnpm install --frozen-lockfile",
+  "frontend:dev:install": "pnpm install",
+  "frontend:build": "pnpm run build",
+  "frontend:dev:watcher": "pnpm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "Vekhyat Jain"
+  },
+  "info": {
+    "productName": "Auralis",
+    "productVersion": "1.0.0",
+    "copyright": "© 2026 Vekhyat Jain",
+    "protocols": [
+      {
+        "scheme": "auralis",
+        "description": "Auralis Protocol",
+        "role": "Editor"
+      }
+    ]
+  },
+  "wailsjsdir": "./frontend",
+  "assetdir": "./frontend/dist",
+  "reloaddirs": "./frontend/src"
+}

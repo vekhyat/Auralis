@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Auralis">
+  <rect width="64" height="64" rx="14" fill="#1a2428"/>
+  <path d="M14 42c5.5-16 10-26 18-26s12.5 10 18 26" fill="none" stroke="#3ecfbf" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M22 42c3.5-10 6.5-16 10-16s6.5 6 10 16" fill="none" stroke="#3ecfbf" stroke-width="2.5" stroke-linecap="round" opacity="0.75"/>
+  <circle cx="32" cy="44.5" r="2.6" fill="#3ecfbf"/>
+</svg>
