@@ -63,6 +63,41 @@ func communitySessionPath() (string, error) {
 	return filepath.Join(dir, "community_session.json"), nil
 }
 
+func legacyCommunitySessionPath() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(homeDir, ".spotiflac", "community_session.json"), nil
+}
+
+func parseCommunitySessionData(data []byte) *communitySessionRecord {
+	record := &communitySessionRecord{}
+	_ = json.Unmarshal(data, record)
+	return record
+}
+
+func importCommunitySession(primary []byte, primaryOK bool, legacy []byte, legacyOK bool) (*communitySessionRecord, bool) {
+	record := &communitySessionRecord{}
+	if primaryOK {
+		record = parseCommunitySessionData(primary)
+	}
+	if communitySessionValid(record) {
+		return record, false
+	}
+	if !legacyOK {
+		return record, false
+	}
+	legacyRecord := parseCommunitySessionData(legacy)
+	if communitySessionValid(legacyRecord) {
+		return legacyRecord, true
+	}
+	if strings.TrimSpace(record.InstallID) == "" && strings.TrimSpace(legacyRecord.InstallID) != "" {
+		return legacyRecord, true
+	}
+	return record, false
+}
+
 func cloneCommunitySession(record *communitySessionRecord) *communitySessionRecord {
 	if record == nil {
 		return &communitySessionRecord{}
@@ -76,10 +111,16 @@ func loadCommunitySession() (*communitySessionRecord, error) {
 	if err != nil {
 		return nil, err
 	}
-	record := &communitySessionRecord{}
-	if data, readErr := os.ReadFile(path); readErr == nil {
-		_ = json.Unmarshal(data, record)
+	primary, primaryErr := os.ReadFile(path)
+	var legacy []byte
+	legacyOK := false
+	if legacyPath, legacyPathErr := legacyCommunitySessionPath(); legacyPathErr == nil {
+		if data, readErr := os.ReadFile(legacyPath); readErr == nil {
+			legacy = data
+			legacyOK = true
+		}
 	}
+	record, migrated := importCommunitySession(primary, primaryErr == nil, legacy, legacyOK)
 	if communitySessionMem != nil {
 		if strings.TrimSpace(record.InstallID) == "" {
 			record.InstallID = communitySessionMem.InstallID
@@ -90,13 +131,21 @@ func loadCommunitySession() (*communitySessionRecord, error) {
 			record.ExpiresAt = communitySessionMem.ExpiresAt
 		}
 	}
+	created := false
 	if strings.TrimSpace(record.InstallID) == "" {
 		record.InstallID = communityRandomHex(16)
+		created = true
+	}
+	if migrated || created || primaryErr != nil {
 		if err := saveCommunitySession(record); err != nil {
 			return nil, err
 		}
+		if migrated {
+			fmt.Println("Imported community session from existing SpotiFLAC data folder")
+		}
+	} else {
+		communitySessionMem = cloneCommunitySession(record)
 	}
-	communitySessionMem = cloneCommunitySession(record)
 	return record, nil
 }
 
