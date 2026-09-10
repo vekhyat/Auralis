@@ -3,36 +3,49 @@
 package backend
 
 import (
+	"fmt"
 	"runtime"
 
 	"golang.org/x/sys/windows"
 )
 
-func restrictPrivateFileACL(path string) error {
+func restrictPrivateFileACL(path string) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("acl restrict panic: %v", recovered)
+		}
+	}()
+
 	tokenUser, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
 		return err
 	}
+	if tokenUser == nil || tokenUser.User.Sid == nil {
+		return fmt.Errorf("missing process user SID")
+	}
 
-	var pinner runtime.Pinner
-	defer pinner.Unpin()
-	pinner.Pin(tokenUser.User.Sid)
+	sid, err := tokenUser.User.Sid.Copy()
+	if err != nil {
+		return err
+	}
+	runtime.KeepAlive(tokenUser)
 
-	acl, err := windows.ACLFromEntries([]windows.EXPLICIT_ACCESS{{
+	entries := []windows.EXPLICIT_ACCESS{{
 		AccessPermissions: windows.GENERIC_ALL,
 		AccessMode:        windows.SET_ACCESS,
 		Inheritance:       windows.NO_INHERITANCE,
 		Trustee: windows.TRUSTEE{
 			TrusteeForm:  windows.TRUSTEE_IS_SID,
 			TrusteeType:  windows.TRUSTEE_IS_USER,
-			TrusteeValue: windows.TrusteeValueFromSID(tokenUser.User.Sid),
+			TrusteeValue: windows.TrusteeValueFromSID(sid),
 		},
-	}}, nil)
+	}}
+	acl, err := windows.ACLFromEntries(entries, nil)
 	if err != nil {
 		return err
 	}
 
-	return windows.SetNamedSecurityInfo(
+	err = windows.SetNamedSecurityInfo(
 		path,
 		windows.SE_FILE_OBJECT,
 		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
@@ -41,4 +54,8 @@ func restrictPrivateFileACL(path string) error {
 		acl,
 		nil,
 	)
+	runtime.KeepAlive(sid)
+	runtime.KeepAlive(entries)
+	runtime.KeepAlive(acl)
+	return err
 }
