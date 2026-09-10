@@ -1,11 +1,5 @@
-/* Auralis verification branding — applied inside the embedded window.
-   Cosmetic only: hides upstream SpotiFLAC chrome so the flow reads as Auralis. */
-
-/* Zarz challenge page (api.zarz.moe) */
-nav, footer, section, .footer-note { display: none !important; }
-.hero { padding-top: 88px !important; padding-bottom: 72px !important; }
-
-/* SpotBye verify page (verify.spotbye.qzz.io) */
-.brand, .tagline, .coffee-button { display: none !important; }
-
-html { background: #000 !important; }
+/* Cosmetic only: hide upstream SpotiFLAC chrome, keep the Turnstile widget. */
+html, body { background: #000 !important; color: #f5f5f5 !important; }
+nav, header, footer, aside, .footer-note, .brand, .tagline, .coffee-button { display: none !important; }
+.hero { padding-top: 48px !important; padding-bottom: 48px !important; }
+iframe[src*="challenges.cloudflare.com"], .cf-turnstile, #cf-turnstile { display: block !important; }

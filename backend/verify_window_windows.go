@@ -47,11 +47,17 @@ func OpenVerificationWindow(target string) (err error) {
 		return fmt.Errorf("verification window is already open")
 	}
 	profileDir := verifyProfileDir()
-	cmd := exec.Command(edgePath,
-		"--app="+target,
+	args := []string{
+		"--app=" + target,
 		"--window-size=500,640",
-		"--user-data-dir="+profileDir,
-	)
+		"--user-data-dir=" + profileDir,
+		"--no-first-run",
+		"--no-default-browser-check",
+	}
+	if extensionDir := mustWriteVerifyExtension(); extensionDir != "" {
+		args = append(args, verifyExtensionLoadArgs(extensionDir)...)
+	}
+	cmd := exec.Command(edgePath, args...)
 	if err := cmd.Start(); err != nil {
 		verifySessionState.mu.Unlock()
 		return fmt.Errorf("failed to open verification window: %w", err)
