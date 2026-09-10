@@ -3,45 +3,42 @@
 package backend
 
 import (
-	_ "embed"
 	"fmt"
-	"runtime"
-	"strings"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"sync"
-
-	"github.com/wailsapp/go-webview2/pkg/edge"
 )
 
-// In-app verification window: hosts the upstream Cloudflare Turnstile challenge
-// page in a native WebView2 window owned by Auralis, with cosmetic branding so
-// the flow feels first-party. The verification itself is untouched — the real
-// remote page loads from the real domain, so Turnstile behaves normally.
-//
-// Threading model: Win32 windows are thread-affine. The caller's goroutine is
-// locked to an OS thread and owns the window for its whole lifetime: create,
-// pump messages, tear down. This slots directly into the existing flow, since
-// completeZarzChallenge / runCommunityVerification already block while waiting
-// for the grant.
-
-//go:embed assets/verify-branding.css
-var verifyBrandingCSS string
-
-const verifyWindowTitle = "Auralis — Verification"
+// Verification is shown in a dedicated Microsoft Edge --app window, not a
+// second in-process WebView2. go-webview2's Chromium.Embed calls os.Exit(1)
+// on environment/controller errors, which killed Auralis the moment a
+// download needed Turnstile. A child Edge process cannot take the app down.
 
 type verifySession struct {
 	mu      sync.Mutex
 	active  bool
+	cmd     *exec.Cmd
+	done    chan struct{}
 	closing bool
 }
 
 var verifySessionState verifySession
 
-// OpenVerificationWindow shows the challenge URL in the embedded browser
-// window and pumps its message loop until the window is closed (either by the
-// user, or automatically once the grant has been delivered).
-func OpenVerificationWindow(target string) error {
+func OpenVerificationWindow(target string) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("verification window panic: %v", recovered)
+		}
+	}()
+
 	if err := validateVerificationChallengeURL(target); err != nil {
 		return err
+	}
+
+	edgePath := microsoftEdgePath()
+	if edgePath == "" {
+		return fmt.Errorf("Microsoft Edge was not found")
 	}
 
 	verifySessionState.mu.Lock()
@@ -49,85 +46,78 @@ func OpenVerificationWindow(target string) error {
 		verifySessionState.mu.Unlock()
 		return fmt.Errorf("verification window is already open")
 	}
+	profileDir := verifyProfileDir()
+	cmd := exec.Command(edgePath,
+		"--app="+target,
+		"--window-size=500,640",
+		"--user-data-dir="+profileDir,
+	)
+	if err := cmd.Start(); err != nil {
+		verifySessionState.mu.Unlock()
+		return fmt.Errorf("failed to open verification window: %w", err)
+	}
+	done := make(chan struct{})
 	verifySessionState.active = true
 	verifySessionState.closing = false
+	verifySessionState.cmd = cmd
+	verifySessionState.done = done
 	verifySessionState.mu.Unlock()
 
-	defer func() {
+	go func() {
+		_ = cmd.Wait()
+		close(done)
 		verifySessionState.mu.Lock()
-		verifySessionState.active = false
+		if verifySessionState.cmd == cmd {
+			verifySessionState.cmd = nil
+			verifySessionState.active = false
+			verifySessionState.done = nil
+		}
 		verifySessionState.mu.Unlock()
 	}()
 
-	// Webview2 controllers and the host window must live on one thread.
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-
-	hwnd := createVerifyHostWindow(verifyWindowTitle)
-	if hwnd == 0 {
-		return fmt.Errorf("could not create the verification window")
-	}
-	// Ensure the window never outlives this call, whatever happens.
-	defer destroyVerifyHostWindow(hwnd)
-
-	chromium := edge.NewChromium()
-	chromium.DataPath = verifyProfileDir()
-	chromium.SetBackgroundColour(0x0a, 0x0a, 0x0a, 0xff)
-	chromium.MessageCallback = func(message string, _ *edge.ICoreWebView2, _ *edge.ICoreWebView2WebMessageReceivedEventArgs) {
-		if strings.HasPrefix(strings.TrimSpace(message), "auralis-verify:close") {
-			CloseVerificationWindow()
-		}
-	}
-	if !chromium.Embed(uintptr(hwnd)) {
-		return fmt.Errorf("failed to initialise the embedded browser")
-	}
-	defer chromium.ShuttingDown()
-
-	chromium.Init(verifyBootstrapJS())
-	chromium.Navigate(target)
-	if err := chromium.Show(); err != nil {
-		return err
-	}
-	focusVerifyHostWindow(hwnd)
-
-	pumpVerifyHostMessages(hwnd)
+	<-done
 	return nil
 }
 
-// CloseVerificationWindow asks the embedded window to close. Safe to call from
-// any goroutine: it merely posts a message, and the owning thread performs the
-// actual teardown. No-op when nothing is open.
 func CloseVerificationWindow() {
-	postVerifyHostClose()
+	verifySessionState.mu.Lock()
+	cmd := verifySessionState.cmd
+	done := verifySessionState.done
+	verifySessionState.closing = true
+	verifySessionState.mu.Unlock()
+	if cmd != nil && cmd.Process != nil {
+		_ = cmd.Process.Kill()
+	}
+	if done != nil {
+		<-done
+	}
 }
 
 func verifyProfileDir() string {
 	dir, err := EnsureAppDir()
 	if err != nil {
-		return ""
+		return filepath.Join(os.TempDir(), "auralis-verify-profile")
 	}
-	return dir + `\verify_profile`
+	return filepath.Join(dir, "verify_profile")
 }
 
-// verifyBootstrapJS runs on every document before page scripts. Applies the
-// branding stylesheet and keeps it applied against late DOM changes.
-func verifyBootstrapJS() string {
-	css := strings.ReplaceAll(verifyBrandingCSS, "\\", `\\`)
-	css = strings.ReplaceAll(css, "`", "\\`")
-	css = strings.ReplaceAll(css, "\n", `\n`)
-	return `(function () {
-	if (window.__auralisBranding) return;
-	window.__auralisBranding = true;
-	var css = ` + "`" + css + "`" + `;
-	function apply() {
-		if (document.getElementById("auralis-branding")) return;
-		var el = document.createElement("style");
-		el.id = "auralis-branding";
-		el.textContent = css;
-		(document.head || document.documentElement).appendChild(el);
+func microsoftEdgePath() string {
+	candidates := []string{
+		filepath.Join(os.Getenv("ProgramFiles(x86)"), `Microsoft\Edge\Application\msedge.exe`),
+		filepath.Join(os.Getenv("ProgramFiles"), `Microsoft\Edge\Application\msedge.exe`),
+		filepath.Join(os.Getenv("LOCALAPPDATA"), `Microsoft\Edge\Application\msedge.exe`),
 	}
-	apply();
-	document.addEventListener("DOMContentLoaded", apply);
-	new MutationObserver(function () { apply(); }).observe(document.documentElement, { childList: true, subtree: true });
-})();`
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		info, err := os.Stat(candidate)
+		if err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	if found, err := exec.LookPath("msedge"); err == nil {
+		return found
+	}
+	return ""
 }

@@ -558,6 +558,14 @@ func completeZarzChallenge(_ *zarzSessionRecord, challenge string) (string, erro
 	windowDone := make(chan struct{})
 	go func() {
 		defer close(windowDone)
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				fmt.Printf("Verification window panic (%v); falling back to the system browser\n", recovered)
+				if openBrowser != nil {
+					openBrowser(parsed.String())
+				}
+			}
+		}()
 		if err := OpenVerificationWindow(parsed.String()); err != nil {
 			fmt.Printf("Embedded verification window unavailable (%v); falling back to the system browser\n", err)
 			if openBrowser == nil {

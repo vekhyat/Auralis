@@ -314,6 +314,14 @@ func runCommunityVerification(record *communitySessionRecord) (string, error) {
 	windowDone := make(chan struct{})
 	go func() {
 		defer close(windowDone)
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				fmt.Printf("Verification window panic (%v); falling back to the system browser\n", recovered)
+				if openBrowser != nil {
+					openBrowser(challengeURL.String())
+				}
+			}
+		}()
 		if err := OpenVerificationWindow(challengeURL.String()); err != nil {
 			fmt.Printf("Embedded verification window unavailable (%v); falling back to the system browser\n", err)
 			if openBrowser == nil {
