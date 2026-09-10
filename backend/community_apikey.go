@@ -9,9 +9,9 @@ import (
 func communityUserAgent() string {
 	version := strings.TrimSpace(AppVersion)
 	if version == "" || version == "Unknown" {
-		return "SpotiFLAC"
+		return "Auralis"
 	}
-	return "SpotiFLAC/" + version
+	return "Auralis/" + version
 }
 
 func setCommunityRequestHeaders(req *http.Request) error {

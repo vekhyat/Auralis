@@ -141,7 +141,7 @@ func loadCommunitySession() (*communitySessionRecord, error) {
 			return nil, err
 		}
 		if migrated {
-			fmt.Println("Imported community session from existing SpotiFLAC data folder")
+			fmt.Println("Imported community session from legacy .spotiflac profile")
 		}
 	} else {
 		communitySessionMem = cloneCommunitySession(record)
@@ -167,7 +167,7 @@ func saveCommunitySession(record *communitySessionRecord) error {
 		_ = os.Remove(tempPath)
 		return err
 	}
-	return os.Chmod(path, 0600)
+	return restrictPrivateFile(path)
 }
 
 func communitySessionValid(record *communitySessionRecord) bool {
@@ -280,7 +280,7 @@ func runCommunityVerification(record *communitySessionRecord) (string, error) {
 	query.Set("app_version", communityAppVersion())
 	query.Set("platform", "desktop")
 	bootstrap.RawQuery = query.Encode()
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Get(bootstrap.String())
+	resp, err := NewSignedHTTPClient(15 * time.Second).Get(bootstrap.String())
 	if err != nil {
 		return "", fmt.Errorf("verification bootstrap failed: %w", err)
 	}
@@ -295,7 +295,10 @@ func runCommunityVerification(record *communitySessionRecord) (string, error) {
 		return "", err
 	}
 	challengeURL, err := url.Parse(result.ChallengeURL)
-	if err != nil || challengeURL.Scheme != "https" {
+	if err != nil {
+		return "", fmt.Errorf("verification service returned an invalid challenge URL")
+	}
+	if err := validateVerificationChallengeURL(challengeURL.String()); err != nil {
 		return "", fmt.Errorf("verification service returned an invalid challenge URL")
 	}
 	challengeQuery := challengeURL.Query()
@@ -304,15 +307,31 @@ func runCommunityVerification(record *communitySessionRecord) (string, error) {
 	communityBrowserMu.RLock()
 	openBrowser := communityBrowserOpen
 	communityBrowserMu.RUnlock()
-	if openBrowser == nil {
-		return "", fmt.Errorf("browser integration is not ready")
-	}
-	openBrowser(challengeURL.String())
+
+	// Embedded window first; system browser only as a fallback. The local
+	// HTTP listener receives the grant regardless of which surface shows the
+	// challenge, since the callback URL is an absolute 127.0.0.1 address.
+	windowDone := make(chan struct{})
+	go func() {
+		defer close(windowDone)
+		if err := OpenVerificationWindow(challengeURL.String()); err != nil {
+			fmt.Printf("Embedded verification window unavailable (%v); falling back to the system browser\n", err)
+			if openBrowser == nil {
+				return
+			}
+			openBrowser(challengeURL.String())
+		}
+	}()
 
 	select {
 	case grant := <-grantCh:
+		CloseVerificationWindow()
+		<-windowDone
+		foregroundAuralisWindow()
 		return grant, nil
 	case <-time.After(communityVerifyTimeout):
+		CloseVerificationWindow()
+		<-windowDone
 		return "", fmt.Errorf("verification timed out")
 	}
 }
@@ -326,7 +345,7 @@ func exchangeCommunityGrant(record *communitySessionRecord, grant string) (*comm
 	if verifyBaseURL == "" {
 		return nil, fmt.Errorf("verification endpoint is unavailable")
 	}
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Post(verifyBaseURL+"/session/exchange", "application/json", bytes.NewReader(payload))
+	resp, err := NewSignedHTTPClient(15*time.Second).Post(verifyBaseURL+"/session/exchange", "application/json", bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}

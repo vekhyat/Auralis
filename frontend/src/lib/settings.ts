@@ -39,7 +39,7 @@ export interface MetadataTagToggles {
 export interface Settings {
     downloadPath: string;
     language: AppLanguage;
-    downloader: "auto" | "tidal" | "qobuz" | "amazon";
+    downloader: "auto" | "tidal" | "qobuz" | "amazon" | "deezer" | "apple" | "jiosaavn";
     customTidalApi: string;
     customQobuzApi: string;
     linkResolver: "songstats" | "songlink";
@@ -234,16 +234,17 @@ export const DEFAULT_SETTINGS: Settings = {
     customQobuzApi: "",
     linkResolver: "songlink",
     allowResolverFallback: true,
-    baseColor: "zinc",
-    theme: "teal",
-    themeMode: "dark",
+    baseColor: "neutral",
+    theme: "neutral",
+    // Dawn catalog defaults to the daylight desk.
+    themeMode: "light",
     fontFamily: "geist-sans",
     customFonts: [],
     folderPreset: "none",
     folderTemplate: "{album_artist}/{album}",
     applyFolderToSingleTrack: false,
     filenamePreset: "title-artist",
-    filenameTemplate: "{artist} - {title}",
+    filenameTemplate: "{title} - {artist}",
     albumFilenameTemplate: "{track}. {title}",
     useSeparateAlbumFilename: false,
     trackNumber: false,
@@ -639,7 +640,7 @@ export function hasConfiguredCustomQobuzApi(value: unknown): boolean {
     return normalizeCustomQobuzApi(value).startsWith("https://");
 }
 export function sanitizeAutoOrder(order: unknown): string {
-    const allowedServices = new Set(["tidal", "qobuz", "amazon"]);
+    const allowedServices = new Set(["tidal", "qobuz", "amazon", "deezer", "apple", "jiosaavn"]);
     const fallbackOrder = "tidal-qobuz-amazon";
     if (typeof order !== "string") {
         return fallbackOrder;
@@ -650,9 +651,19 @@ export function sanitizeAutoOrder(order: unknown): string {
         .filter((part, index, parts) => part !== "" && allowedServices.has(part) && parts.indexOf(part) === index);
     return normalized.length >= 2 ? normalized.join("-") : fallbackOrder;
 }
+const EXTRA_AUTO_SERVICES = ["deezer", "apple", "jiosaavn"] as const;
+export function extendAutoOrder(order: unknown): string[] {
+    const parts = sanitizeAutoOrder(order).split("-");
+    for (const extra of EXTRA_AUTO_SERVICES) {
+        if (!parts.includes(extra)) {
+            parts.push(extra);
+        }
+    }
+    return parts;
+}
 function normalizeDownloader(value: unknown): Settings["downloader"] {
     const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
-    if (normalized === "tidal" || normalized === "qobuz" || normalized === "amazon" || normalized === "auto") {
+    if (normalized === "tidal" || normalized === "qobuz" || normalized === "amazon" || normalized === "deezer" || normalized === "apple" || normalized === "jiosaavn" || normalized === "auto") {
         return normalized;
     }
     return DEFAULT_SETTINGS.downloader;
@@ -710,8 +721,8 @@ function normalizeSettingsPayload(settings: SettingsPayload): SettingsPayload {
     if (!("filenamePreset" in normalized) && "filenameFormat" in normalized) {
         const format = normalized.filenameFormat;
         if (format === "title-artist") {
-            normalized.filenamePreset = "artist-title";
-            normalized.filenameTemplate = "{artist} - {title}";
+            normalized.filenamePreset = "title-artist";
+            normalized.filenameTemplate = "{title} - {artist}";
         }
         else if (format === "artist-title") {
             normalized.filenamePreset = "artist-title";
@@ -743,9 +754,6 @@ function normalizeSettingsPayload(settings: SettingsPayload): SettingsPayload {
     }
     if (normalized.autoQuality !== "16" && normalized.autoQuality !== "24" && normalized.autoQuality !== "atmos") {
         normalized.autoQuality = "16";
-    }
-    if (normalized.autoQuality === "atmos" && sanitizeAutoOrder(normalized.autoOrder).includes("qobuz")) {
-        normalized.autoQuality = "24";
     }
     normalized.customTidalApi = normalizeCustomTidalApi(normalized.customTidalApi);
     normalized.customQobuzApi = normalizeCustomQobuzApi(normalized.customQobuzApi);

@@ -11,6 +11,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/pquerna/otp v1.5.0
 	github.com/ulikunitz/xz v0.5.16
+	github.com/wailsapp/go-webview2 v1.0.23
 	github.com/wailsapp/wails/v2 v2.13.0
 	go.etcd.io/bbolt v1.5.0
 	go.senan.xyz/taglib v0.14.0
@@ -43,7 +44,6 @@ require (
 	github.com/tkrajina/go-reflector v0.5.8 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
-	github.com/wailsapp/go-webview2 v1.0.23 // indirect
 	github.com/wailsapp/mimetype v1.4.1 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/net v0.57.0 // indirect

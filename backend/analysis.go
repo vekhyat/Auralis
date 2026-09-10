@@ -141,6 +141,10 @@ func DecodeAudioForAnalysis(filePath string) (*AnalysisDecodeResponse, error) {
 		return nil, err
 	}
 
+	if err := rejectLongAnalysis(metadata.Duration); err != nil {
+		return nil, err
+	}
+
 	pcmBase64, err := extractAnalysisPCMBase64(filePath)
 	if err != nil {
 		return nil, err
@@ -168,6 +172,10 @@ func DecodeAudioForTempoKey(filePath string) (*TempoKeyDecodeResponse, error) {
 		return nil, err
 	}
 
+	if err := rejectLongAnalysis(metadata.Duration); err != nil {
+		return nil, err
+	}
+
 	pcmBase64, err := extractPCMBase64(filePath, tempoKeyAnalysisSampleRate)
 	if err != nil {
 		return nil, err
@@ -179,6 +187,15 @@ func DecodeAudioForTempoKey(filePath string) (*TempoKeyDecodeResponse, error) {
 		Duration:   metadata.Duration,
 		FileSize:   metadata.FileSize,
 	}, nil
+}
+
+const maxInAppAnalysisSeconds = 8 * 60
+
+func rejectLongAnalysis(durationSeconds float64) error {
+	if durationSeconds > maxInAppAnalysisSeconds {
+		return fmt.Errorf("audio is too long to decode in-app (%.0f minutes)", durationSeconds/60)
+	}
+	return nil
 }
 
 func extractAnalysisPCMBase64(filePath string) (string, error) {

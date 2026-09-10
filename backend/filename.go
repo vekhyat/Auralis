@@ -128,15 +128,39 @@ func BuildExpectedFilename(trackName, artistName, albumName, albumArtist, releas
 	return buildFormattedFilenameBase(trackName, artistName, albumName, albumArtist, releaseDate, filenameFormat, playlistName, playlistOwner, isrc, includeTrackNumber, position, discNumber, useAlbumTrackNumber) + ".flac"
 }
 
+const existingDownloadMinBytes = 100 * 1024
+
+func existingDownloadLooksComplete(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Size() >= existingDownloadMinBytes
+}
+
+func existingAudioDownload(path string) (string, bool) {
+	if existingDownloadLooksComplete(path) {
+		return path, true
+	}
+	base := strings.TrimSuffix(path, filepath.Ext(path))
+	for _, ext := range []string{".flac", ".m4a", ".mp3", ".mp4", ".aac"} {
+		candidate := base + ext
+		if candidate == path {
+			continue
+		}
+		if existingDownloadLooksComplete(candidate) {
+			return candidate, true
+		}
+	}
+	return path, false
+}
+
 func ResolveOutputPathForDownload(path string, redownloadWithSuffix bool) (string, bool) {
 	if !redownloadWithSuffix {
-		if info, err := os.Stat(path); err == nil && info.Size() > 0 {
+		if existingDownloadLooksComplete(path) {
 			return path, true
 		}
 		return path, false
 	}
 
-	if info, err := os.Stat(path); err != nil || info.Size() == 0 {
+	if !existingDownloadLooksComplete(path) {
 		return path, false
 	}
 
@@ -145,7 +169,7 @@ func ResolveOutputPathForDownload(path string, redownloadWithSuffix bool) (strin
 
 	for i := 1; ; i++ {
 		candidate := fmt.Sprintf("%s_%02d%s", base, i, ext)
-		if info, err := os.Stat(candidate); err != nil || info.Size() == 0 {
+		if !existingDownloadLooksComplete(candidate) {
 			return candidate, false
 		}
 	}
@@ -157,6 +181,41 @@ func mustFileSize(path string) int64 {
 		return 0
 	}
 	return info.Size()
+}
+
+func SanitizeManualRenameName(newName string) (string, error) {
+	name := strings.TrimSpace(newName)
+	name = strings.ReplaceAll(name, "/", "")
+	name = strings.ReplaceAll(name, "\\", "")
+	name = strings.Trim(name, " .")
+	if name == "" || name == "." || name == ".." {
+		return "", fmt.Errorf("invalid file name")
+	}
+	if strings.ContainsRune(name, filepath.Separator) {
+		return "", fmt.Errorf("invalid file name")
+	}
+	return name, nil
+}
+
+func ManualRenamePath(oldPath, newName string) (string, error) {
+	clean, err := SanitizeManualRenameName(newName)
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Dir(oldPath)
+	ext := filepath.Ext(oldPath)
+	newPath := filepath.Join(dir, clean+ext)
+	cleanedNew := filepath.Clean(newPath)
+	cleanedDir := filepath.Clean(dir)
+	if filepath.Dir(cleanedNew) != cleanedDir {
+		return "", fmt.Errorf("rename would leave the original folder")
+	}
+	if !strings.EqualFold(cleanedNew, filepath.Clean(oldPath)) {
+		if _, err := os.Stat(cleanedNew); err == nil {
+			return "", fmt.Errorf("a file with that name already exists")
+		}
+	}
+	return cleanedNew, nil
 }
 
 func SanitizeFilename(name string) string {

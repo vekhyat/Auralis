@@ -1,25 +1,23 @@
 import { t } from "@/i18n";
 import { Fragment, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Search, Filter, Trash2, Play, Pause, StopCircle, RotateCcw, CircleCheckBig, XCircle, Music2, Disc3, ListMusic, UserRound, ListOrdered, Eraser, FileCheck } from "lucide-react";
+import { Search, Filter, Trash2, Play, Pause, StopCircle, RotateCcw, CircleCheckBig, XCircle, Music2, ListOrdered, Eraser } from "lucide-react";
 import { clearFinishedQueueItems, clearQueue, removeQueueItem, removeTrackFromQueueItem, retryQueueItem, type QueueItem, type QueueItemType } from "@/lib/queue";
 import type { TrackMetadata } from "@/types/api";
 const TABS: Array<{
     value: QueueItemType;
     label: string;
-    icon: typeof Music2;
 }> = [
-    { value: "track", label: "translation.common.tracks", icon: Music2 },
-    { value: "album", label: "translation.common.albums", icon: Disc3 },
-    { value: "playlist", label: "translation.common.playlists", icon: ListMusic },
-    { value: "artist", label: "translation.common.artists", icon: UserRound },
+    { value: "track", label: "translation.common.tracks" },
+    { value: "album", label: "translation.common.albums" },
+    { value: "playlist", label: "translation.common.playlists" },
+    { value: "artist", label: "translation.common.artists" },
 ];
 const ITEMS_PER_PAGE = 50;
 type StatusFilter = "all" | "pending" | "running" | "paused" | "done" | "partial" | "skipped" | "failed";
@@ -97,15 +95,15 @@ export function QueuePage({ items, isProcessing, isPausing, processingType, down
     const renderTrackStatusIcon = (item: QueueItem, track: TrackMetadata) => {
         switch (getTrackStatus(item, track)) {
             case "downloading":
-                return <Spinner className="h-4 w-4"/>;
+                return <Spinner className="size-3.5"/>;
             case "skipped":
-                return <FileCheck className="h-4 w-4 text-yellow-500"/>;
+                return <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{t("translation.queue.skipped")}</span>;
             case "done":
-                return <CircleCheckBig className="h-4 w-4 text-green-500"/>;
+                return <CircleCheckBig className="size-3.5"/>;
             case "failed":
-                return <XCircle className="h-4 w-4 text-red-500"/>;
+                return <XCircle className="size-3.5 text-destructive"/>;
             default:
-                return <div className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40"/>;
+                return <div className="size-1.5 rounded-full bg-muted-foreground/40"/>;
         }
     };
     const getProgressSummary = (item: QueueItem) => {
@@ -146,7 +144,7 @@ export function QueuePage({ items, isProcessing, isPausing, processingType, down
     const tabPausedCount = tabItems.filter((item) => item.status === "paused").length;
     const tabRunnableCount = tabPendingCount + tabPausedCount;
     const finishedCount = tabItems.filter((item) => ["done", "partial", "skipped", "failed"].includes(item.status)).length;
-    const isTabRunning = isProcessing && processingType === activeTab;
+    const isTabRunning = isProcessing && (processingType === activeTab || processingType === null);
     const totalPages = Math.max(1, Math.ceil(filteredItems.length / ITEMS_PER_PAGE));
     const page = Math.min(currentPage, totalPages);
     const startIndex = (page - 1) * ITEMS_PER_PAGE;
@@ -169,31 +167,26 @@ export function QueuePage({ items, isProcessing, isPausing, processingType, down
     };
     const renderStatus = (item: QueueItem) => {
         if (item.status === "running") {
-            return (<div className="flex items-center justify-center gap-2 text-xs font-medium text-primary">
-                    <Spinner className="h-4 w-4"/>
+            return (<div className="flex items-center justify-center gap-1.5 text-xs font-medium text-primary">
+                    <Spinner className="size-3.5"/>
                     {isPausing ? t("translation.queue.pausing") : t("translation.queue.running")}</div>);
         }
         if (item.status === "paused") {
-            return (<div className="flex items-center justify-center gap-2 text-xs font-medium text-amber-500">
-                    <Pause className="h-4 w-4"/>
-                    {t("translation.queue.paused")}</div>);
+            return (<span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{t("translation.queue.paused")}</span>);
         }
         if (item.status === "done") {
-            return (<div className="flex items-center justify-center gap-2 text-xs font-medium text-green-500">
-                    <CircleCheckBig className="h-4 w-4"/>
-                    {t("translation.queue.done")}</div>);
+            return (<span className="font-mono text-[10px] uppercase tracking-wider">{t("translation.queue.done")}</span>);
         }
         if (item.status === "partial")
-            return (<div className="flex items-center justify-center gap-2 text-xs font-medium text-amber-500"><XCircle className="h-4 w-4"/>{t("translation.queue.partial")}</div>);
+            return (<span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{t("translation.queue.partial")}</span>);
         if (item.status === "skipped")
-            return (<div className="flex items-center justify-center gap-2 text-xs font-medium text-yellow-500"><FileCheck className="h-4 w-4"/>{t("translation.queue.skipped")}</div>);
+            return (<span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{t("translation.queue.skipped")}</span>);
         if (item.status === "failed") {
             return (<TooltipProvider>
                     <Tooltip delayDuration={0}>
                         <TooltipTrigger asChild>
-                            <div className="flex items-center justify-center gap-2 text-xs font-medium text-red-500">
-                                <XCircle className="h-4 w-4"/>
-                                {t("translation.queue.failed")}</div>
+                            <span className="font-mono text-[10px] uppercase tracking-wider text-destructive">
+                                {t("translation.queue.failed")}</span>
                         </TooltipTrigger>
                         <TooltipContent>
                             <p className="max-w-xs wrap-break-word">{item.error || t("translation.queue.failed")}</p>
@@ -201,19 +194,11 @@ export function QueuePage({ items, isProcessing, isPausing, processingType, down
                     </Tooltip>
                 </TooltipProvider>);
         }
-        return (<span className="text-xs font-medium text-muted-foreground">{t("translation.queue.pending")}</span>);
+        return (<span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{t("translation.queue.pending")}</span>);
     };
-    return (<div className="space-y-6">
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                    <h1 className="text-2xl font-bold">{t("translation.queue.queue")}</h1>
-                    {pendingCount > 0 && (<Badge variant="secondary" className="font-mono">
-                            {t("translation.queue.value1Pending", { value1: pendingCount.toLocaleString("en-US") })}
-                        </Badge>)}
-                    {pausedCount > 0 && (<Badge variant="outline" className="font-mono">
-                            {pausedCount.toLocaleString("en-US")} {t("translation.queue.paused")}
-                        </Badge>)}
-                </div>
+    return (<div className="space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+                <h1 className="text-lg font-semibold tracking-tight">{t("translation.queue.queue")}</h1>
                 <div className="flex items-center gap-2">
                     {isProcessing ? (<>
                         <Button variant="outline" onClick={() => onPause()} disabled={isPausing} className="cursor-pointer gap-2">
@@ -236,15 +221,13 @@ export function QueuePage({ items, isProcessing, isPausing, processingType, down
                 </div>
             </div>
 
-            <div className="flex gap-2 border-b shrink-0 flex-wrap">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border pb-2">
                 {TABS.map((tab) => {
-            const Icon = tab.icon;
             const count = items.filter((item) => item.type === tab.value).length;
-            return (<Button key={tab.value} variant={activeTab === tab.value ? "default" : "ghost"} size="sm" onClick={() => handleTabChange(tab.value)} className="rounded-b-none gap-2">
-                            <Icon className="h-4 w-4"/>
+            return (<button key={tab.value} type="button" onClick={() => handleTabChange(tab.value)} className={`cursor-pointer text-[13px] transition-colors ${activeTab === tab.value ? "font-semibold text-primary underline decoration-primary underline-offset-[6px]" : "text-muted-foreground hover:text-foreground"}`}>
                             {t(tab.label)}
-                            {count > 0 && (<span className={`font-mono text-xs ${activeTab === tab.value ? "text-primary-foreground/70" : "text-muted-foreground"}`}>{count.toLocaleString("en-US")}</span>)}
-                        </Button>);
+                            {count > 0 && (<span className="ml-1 font-mono text-[11px] tabular-nums opacity-75">{count.toLocaleString("en-US")}</span>)}
+                        </button>);
         })}
             </div>
 
@@ -287,31 +270,29 @@ export function QueuePage({ items, isProcessing, isPausing, processingType, down
                         <StopCircle className="h-4 w-4"/>
                         {t("translation.common.stop")}
                     </Button>
-                </>) : (<Button onClick={() => handleStart(activeTab)} disabled={isProcessing || tabRunnableCount === 0} className="cursor-pointer gap-2">
+                </>) : (<Button onClick={() => handleStart(activeTab)} disabled={isProcessing || isDirectDownloading || tabRunnableCount === 0} className="cursor-pointer gap-2">
                         <Play className="h-4 w-4"/>
                         {tabPausedCount > 0 ? t("translation.queue.resume") : t("translation.queue.start")}
                     </Button>)}
             </div>
 
-            <div className="rounded-md border overflow-hidden">
-                {paginated.length === 0 ? (<div className="flex flex-col items-center justify-center p-16 text-center text-muted-foreground gap-3">
-                        <div className="rounded-full bg-muted/50 p-4 ring-8 ring-muted/20">
-                            <ListOrdered className="h-10 w-10 opacity-40"/>
-                        </div>
+            <div>
+                {paginated.length === 0 ? (<div className="flex flex-col items-center justify-center gap-3 p-16 text-center text-muted-foreground">
+                        <ListOrdered className="size-9 opacity-30"/>
                         <div className="space-y-1">
                             <p className="font-medium text-foreground/80">{t("translation.queue.emptyQueue")}</p>
                             <p className="text-sm">{t("translation.queue.addToQueueHint")}</p>
                         </div>
                     </div>) : (<table className="w-full table-fixed">
                         <thead>
-                            <tr className="border-b bg-muted/50">
-                                <th className="h-10 px-3 text-center align-middle font-medium text-muted-foreground w-12 text-xs uppercase">{"#"}</th>
-                                <th className="h-10 px-3 text-left align-middle font-medium text-muted-foreground text-xs uppercase w-[35%]">{t("translation.common.title")}</th>
-                                <th className="h-10 px-3 text-left align-middle font-medium text-muted-foreground hidden md:table-cell text-xs uppercase">{t("translation.common.details")}</th>
-                                <th className="h-10 px-3 text-center align-middle font-medium text-muted-foreground hidden lg:table-cell w-20 text-xs uppercase text-nowrap">{t("translation.common.tracks")}</th>
-                                <th className="h-10 px-3 text-left align-middle font-medium text-muted-foreground hidden xl:table-cell w-20 text-xs uppercase text-nowrap">{t("translation.history.dur")}</th>
-                                <th className="h-10 px-3 text-center align-middle font-medium text-muted-foreground w-28 text-xs uppercase text-nowrap">{t("translation.queue.status")}</th>
-                                <th className="h-10 px-3 text-center align-middle font-medium text-muted-foreground w-24 text-xs uppercase text-nowrap">{t("translation.common.actions")}</th>
+                            <tr className="border-b border-border">
+                                <th className="h-9 w-12 px-3 text-center align-middle font-mono text-[10px] font-semibold tracking-widest uppercase text-muted-foreground">{"#"}</th>
+                                <th className="h-9 w-[35%] px-3 text-left align-middle text-[10px] font-semibold tracking-widest uppercase text-muted-foreground">{t("translation.common.title")}</th>
+                                <th className="hidden h-9 px-3 text-left align-middle text-[10px] font-semibold tracking-widest uppercase text-muted-foreground md:table-cell">{t("translation.common.details")}</th>
+                                <th className="hidden h-9 w-20 px-3 text-center align-middle whitespace-nowrap font-mono text-[10px] font-semibold tracking-widest uppercase text-muted-foreground lg:table-cell">{t("translation.common.tracks")}</th>
+                                <th className="hidden h-9 w-20 px-3 text-left align-middle whitespace-nowrap font-mono text-[10px] font-semibold tracking-widest uppercase text-muted-foreground xl:table-cell">{t("translation.history.dur")}</th>
+                                <th className="h-9 w-28 px-3 text-center align-middle whitespace-nowrap font-mono text-[10px] font-semibold tracking-widest uppercase text-muted-foreground">{t("translation.queue.status")}</th>
+                                <th className="h-9 w-24 px-3 text-center align-middle whitespace-nowrap font-mono text-[10px] font-semibold tracking-widest uppercase text-muted-foreground">{t("translation.common.actions")}</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -320,14 +301,14 @@ export function QueuePage({ items, isProcessing, isPausing, processingType, down
                 const isExpanded = canExpand && expandedIds.includes(item.id);
                 const summary = getProgressSummary(item);
                 return (<Fragment key={item.id}>
-                                <tr onClick={canExpand ? () => toggleExpanded(item.id) : undefined} className={`border-b transition-colors hover:bg-muted/50 ${canExpand ? "cursor-pointer select-none" : ""}`}>
-                                    <td className="p-3 align-middle text-sm text-muted-foreground text-center font-mono">
+                                <tr onClick={canExpand ? () => toggleExpanded(item.id) : undefined} className={`border-b border-border transition-colors hover:bg-muted/60 ${canExpand ? "cursor-pointer select-none" : ""}`}>
+                                    <td className="p-3 text-center align-middle font-mono text-xs tabular-nums text-muted-foreground">
                                         {startIndex + index + 1}
                                     </td>
-                                    <td className="p-3 align-middle min-w-0">
-                                        <div className="flex items-center gap-3 min-w-0">
-                                            <div className="h-10 w-10 rounded shrink-0 bg-secondary overflow-hidden">
-                                                {item.image ? (<img src={item.image} alt={item.name} className="h-full w-full object-cover"/>) : (<div className="h-full w-full flex items-center justify-center text-xs text-muted-foreground font-medium bg-muted">
+                                    <td className="min-w-0 p-3 align-middle">
+                                        <div className="flex min-w-0 items-center gap-3">
+                                            <div className="size-7 shrink-0 overflow-hidden rounded-[2px] bg-secondary">
+                                                {item.image ? (<img src={item.image} alt={item.name} loading="lazy" referrerPolicy="no-referrer" className="h-full w-full object-cover"/>) : (<div className="flex h-full w-full items-center justify-center bg-muted font-mono text-[9px] font-semibold text-muted-foreground">
                                                         {item.type.slice(0, 2).toUpperCase()}
                                                     </div>)}
                                             </div>
@@ -337,19 +318,19 @@ export function QueuePage({ items, isProcessing, isPausing, processingType, down
                                             </div>
                                         </div>
                                     </td>
-                                    <td className="p-3 align-middle text-sm text-muted-foreground hidden md:table-cell">
+                                    <td className="hidden p-3 align-middle text-sm text-muted-foreground md:table-cell">
                                         <div className="truncate">{item.info}</div>
                                     </td>
-                                    <td className="p-3 align-middle text-center text-sm text-muted-foreground hidden lg:table-cell font-mono">
+                                    <td className="hidden p-3 text-center align-middle font-mono text-xs tabular-nums text-muted-foreground lg:table-cell">
                                         <div className="flex flex-col items-center">
                                             <span>{item.trackCount.toLocaleString("en-US")}</span>
                                             {canExpand && (summary.done > 0 || summary.failed > 0) && (<span className="text-[10px] leading-none">
-                                                <span className="text-green-500">{summary.done}</span>
-                                                {summary.failed > 0 && (<span className="text-red-500">{t("translation.queue.value1Value2", { value1: "", value2: summary.failed })}</span>)}
+                                                <span>{summary.done}</span>
+                                                {summary.failed > 0 && (<span className="text-destructive">{t("translation.queue.value1Value2", { value1: "", value2: summary.failed })}</span>)}
                                             </span>)}
                                         </div>
                                     </td>
-                                    <td className="p-3 align-middle text-sm text-muted-foreground hidden xl:table-cell font-mono">
+                                    <td className="hidden p-3 align-middle font-mono text-xs tabular-nums text-muted-foreground xl:table-cell">
                                         {formatDuration(item.durationMs)}
                                     </td>
                                     <td className="p-3 align-middle text-center">
@@ -396,15 +377,15 @@ export function QueuePage({ items, isProcessing, isPausing, processingType, down
                                     <td className="py-2 px-3 align-middle"/>
                                     <td className="py-2 px-3 align-middle"/>
                                 </tr>)}
-                                {isExpanded && item.tracks.map((track, trackIndex) => (<tr key={track.spotify_id || `${item.id}-${trackIndex}`} className="border-b border-border/50 bg-muted/20">
-                                    <td className="py-2 px-3 align-middle text-center text-xs text-muted-foreground font-mono">
+                                {isExpanded && item.tracks.map((track, trackIndex) => (<tr key={track.spotify_id || `${item.id}-${trackIndex}`} className="border-b border-border/60 bg-muted/30">
+                                    <td className="px-3 py-2 text-center align-middle font-mono text-xs tabular-nums text-muted-foreground">
                                         {trackIndex + 1}
                                     </td>
-                                    <td className="py-2 px-3 align-middle min-w-0">
-                                        <div className="flex items-center gap-3 min-w-0">
-                                            <div className="h-8 w-8 rounded shrink-0 bg-secondary overflow-hidden">
-                                                {track.images ? (<img src={track.images} alt={track.name} className="h-full w-full object-cover"/>) : (<div className="h-full w-full flex items-center justify-center bg-muted">
-                                                    <Music2 className="h-3.5 w-3.5 text-muted-foreground opacity-50"/>
+                                    <td className="min-w-0 px-3 py-2 align-middle">
+                                        <div className="flex min-w-0 items-center gap-3">
+                                            <div className="size-6 shrink-0 overflow-hidden rounded-[2px] bg-secondary">
+                                                {track.images ? (<img src={track.images} alt={track.name} loading="lazy" referrerPolicy="no-referrer" className="h-full w-full object-cover"/>) : (<div className="flex h-full w-full items-center justify-center bg-muted">
+                                                    <Music2 className="size-3 text-muted-foreground opacity-50"/>
                                                 </div>)}
                                             </div>
                                             <div className="flex flex-col min-w-0 flex-1">

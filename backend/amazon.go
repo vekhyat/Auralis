@@ -2,10 +2,14 @@ package backend
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,13 +24,40 @@ type AmazonDownloader struct {
 	SourceURL string
 }
 
+const (
+	amazonAPITimeout      = 120 * time.Second
+	amazonStreamTimeout   = 5 * time.Minute
+	amazonStreamRetries   = 3
+	amazonStreamRetryWait = 2 * time.Second
+)
+
 func NewAmazonDownloader() *AmazonDownloader {
 	return &AmazonDownloader{
-		client: &http.Client{
-			Timeout: 120 * time.Second,
-		},
+		client:  NewSignedHTTPClient(amazonAPITimeout),
 		regions: []string{"us", "eu"},
 	}
+}
+
+func amazonStreamHTTPClient() *http.Client {
+	return &http.Client{Timeout: amazonStreamTimeout}
+}
+
+func isTransientAmazonStreamError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "deadline exceeded") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "tls handshake timeout")
 }
 
 func (a *AmazonDownloader) GetAmazonURLFromSpotify(spotifyTrackID string) (string, error) {
@@ -133,6 +164,10 @@ func (a *AmazonDownloader) downloadFromCommunity(amazonURL, outputDir, quality s
 		}
 		fmt.Printf("Community Amazon API failed, trying Zarz: %v\n", err)
 		apiResp, err = a.getAmazonZarzStream(asin, quality)
+		if err != nil && amazonShouldFallbackToFlac(quality) {
+			fmt.Printf("Zarz Amazon %s failed, falling back to flac: %v\n", mapAmazonQualityToZarzCodec(quality), err)
+			apiResp, err = a.getAmazonZarzStream(asin, "16")
+		}
 		if err != nil {
 			return "", err
 		}
@@ -163,28 +198,57 @@ func (a *AmazonDownloader) downloadFromCommunity(amazonURL, outputDir, quality s
 		os.Remove(encryptedPath)
 	}()
 
-	dlReq, err := NewRequestWithDefaultHeaders(http.MethodGet, streamURL, nil)
-	if err != nil {
-		return "", err
-	}
-	if captcha := strings.TrimSpace(apiResp.Captcha); captcha != "" {
-		dlReq.Header.Set("x-captcha-token", captcha)
-	}
-
-	dlResp, err := a.client.Do(dlReq)
-	if err != nil {
-		return "", err
-	}
-	defer dlResp.Body.Close()
-
 	fmt.Printf("Downloading track: %s\n", asin)
-	pw := NewProgressWriter(out)
-	if _, err = copyAmazonStream(pw, dlResp); err != nil {
-		return "", err
+	streamClient := amazonStreamHTTPClient()
+	var lastStreamErr error
+	for attempt := 1; attempt <= amazonStreamRetries; attempt++ {
+		if _, err := out.Seek(0, io.SeekStart); err != nil {
+			return "", err
+		}
+		if err := out.Truncate(0); err != nil {
+			return "", err
+		}
+		dlReq, err := NewRequestWithDefaultHeaders(http.MethodGet, streamURL, nil)
+		if err != nil {
+			return "", err
+		}
+		if captcha := strings.TrimSpace(apiResp.Captcha); captcha != "" {
+			dlReq.Header.Set("x-captcha-token", captcha)
+		}
+		dlResp, err := streamClient.Do(dlReq)
+		if err != nil {
+			lastStreamErr = err
+			if isTransientAmazonStreamError(err) && attempt < amazonStreamRetries {
+				fmt.Printf("Amazon stream timed out, retrying (%d/%d)...\n", attempt, amazonStreamRetries)
+				if sleepErr := SleepWithDownloadContext(amazonStreamRetryWait); sleepErr != nil {
+					return "", sleepErr
+				}
+				continue
+			}
+			return "", err
+		}
+		pw := NewProgressWriter(out)
+		_, copyErr := copyAmazonStream(pw, dlResp)
+		dlResp.Body.Close()
+		if copyErr != nil {
+			lastStreamErr = copyErr
+			if isTransientAmazonStreamError(copyErr) && attempt < amazonStreamRetries {
+				fmt.Printf("Amazon stream download interrupted, retrying (%d/%d)...\n", attempt, amazonStreamRetries)
+				if sleepErr := SleepWithDownloadContext(amazonStreamRetryWait); sleepErr != nil {
+					return "", sleepErr
+				}
+				continue
+			}
+			return "", copyErr
+		}
+		lastStreamErr = nil
+		fmt.Printf("\rDownloaded: %.2f MB (Complete)\n", float64(pw.GetTotal())/(1024*1024))
+		break
+	}
+	if lastStreamErr != nil {
+		return "", lastStreamErr
 	}
 	out.Close()
-
-	fmt.Printf("\rDownloaded: %.2f MB (Complete)\n", float64(pw.GetTotal())/(1024*1024))
 
 	remuxInput := encryptedPath
 	if len(keySpecs) > 0 {
@@ -206,10 +270,12 @@ func (a *AmazonDownloader) downloadFromCommunity(amazonURL, outputDir, quality s
 	finalPath := filepath.Join(outputDir, asin+targetExt)
 
 	if err := amazonRemuxWithFFmpeg(remuxInput, finalPath, targetExt); err != nil {
+		_ = os.Remove(finalPath)
 		return "", err
 	}
 
 	if info, err := os.Stat(finalPath); err != nil || info.Size() == 0 {
+		_ = os.Remove(finalPath)
 		return "", fmt.Errorf("remuxed file missing or empty")
 	}
 
@@ -256,7 +322,55 @@ func amazonRemuxWithFFmpeg(inputPath, outputPath, targetExt string) error {
 }
 
 func (a *AmazonDownloader) DownloadFromService(amazonURL, outputDir, quality string) (string, error) {
-	return a.downloadFromCommunity(amazonURL, outputDir, quality)
+	path, err := a.downloadFromCommunity(amazonURL, outputDir, quality)
+	if err == nil {
+		return path, nil
+	}
+	if IsDownloadCancelledError(err) {
+		return "", err
+	}
+	fmt.Printf("Amazon community/Zarz failed, trying Antra mirror: %v\n", err)
+	antraPath, antraErr := a.downloadFromAntraMirror(amazonURL, outputDir, quality)
+	if antraErr != nil {
+		return "", err
+	}
+	return antraPath, nil
+}
+
+func (a *AmazonDownloader) downloadFromAntraMirror(amazonURL, outputDir, quality string) (string, error) {
+	asinRegex := regexp.MustCompile(`(B[0-9A-Z]{9})`)
+	asin := asinRegex.FindString(amazonURL)
+	if asin == "" && strings.Contains(amazonURL, "spotify.com") {
+		parts := strings.Split(amazonURL, "/track/")
+		if len(parts) > 1 {
+			spotifyID := strings.Split(parts[1], "?")[0]
+			resolved, err := antraResolveSpotify("amazon", spotifyID)
+			if err != nil {
+				return "", err
+			}
+			asin = resolved
+		}
+	}
+	if asin == "" {
+		return "", fmt.Errorf("failed to extract Amazon ASIN")
+	}
+	dest := filepath.Join(outputDir, asin+".flac")
+	query := url.Values{}
+	if amazonCommunityNormalizeQuality(quality) == "atmos" {
+		query.Set("format", "atmos")
+	}
+	path, err := antraStreamToFile("amazon", asin, dest, query)
+	if err == nil {
+		return path, nil
+	}
+	info, infoErr := antraGetTrackInfo("amazon", asin)
+	if infoErr != nil {
+		return "", err
+	}
+	if info.StreamURL == "" {
+		return "", err
+	}
+	return antraDownloadURLToFile(info.StreamURL, dest)
 }
 
 func (a *AmazonDownloader) DownloadByURL(amazonURL, outputDir, quality, filenameFormat, playlistName, playlistOwner string, includeTrackNumber bool, position int, spotifyTrackName, spotifyArtistName, spotifyAlbumName, spotifyAlbumArtist, spotifyReleaseDate, spotifyCoverURL string, spotifyTrackNumber, spotifyDiscNumber, spotifyTotalTracks int, embedMaxQualityCover bool, spotifyTotalDiscs int, spotifyCopyright, spotifyPublisher, spotifyComposer, metadataSeparator, isrcOverride, spotifyURL string, allowFallback bool, allowAtmosFallback bool, atmosFallbackQuality string, useFirstArtistOnly bool, useSingleGenre bool, embedGenre bool) (string, error) {
@@ -275,11 +389,14 @@ func (a *AmazonDownloader) DownloadByURL(amazonURL, outputDir, quality, filename
 			filenameAlbumArtist = GetFirstArtist(spotifyAlbumArtist)
 		}
 		expectedFilename := BuildExpectedFilename(spotifyTrackName, filenameArtist, spotifyAlbumName, filenameAlbumArtist, spotifyReleaseDate, filenameFormat, playlistName, playlistOwner, includeTrackNumber, position, spotifyDiscNumber, false, isrcOverride)
+		if amazonCommunityNormalizeQuality(quality) == "atmos" {
+			expectedFilename = replaceAudioExtension(expectedFilename, ".m4a")
+		}
 		expectedPath := filepath.Join(outputDir, expectedFilename)
 
 		if !GetRedownloadWithSuffixSetting() {
-			if fileInfo, err := os.Stat(expectedPath); err == nil && fileInfo.Size() > 0 {
-				fmt.Printf("File already exists: %s (%.2f MB)\n", expectedPath, float64(fileInfo.Size())/(1024*1024))
+			if existingDownloadLooksComplete(expectedPath) {
+				fmt.Printf("File already exists: %s (%.2f MB)\n", expectedPath, float64(mustFileSize(expectedPath))/(1024*1024))
 				return "EXISTS:" + expectedPath, nil
 			}
 		}

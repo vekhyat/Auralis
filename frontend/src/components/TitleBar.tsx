@@ -1,221 +1,185 @@
-import { t, translateMessage } from "@/i18n";
-import { X, Minus, Maximize, SlidersHorizontal, Globe, Eye, EyeOff, ArrowLeft, ArrowRight, RotateCw } from "lucide-react";
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import {
+    ArrowLeft,
+    ArrowRight,
+    Bug,
+    Ellipsis,
+    ExternalLink,
+    Minus,
+    Square,
+    X,
+} from "lucide-react";
 import { WindowMinimise, WindowToggleMaximise, Quit } from "../../wailsjs/runtime/runtime";
 import { Menubar, MenubarContent, MenubarMenu, MenubarItem, MenubarTrigger, MenubarLabel, MenubarSeparator } from "@/components/ui/menubar";
-import { Slider } from "@/components/ui/slider";
-import { getSettings, updateSettings } from "@/lib/settings";
-import { PREVIEW_VOLUME_CHANGED_EVENT } from "@/lib/preview";
-import { fetchCurrentIPInfo } from "@/lib/api";
-import type { CurrentIPInfo } from "@/types/api";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { OmnibarSearch } from "@/components/OmnibarSearch";
 import { openExternal } from "@/lib/utils";
-import { useEffect, useRef, useState } from "react";
-const IP_INFO_REFRESH_INTERVAL_MS = 30000;
-const SPOTIFY_BLOCKED_COUNTRY_CODES = new Set([
-    "AF",
-    "IO",
-    "CF",
-    "CN",
-    "CU",
-    "ER",
-    "IR",
-    "MM",
-    "KP",
-    "RU",
-    "SO",
-    "SS",
-    "SD",
-    "SY",
-    "TM",
-    "YE",
-]);
-interface SettingsUpdatedDetail {
-    previewVolume?: number;
+import { cn } from "@/lib/utils";
+import type { DestinationPage, PageType } from "@/pages";
+
+const noDrag = { "--wails-draggable": "no-drag" } as React.CSSProperties;
+
+interface OmnibarBinding {
+    value: string;
+    loading: boolean;
+    onChange: (value: string) => void;
+    onSubmit: () => void;
 }
+
 interface TitleBarProps {
     canGoBack?: boolean;
     canGoForward?: boolean;
     navigationDisabled?: boolean;
     onBack?: () => void;
     onForward?: () => void;
-    pageTitle?: string;
+    currentPage: PageType;
+    onPageChange: (page: DestinationPage | "debug") => void;
+    queueCount?: number;
+    omnibar: OmnibarBinding;
 }
-export function TitleBar({ canGoBack = false, canGoForward = false, navigationDisabled = false, onBack, onForward, pageTitle = "Auralis", }: TitleBarProps) {
-    const initialSettings = getSettings();
-    const [previewVolume, setPreviewVolume] = useState(initialSettings.previewVolume ?? 100);
-    const [currentIPInfo, setCurrentIPInfo] = useState<CurrentIPInfo | null>(null);
-    const [isLoadingCurrentIPInfo, setIsLoadingCurrentIPInfo] = useState(false);
-    const [currentIPInfoError, setCurrentIPInfoError] = useState("");
-    const [showIPAddress, setShowIPAddress] = useState(false);
-    const currentIPInfoRef = useRef<CurrentIPInfo | null>(null);
-    useEffect(() => {
-        currentIPInfoRef.current = currentIPInfo;
-    }, [currentIPInfo]);
-    useEffect(() => {
-        const handleSettingsUpdate = (event: Event) => {
-            const updatedSettings = (event as CustomEvent<SettingsUpdatedDetail>).detail;
-            if (updatedSettings && typeof updatedSettings.previewVolume === "number") {
-                setPreviewVolume(updatedSettings.previewVolume);
-            }
-        };
-        window.addEventListener("settingsUpdated", handleSettingsUpdate);
-        return () => window.removeEventListener("settingsUpdated", handleSettingsUpdate);
-    }, []);
-    const loadCurrentIPInfo = async (options?: {
-        silent?: boolean;
-    }) => {
-        const silent = options?.silent ?? false;
-        if (!silent) {
-            setIsLoadingCurrentIPInfo(true);
-            setCurrentIPInfoError("");
-        }
-        try {
-            const info = await fetchCurrentIPInfo();
-            setCurrentIPInfo(info);
-            setCurrentIPInfoError("");
-        }
-        catch (error) {
-            if (!silent || !currentIPInfoRef.current) {
-                setCurrentIPInfo(null);
-                setCurrentIPInfoError(error instanceof Error ? translateMessage(error.message) : t("translation.titleBar.unableDetectIp"));
-            }
-        }
-        finally {
-            if (!silent) {
-                setIsLoadingCurrentIPInfo(false);
-            }
+
+export function TitleBar({ canGoBack = false, canGoForward = false, navigationDisabled = false, onBack, onForward, currentPage, onPageChange, queueCount = 0, omnibar }: TitleBarProps) {
+    const { t } = useTranslation();
+    const [isIssuesDialogOpen, setIsIssuesDialogOpen] = useState(false);
+    const [hasIssueAgreement, setHasIssueAgreement] = useState(false);
+    const version = __APP_VERSION__;
+    const handleIssuesDialogChange = (open: boolean) => {
+        setIsIssuesDialogOpen(open);
+        if (!open) {
+            setHasIssueAgreement(false);
         }
     };
-    useEffect(() => {
-        void loadCurrentIPInfo();
-    }, []);
-    useEffect(() => {
-        const intervalId = window.setInterval(() => {
-            void loadCurrentIPInfo({ silent: true });
-        }, IP_INFO_REFRESH_INTERVAL_MS);
-        const handleFocus = () => {
-            if (document.visibilityState === "hidden") {
-                return;
-            }
-            void loadCurrentIPInfo({ silent: true });
-        };
-        window.addEventListener("focus", handleFocus);
-        document.addEventListener("visibilitychange", handleFocus);
-        return () => {
-            window.clearInterval(intervalId);
-            window.removeEventListener("focus", handleFocus);
-            document.removeEventListener("visibilitychange", handleFocus);
-        };
-    }, []);
-    const handleMinimize = () => {
-        WindowMinimise();
+    const handleOpenIssues = () => {
+        openExternal("https://github.com/vekhyat/Auralis/issues");
+        handleIssuesDialogChange(false);
     };
-    const handleMaximize = () => {
-        WindowToggleMaximise();
-    };
-    const handleClose = () => {
-        Quit();
-    };
-    const handlePreviewVolumeChange = (value: number[]) => {
-        const nextValue = value[0];
-        if (typeof nextValue !== "number" || Number.isNaN(nextValue)) {
-            return;
-        }
-        setPreviewVolume(nextValue);
-        window.dispatchEvent(new CustomEvent(PREVIEW_VOLUME_CHANGED_EVENT, { detail: nextValue }));
-    };
-    const handlePreviewVolumeCommit = (value: number[]) => {
-        const nextValue = value[0];
-        if (typeof nextValue !== "number" || Number.isNaN(nextValue)) {
-            return;
-        }
-        setPreviewVolume(nextValue);
-        void updateSettings({ previewVolume: nextValue });
-    };
-    const detectedCountryCode = currentIPInfo?.country_code?.toUpperCase() || "";
-    const detectedFlagPath = detectedCountryCode ? `/assets/flags/${detectedCountryCode.toLowerCase()}.svg` : "";
-    const isSpotifyBlockedCountry = detectedCountryCode !== "" && SPOTIFY_BLOCKED_COUNTRY_CODES.has(detectedCountryCode);
+    const destinations: Array<{ page: DestinationPage; label: string; active: boolean; count?: number }> = [
+        { page: "main", label: t("translation.sidebar.library"), active: currentPage === "main" },
+        { page: "queue", label: t("translation.queue.queue"), active: currentPage === "queue", count: queueCount },
+        { page: "history", label: t("translation.sidebar.history"), active: currentPage === "history" },
+        { page: "tools", label: t("translation.sidebar.tools"), active: currentPage.startsWith("audio-") || ["tools", "tempo-key-analyzer", "replaygain", "file-manager", "lyrics-manager", "enrich"].includes(currentPage) },
+        { page: "settings", label: t("translation.sidebar.settings"), active: currentPage === "settings" },
+    ];
     return (<>
+      <header
+        className="fixed inset-x-0 top-0 z-40 flex h-11 items-center gap-3 border-b bg-background pr-0 pl-3"
+        style={{ "--wails-draggable": "drag" } as React.CSSProperties}
+        onDoubleClick={() => WindowToggleMaximise()}
+      >
+        <div className="flex shrink-0 items-center gap-2" style={noDrag}>
+          <img src="/icon.svg" alt="" className="size-[22px] rounded-[2px]"/>
+          <span className="text-[13px] font-semibold tracking-tight">Auralis</span>
+        </div>
 
-      <div className="fixed top-0 left-0 right-0 z-40 h-10 border-b border-border bg-card/90 backdrop-blur-sm" style={{ "--wails-draggable": "drag" } as React.CSSProperties} onDoubleClick={handleMaximize}/>
+        <div className="flex h-full shrink-0 items-center gap-0.5" style={noDrag}>
+          <button
+            type="button"
+            onClick={onBack}
+            disabled={!canGoBack || navigationDisabled}
+            className="flex size-7 cursor-pointer items-center justify-center rounded-[2px] transition-colors hover:bg-muted disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent"
+            aria-label={t("translation.common.goPreviousPage")}
+          >
+            <ArrowLeft className="size-3.5"/>
+          </button>
+          <button
+            type="button"
+            onClick={onForward}
+            disabled={!canGoForward || navigationDisabled}
+            className="flex size-7 cursor-pointer items-center justify-center rounded-[2px] transition-colors hover:bg-muted disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent"
+            aria-label={t("translation.common.goNextPage")}
+          >
+            <ArrowRight className="size-3.5"/>
+          </button>
+        </div>
 
-      <div className="fixed top-0 left-0 z-50 flex h-10 w-44 items-center gap-2 px-3" style={{ "--wails-draggable": "no-drag" } as React.CSSProperties}>
-        <img src="/icon.svg" alt="" className="size-5 rounded-[5px]" />
-        <span className="text-[13px] font-semibold tracking-tight">Auralis</span>
-      </div>
+        <div className="min-w-0 flex-1 sm:max-w-xl lg:max-w-2xl" style={noDrag}>
+          <OmnibarSearch value={omnibar.value} busy={omnibar.loading} onChange={omnibar.onChange} onSubmit={omnibar.onSubmit}/>
+        </div>
 
-      <div className="pointer-events-none fixed top-0 left-44 right-28 z-50 flex h-10 items-center justify-center">
-        <span className="text-[12px] font-medium text-muted-foreground">{pageTitle}</span>
-      </div>
-
-      <div className="fixed top-1.5 left-44 z-50 flex h-7 items-center gap-0.5 pl-2" style={{ "--wails-draggable": "no-drag" } as React.CSSProperties}>
-        <button type="button" onClick={onBack} disabled={!canGoBack || navigationDisabled} className="flex size-7 cursor-pointer items-center justify-center rounded transition-colors hover:bg-muted disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent" aria-label={t("translation.common.goPreviousPage")}><ArrowLeft className="h-3.5 w-3.5"/></button>
-        <button type="button" onClick={onForward} disabled={!canGoForward || navigationDisabled} className="flex size-7 cursor-pointer items-center justify-center rounded transition-colors hover:bg-muted disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent" aria-label={t("translation.common.goNextPage")}><ArrowRight className="h-3.5 w-3.5"/></button>
-        <button type="button" onClick={() => window.location.reload()} className="flex size-7 cursor-pointer items-center justify-center rounded transition-colors hover:bg-muted" aria-label={t("translation.header.reload")}><RotateCw className="h-3.5 w-3.5"/></button>
-      </div>
-
-
-      <div className="fixed top-1.5 right-2 z-50 flex h-7 gap-0.5 items-center">
-        <Menubar className="border-none bg-transparent shadow-none px-0 mr-1" style={{ "--wails-draggable": "no-drag" } as React.CSSProperties}>
+        <nav className="ml-auto flex h-full shrink-0 items-stretch gap-0.5" style={noDrag} aria-label={t("translation.sidebar.tools")}>
+          {destinations.map((destination) => (<button
+            key={destination.page}
+            type="button"
+            onClick={() => onPageChange(destination.page)}
+            className={cn(
+                "relative flex cursor-pointer items-center gap-1.5 px-2.5 text-[12.5px] transition-colors",
+                destination.active
+                    ? "font-semibold text-primary after:absolute after:inset-x-2.5 after:bottom-2 after:h-px after:bg-primary"
+                    : "font-medium text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <span className="whitespace-nowrap">{destination.label}</span>
+            {destination.count ? (<span className="font-mono text-[11px] tabular-nums opacity-80">{destination.count > 99 ? "99+" : destination.count}</span>) : null}
+          </button>))}
+          <Menubar className="border-none bg-transparent shadow-none px-0">
             <MenubarMenu>
-                <MenubarTrigger className="cursor-pointer size-7 p-0 flex items-center justify-center hover:bg-muted transition-colors rounded data-[state=open]:bg-muted">
-                    <SlidersHorizontal className="w-3.5 h-3.5"/>
-                </MenubarTrigger>
-                <MenubarContent align="end" className="w-max max-w-[calc(100vw-1rem)]">
-                    <div className="px-2 py-1.5 space-y-2">
-                        <div className="flex items-center justify-between gap-3">
-                            <MenubarLabel className="p-0">{t("translation.titleBar.previewVolume")}</MenubarLabel>
-                            <span className="text-xs font-medium text-muted-foreground tabular-nums">
-                                {previewVolume}%
-                            </span>
-                        </div>
-                        <Slider value={[previewVolume]} min={0} max={100} step={5} onValueChange={handlePreviewVolumeChange} onValueCommit={handlePreviewVolumeCommit} aria-label={t("translation.titleBar.previewVolume2")}/>
-                    </div>
-                    <MenubarSeparator />
-                    <div className="flex items-center gap-1.5 px-2 py-1.5">
-                        <MenubarLabel className="p-0">{t("translation.titleBar.network")}</MenubarLabel>
-                        {isSpotifyBlockedCountry && (<span className="text-xs font-medium text-destructive">
-                            {t("translation.titleBar.blockedBySpotify")}
-                        </span>)}
-                    </div>
-                    <div className="px-2 py-1.5 space-y-1">
-                        <div className="flex items-center justify-between gap-3">
-                            <div className="flex items-center gap-2 min-w-0">
-                                {detectedFlagPath ? (<img src={detectedFlagPath} alt={detectedCountryCode} className="h-3.5 w-4.5 rounded-[2px] border object-cover bg-muted"/>) : (<Globe className="w-4 h-4 opacity-70"/>)}
-                                <span className="font-mono text-xs truncate">
-                                    {isLoadingCurrentIPInfo
-            ? t("translation.migrated.TitleBar.detecting")
-            : currentIPInfo
-                ? showIPAddress
-                    ? currentIPInfo.ip
-                    : t("translation.titleBar.value1Value2", { value1: currentIPInfo.country, value2: detectedCountryCode ? `(${detectedCountryCode})` : "" })
-                : t("translation.migrated.TitleBar.unavailable")}
-                                </span>
-                            </div>
-                            {currentIPInfo && !isLoadingCurrentIPInfo && (<button type="button" onClick={() => setShowIPAddress((prev) => !prev)} className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors" aria-label={showIPAddress ? t("translation.migrated.TitleBar.hideIP") : t("translation.migrated.TitleBar.showIP")}>
-                                {showIPAddress ? <EyeOff className="h-3.5 w-3.5"/> : <Eye className="h-3.5 w-3.5"/>}
-                            </button>)}
-                        </div>
-                        {!isLoadingCurrentIPInfo && !currentIPInfo && currentIPInfoError && (<div className="text-xs text-muted-foreground">
-                            {t("translation.titleBar.ipDetectionUnavailable")}
-                        </div>)}
-                    </div>
-                    <MenubarSeparator />
-                    <MenubarItem onClick={() => openExternal("https://github.com/vekhyat/Auralis")} className="cursor-pointer gap-2">
-                        <Globe className="w-4 h-4 opacity-70"/>
-                        <span>{t("translation.titleBar.website")}</span>
-                    </MenubarItem>
-                </MenubarContent>
+              <MenubarTrigger className="size-8 cursor-pointer rounded-[2px] p-0 transition-colors data-[state=open]:bg-muted hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground" aria-label={t("translation.common.more")}>
+                <Ellipsis className="size-4"/>
+              </MenubarTrigger>
+              <MenubarContent align="end" className="min-w-44">
+                <div className="px-2 py-1">
+                  <MenubarLabel className="p-0 font-mono text-[11px] font-normal text-muted-foreground">
+                    Auralis v{version}
+                  </MenubarLabel>
+                </div>
+                <MenubarSeparator />
+                <MenubarItem onClick={() => onPageChange("debug")} className="cursor-pointer gap-2">
+                  <span>{t("translation.sidebar.debugLogs")}</span>
+                </MenubarItem>
+                <MenubarItem onSelect={() => setIsIssuesDialogOpen(true)} className="cursor-pointer gap-2">
+                  <Bug className="size-3.5"/>
+                  <span>{t("translation.sidebar.reportBugsRequestFeatures")}</span>
+                </MenubarItem>
+                <MenubarItem onClick={() => openExternal("https://github.com/vekhyat/Auralis")} className="cursor-pointer gap-2">
+                  <ExternalLink className="size-3.5"/>
+                  <span>{t("translation.titleBar.website")}</span>
+                </MenubarItem>
+              </MenubarContent>
             </MenubarMenu>
-        </Menubar>
-        <button onClick={handleMinimize} className="size-7 cursor-pointer flex items-center justify-center hover:bg-muted transition-colors rounded" style={{ "--wails-draggable": "no-drag" } as React.CSSProperties} aria-label={t("translation.titleBar.minimize")}>
-          <Minus className="w-3.5 h-3.5"/>
-        </button>
-        <button onClick={handleMaximize} className="size-7 cursor-pointer flex items-center justify-center hover:bg-muted transition-colors rounded" style={{ "--wails-draggable": "no-drag" } as React.CSSProperties} aria-label={t("translation.titleBar.maximize")}>
-          <Maximize className="w-3.5 h-3.5"/>
-        </button>
-        <button onClick={handleClose} className="size-7 cursor-pointer flex items-center justify-center hover:bg-destructive hover:text-white transition-colors rounded" style={{ "--wails-draggable": "no-drag" } as React.CSSProperties} aria-label={t("translation.common.close")}>
-          <X className="w-3.5 h-3.5"/>
-        </button>
-      </div>
+          </Menubar>
+        </nav>
+
+        <div className="flex h-full shrink-0 items-stretch" style={noDrag}>
+          <button onClick={() => WindowMinimise()} className="flex w-11 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label={t("translation.titleBar.minimize")}>
+            <Minus className="size-3.5"/>
+          </button>
+          <button onClick={() => WindowToggleMaximise()} className="flex w-11 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label={t("translation.titleBar.maximize")}>
+            <Square className="size-3"/>
+          </button>
+          <button onClick={() => Quit()} className="flex w-11 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-destructive hover:text-white" aria-label={t("translation.common.close")}>
+            <X className="size-3.5"/>
+          </button>
+        </div>
+      </header>
+
+      <Dialog open={isIssuesDialogOpen} onOpenChange={handleIssuesDialogChange}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{t("translation.sidebar.beforeOpeningIssues")}</DialogTitle>
+            <DialogDescription />
+          </DialogHeader>
+          <div className="space-y-4 text-sm">
+            <div className="border border-primary/30 bg-primary/5 p-4">
+              <p className="font-semibold">{t("translation.sidebar.important")}</p>
+              <p className="mt-1 text-muted-foreground">{t("translation.sidebar.searchIssuesFirst")}</p>
+            </div>
+            <label className="flex cursor-pointer items-start gap-3 border p-4">
+              <Checkbox className="mt-0.5 shrink-0" checked={hasIssueAgreement} onCheckedChange={(checked) => setHasIssueAgreement(checked === true)} />
+              <span className="leading-5 text-foreground/90">{t("translation.sidebar.issueAgreement")}</span>
+            </label>
+          </div>
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button variant="outline" onClick={() => handleIssuesDialogChange(false)}>
+              {t("translation.sidebar.cancel")}
+            </Button>
+            <Button disabled={!hasIssueAgreement} onClick={handleOpenIssues}>
+              {t("translation.sidebar.openIssues")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>);
 }

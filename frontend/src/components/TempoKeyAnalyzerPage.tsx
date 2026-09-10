@@ -4,7 +4,7 @@ import { Activity, AlertCircle, ChevronDown, CircleCheckBig, CircleHelp, FileMus
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { GaugeIcon } from "@/components/ui/gauge";
+import { Gauge } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -355,21 +355,21 @@ export function TempoKeyAnalyzerPage() {
                         <div className="space-y-1.5">
                             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("translation.tempoKey.musicalKey")}</p>
                             <div className="flex items-end gap-3">
-                                <span className="font-mono text-4xl font-bold text-primary">{result.key}</span>
+                                <span className="font-mono text-2xl font-semibold text-primary">{result.key}</span>
                                 <span className="pb-1 text-sm font-medium text-muted-foreground">{activeScaleLabel}</span>
                             </div>
                         </div>
                         <div className="space-y-1.5">
                             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("translation.tempoKey.tempo")}</p>
                             <div className="flex items-baseline gap-2">
-                                <span className="font-mono text-4xl font-bold">{roundedBpm}</span>
+                                <span className="font-mono text-2xl font-semibold">{roundedBpm}</span>
                                 <span className="text-sm font-medium text-muted-foreground">{t("translation.tempoKey.bpm")}</span>
                             </div>
                             <p className="text-xs text-muted-foreground">{tempoLabel(result.bpm)}</p>
                         </div>
                         <div className="space-y-1.5">
                             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("translation.tempoKey.camelot")}</p>
-                            <p className="font-mono text-4xl font-bold">{camelotCode(result.key, result.scale)}</p>
+                            <p className="font-mono text-2xl font-semibold">{camelotCode(result.key, result.scale)}</p>
                         </div>
                     </div>
                 </CardContent>
@@ -450,7 +450,7 @@ export function TempoKeyAnalyzerPage() {
                 {!isRunning && <Button onClick={analyzePending}>{t("translation.queue.retry")}</Button>}
             </div>
         </div>) : (<div className="flex min-h-full flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
-            <GaugeIcon className="text-primary" size={36}/>
+            <Gauge className="size-9 text-primary"/>
             <span>{t("translation.tempoKey.resultsAppearHere")}</span>
         </div>);
     return (<div className="flex h-[calc(100dvh-5.5rem)] min-h-0 flex-col gap-6 md:h-[calc(100dvh-6.5rem)]">

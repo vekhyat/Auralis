@@ -20,6 +20,8 @@ export function useMetadata() {
     const loadingToastId = useRef<string | number | null>(null);
     const fetchedCount = useRef(0);
     const currentName = useRef("");
+    const fetchGeneration = useRef(0);
+    const streamGeneration = useRef(0);
     const updateNavigationState = () => {
         setNavigationState({
             canGoBack: navigationIndex.current > 0,
@@ -90,10 +92,20 @@ export function useMetadata() {
         }
     }, [loading]);
     useEffect(() => {
+        const beginHandler = (id: number) => {
+            streamGeneration.current = id;
+        };
+        EventsOn("metadata-stream-begin", beginHandler);
         const handler = (data: any) => {
             if (!data) {
                 return;
             }
+            const streamId = typeof data === "object" && data !== null && "id" in data ? Number(data.id) : NaN;
+            const payload = typeof data === "object" && data !== null && "payload" in data ? data.payload : null;
+            if (!Number.isFinite(streamId) || streamId !== streamGeneration.current || payload == null) {
+                return;
+            }
+            data = payload;
             if (Array.isArray(data)) {
                 fetchedCount.current += data.length;
                 if (loadingToastId.current && currentName.current) {
@@ -139,7 +151,10 @@ export function useMetadata() {
             });
         };
         EventsOn("metadata-stream", handler);
-        return () => EventsOff("metadata-stream");
+        return () => {
+            EventsOff("metadata-stream");
+            EventsOff("metadata-stream-begin");
+        };
     }, []);
     const getUrlType = (url: string): string => {
         if (url.includes("/track/"))
@@ -209,12 +224,16 @@ export function useMetadata() {
         const urlType = getUrlType(url);
         logger.info(`fetching ${urlType} metadata...`);
         logger.debug(`url: ${url}`);
+        const generation = ++fetchGeneration.current;
         setLoading(true);
         setMetadata(null);
         try {
             const startTime = Date.now();
             const timeout = urlType === "artist" ? 60 : 300;
             const data = await fetchSpotifyMetadata(url, true, 1.0, timeout);
+            if (generation !== fetchGeneration.current) {
+                return;
+            }
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
             if ("playlist_info" in data) {
                 const playlistInfo = data.playlist_info;
@@ -256,19 +275,28 @@ export function useMetadata() {
             toast.success(t("translation.download.metadataFetchedSuccessfully"));
         }
         catch (err) {
+            if (generation !== fetchGeneration.current) {
+                return;
+            }
             const rawError = err instanceof Error ? err.message : t("translation.app.fetchFailed");
             const errorMsg = translateMessage(rawError);
             logger.error(`fetch failed: ${errorMsg}`);
             toast.error(errorMsg);
             showFetchFailureAdvice(rawError);
+            const current = navigationHistory.current[navigationIndex.current];
+            setMetadata(current?.metadata ?? null);
         }
         finally {
-            setLoading(false);
+            if (generation === fetchGeneration.current) {
+                setLoading(false);
+            }
         }
     };
     const loadFromCache = (cachedData: string, url = "", originUrl?: string) => {
         try {
             const data = JSON.parse(cachedData);
+            fetchGeneration.current += 1;
+            streamGeneration.current += 1;
             rememberOrigin(originUrl);
             commitNavigation(url, data);
             toast.success(t("translation.download.loadedCache"));

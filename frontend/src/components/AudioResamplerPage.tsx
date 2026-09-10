@@ -8,7 +8,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { SelectAudioFiles, SelectFolder, ListAudioFilesInDir, ResampleAudio } from "../../wailsjs/go/main/App";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { OnFileDrop, OnFileDropOff } from "../../wailsjs/runtime/runtime";
-import { AudioLinesIcon } from "@/components/ui/audio-lines";
+import { AudioLines } from "lucide-react";
 interface AudioFile {
     path: string;
     name: string;
@@ -345,7 +345,7 @@ export function AudioResamplerPage() {
             setIsDragging(false);
         }} style={{ "--wails-drop-target": "drop" } as React.CSSProperties}>
             {files.length === 0 ? (<>
-                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted">
+                <div className="mb-4 flex size-14 items-center justify-center border border-border bg-muted/50">
                     <Upload className="h-8 w-8 text-primary"/>
                 </div>
                 <p className="text-sm text-muted-foreground mb-4 text-center">
@@ -443,7 +443,7 @@ export function AudioResamplerPage() {
                                 <Spinner className="h-4 w-4"/>
                                 {t("translation.audioResampler.resampling")}
                             </>) : (<>
-                                <AudioLinesIcon size={16} className="text-primary-foreground"/>
+                                <AudioLines className="size-4 text-primary-foreground"/>
                                 {t("translation.audioResampler.resample")}{" "}
                                 {resampleableCount > 0 ? t("translation.migrated.AudioResamplerPage.text", { value1: resampleableCount, value2: t("translation.common.fileTitle", { count: resampleableCount }) }) : ""}
                             </>)}

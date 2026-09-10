@@ -55,6 +55,10 @@ temp/
 *.tmp
 *.bak
 *.old
+_tmp_*
+
+# Local agent / scratch
+.grok/
 
 # Test files
 test

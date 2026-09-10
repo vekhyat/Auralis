@@ -1469,6 +1469,59 @@ func parseDuration(durationStr string) int {
 	return (minutes*60 + seconds) * 1000
 }
 
+func normalizeSpotifyHost(host string) string {
+	host = strings.ToLower(strings.TrimSpace(host))
+	return strings.TrimPrefix(host, "www.")
+}
+
+func isSpotifyCatalogHost(host string) bool {
+	host = normalizeSpotifyHost(host)
+	return host == "open.spotify.com" || host == "play.spotify.com"
+}
+
+func isSpotifyShareHost(host string) bool {
+	host = normalizeSpotifyHost(host)
+	return host == "spotify.link" || strings.HasSuffix(host, ".spotify.link")
+}
+
+func resolveSpotifyShareURL(raw string) (string, error) {
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 8 {
+				return fmt.Errorf("too many redirects")
+			}
+			if req.URL != nil && req.URL.Scheme != "https" {
+				return fmt.Errorf("refusing non-https redirect")
+			}
+			return nil
+		},
+	}
+	req, err := http.NewRequest(http.MethodHead, raw, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := client.Do(req)
+	if err != nil || resp.StatusCode >= 400 {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		req, err = http.NewRequest(http.MethodGet, raw, nil)
+		if err != nil {
+			return "", err
+		}
+		resp, err = client.Do(req)
+	}
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.Request == nil || resp.Request.URL == nil {
+		return "", errInvalidSpotifyURL
+	}
+	return resp.Request.URL.String(), nil
+}
+
 func parseSpotifyURI(input string) (spotifyURI, error) {
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "" {
@@ -1490,7 +1543,25 @@ func parseSpotifyURI(input string) (spotifyURI, error) {
 		return spotifyURI{}, err
 	}
 
-	if parsed.Host != "open.spotify.com" && parsed.Host != "play.spotify.com" {
+	if isSpotifyShareHost(parsed.Host) {
+		resolved, resolveErr := resolveSpotifyShareURL(trimmed)
+		if resolveErr != nil {
+			return spotifyURI{}, resolveErr
+		}
+		return parseSpotifyCatalogURI(resolved)
+	}
+
+	return parseSpotifyCatalogURI(trimmed)
+}
+
+func parseSpotifyCatalogURI(input string) (spotifyURI, error) {
+	trimmed := strings.TrimSpace(input)
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return spotifyURI{}, err
+	}
+
+	if !isSpotifyCatalogHost(parsed.Host) {
 		return spotifyURI{}, errInvalidSpotifyURL
 	}
 
@@ -1517,6 +1588,10 @@ func parseSpotifyURI(input string) (spotifyURI, error) {
 		case "album", "track", "playlist", "artist":
 			return spotifyURI{Type: parts[0], ID: cleanSpotifyID(parts[1])}, nil
 		}
+	}
+
+	if len(parts) >= 4 && parts[0] == "user" && parts[2] == "playlist" {
+		return spotifyURI{Type: "playlist", ID: cleanSpotifyID(parts[3])}, nil
 	}
 
 	if len(parts) >= 3 && parts[0] == "artist" {

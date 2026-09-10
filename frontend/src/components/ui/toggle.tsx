@@ -6,7 +6,7 @@ const toggleVariants = cva("inline-flex items-center justify-center gap-2 rounde
     variants: {
         variant: {
             default: "bg-transparent",
-            outline: "border border-input bg-transparent shadow-xs hover:bg-accent hover:text-accent-foreground",
+            outline: "border border-input bg-transparent hover:bg-accent hover:text-accent-foreground",
         },
         size: {
             default: "h-9 px-2 min-w-9",

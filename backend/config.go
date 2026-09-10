@@ -28,6 +28,12 @@ func sanitizeDownloaderValue(value interface{}) string {
 		return "qobuz"
 	case "amazon":
 		return "amazon"
+	case "deezer":
+		return "deezer"
+	case "apple":
+		return "apple"
+	case "jiosaavn":
+		return "jiosaavn"
 	default:
 		return "auto"
 	}
@@ -36,9 +42,12 @@ func sanitizeDownloaderValue(value interface{}) string {
 func sanitizeAutoOrderValue(value interface{}) string {
 	autoOrder, _ := value.(string)
 	allowed := map[string]struct{}{
-		"tidal":  {},
-		"qobuz":  {},
-		"amazon": {},
+		"tidal":    {},
+		"qobuz":    {},
+		"amazon":   {},
+		"deezer":   {},
+		"apple":    {},
+		"jiosaavn": {},
 	}
 	fallback := "tidal-qobuz-amazon"
 

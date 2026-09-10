@@ -346,7 +346,7 @@ func EnrichFile(filePath, priority string, allowFallback bool, spotifySeparator 
 
 	merged := mergeMissingMetadata(current, incoming)
 
-	if err := TagFile(filePath, merged, ""); err != nil {
+	if err := TagFileMerge(filePath, merged, ""); err != nil {
 		result.Status, result.Source, result.Message = "failed", source, err.Error()
 		return result
 	}

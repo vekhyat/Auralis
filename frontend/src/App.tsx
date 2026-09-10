@@ -1,21 +1,20 @@
-import { useState, useEffect, useCallback, useLayoutEffect, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, } from "@/components/ui/dialog";
-import { X, ArrowUp, CloudDownload } from "lucide-react";
+import { X } from "lucide-react";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { getSettings, getSettingsWithDefaults, loadSettings, saveSettings, applyThemeMode, applyFont } from "@/lib/settings";
-import { applyTheme } from "@/lib/themes";
+import { getSettings, getSettingsWithDefaults, loadSettings, saveSettings, applyThemeMode } from "@/lib/settings";
 import { openExternal } from "@/lib/utils";
 import { OpenFolder, CheckFFmpegInstalled, DownloadFFmpeg, GetRecentFetches, SaveRecentFetches } from "../wailsjs/go/main/App";
 import { EventsOn, EventsOff, Quit } from "../wailsjs/runtime/runtime";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { TitleBar } from "@/components/TitleBar";
-import { Sidebar, type PageType } from "@/components/Sidebar";
-import { Header } from "@/components/Header";
 import { MarkdownLite, extractMarkdownSection } from "@/components/MarkdownLite";
-import { SearchBar } from "@/components/SearchBar";
+import { CatalogPane } from "@/components/CatalogPane";
+import { useSmartSearch } from "@/hooks/useSmartSearch";
+import { SmartSearchDialogs } from "@/components/SmartSearchDialogs";
 import { TrackInfo } from "@/components/TrackInfo";
 import { AlbumInfo } from "@/components/AlbumInfo";
 import { PlaylistInfo } from "@/components/PlaylistInfo";
@@ -36,6 +35,7 @@ import { DebugLoggerPage } from "@/components/DebugLoggerPage";
 import { HistoryPage } from "@/components/HistoryPage";
 import { QueuePage } from "@/components/QueuePage";
 import type { HistoryItem } from "@/components/FetchHistory";
+import type { PageType } from "@/pages";
 import { useDownload } from "@/hooks/useDownload";
 import { useQueue } from "@/hooks/useQueue";
 import { addCollectionToQueue, addTracksToQueue, type AddResult } from "@/lib/queue";
@@ -144,15 +144,12 @@ function App() {
         index: number;
     }>({ history: ["tools"], index: 0 });
     const [activeToolGroup, setActiveToolGroup] = useState<ToolGroup>("analysis");
-    const contentScrollRef = useRef<HTMLDivElement | null>(null);
     const [spotifyUrl, setSpotifyUrl] = useState("");
     const [smartSearchInput, setSmartSearchInput] = useState("");
     const [selectedTracks, setSelectedTracks] = useState<string[]>([]);
     const [searchQuery, setSearchQuery] = useState("");
     const [sortBy, setSortBy] = useState<string>("default");
     const [currentListPage, setCurrentListPage] = useState(1);
-    const [hasUpdate, setHasUpdate] = useState(false);
-    const [releaseDate, setReleaseDate] = useState<string | null>(null);
     const [updateInfo, setUpdateInfo] = useState<{
         version: string;
         changelog: string;
@@ -160,8 +157,6 @@ function App() {
     } | null>(null);
     const [showUpdateDialog, setShowUpdateDialog] = useState(false);
     const [fetchHistory, setFetchHistory] = useState<HistoryItem[]>([]);
-    const [isSearchMode, setIsSearchMode] = useState(false);
-    const [showScrollTop, setShowScrollTop] = useState(false);
     const [hasUnsavedSettings, setHasUnsavedSettings] = useState(false);
     const [pendingPageChange, setPendingPageChange] = useState<PageType | null>(null);
     const [showUnsavedChangesDialog, setShowUnsavedChangesDialog] = useState(false);
@@ -183,21 +178,12 @@ function App() {
     const [isInstallingFFmpeg, setIsInstallingFFmpeg] = useState(false);
     const [ffmpegInstallProgress, setFfmpegInstallProgress] = useState(0);
     const [ffmpegInstallStatus, setFfmpegInstallStatus] = useState("");
-    useLayoutEffect(() => {
-        const savedSettings = getSettings();
-        if (savedSettings) {
-            applyThemeMode(savedSettings.themeMode);
-            applyTheme(savedSettings.theme, savedSettings.baseColor);
-            applyFont(savedSettings.fontFamily, savedSettings.customFonts);
-        }
-    }, []);
+    useLayoutEffectInit();
     useEffect(() => {
         const initSettings = async () => {
             const settings = await loadSettings();
             await i18n.changeLanguage(settings.language);
             applyThemeMode(settings.themeMode);
-            applyTheme(settings.theme, settings.baseColor);
-            applyFont(settings.fontFamily, settings.customFonts);
             if (!settings.downloadPath) {
                 const settingsWithDefaults = await getSettingsWithDefaults();
                 await saveSettings(settingsWithDefaults);
@@ -220,7 +206,6 @@ function App() {
             const currentSettings = getSettings();
             if (currentSettings.themeMode === "auto") {
                 applyThemeMode("auto");
-                applyTheme(currentSettings.theme, currentSettings.baseColor);
             }
         };
         mediaQuery.addEventListener("change", handleChange);
@@ -231,27 +216,6 @@ function App() {
             mediaQuery.removeEventListener("change", handleChange);
         };
     }, []);
-    useEffect(() => {
-        const contentElement = contentScrollRef.current;
-        if (!contentElement) {
-            return;
-        }
-        const handleScroll = () => {
-            setShowScrollTop(contentElement.scrollTop > 300);
-        };
-        handleScroll();
-        contentElement.addEventListener("scroll", handleScroll, { passive: true });
-        return () => {
-            contentElement.removeEventListener("scroll", handleScroll);
-        };
-    }, []);
-    const scrollToTop = useCallback(() => {
-        contentScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-    }, []);
-    useEffect(() => {
-        contentScrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
-        setShowScrollTop(false);
-    }, [currentPage]);
     useEffect(() => {
         setSelectedTracks([]);
         setSearchQuery("");
@@ -268,11 +232,7 @@ function App() {
             const data = await response.json();
             const rawTag = data.tag_name || "";
             const latestVersion = rawTag.replace(/^v/, "") || "";
-            if (data.published_at) {
-                setReleaseDate(data.published_at);
-            }
             if (latestVersion && isNewerVersion(latestVersion, CURRENT_VERSION)) {
-                setHasUpdate(true);
                 setUpdateInfo({
                     version: latestVersion,
                     changelog: extractMarkdownSection(data.body || "", "Changelog"),
@@ -382,7 +342,7 @@ function App() {
             setSpotifyUrl(updatedUrl);
         }
     };
-    const handleFetchMetadata = async () => {
+    const handleFetchMetadata = useCallback(async () => {
         const requestedUrl = smartSearchInput.trim();
         setSpotifyUrl(requestedUrl);
         const updatedUrl = await metadata.handleFetchMetadata(requestedUrl, metadata.metadata ? undefined : requestedUrl);
@@ -390,7 +350,25 @@ function App() {
             setSpotifyUrl(updatedUrl);
             setSmartSearchInput(updatedUrl);
         }
-    };
+    }, [smartSearchInput, metadata]);
+    // The omnibar owns link classification and catalog search; App keeps the
+    // fetch pipeline so queue/download behavior never changes.
+    const omnibar = useSmartSearch({
+        url: smartSearchInput,
+        onUrlChange: setSmartSearchInput,
+        onFetch: () => void handleFetchMetadata(),
+        onFetchUrl: async (url) => {
+            const originUrl = metadata.metadata ? undefined : smartSearchInput;
+            setSmartSearchInput(url);
+            setSpotifyUrl(url);
+            const updatedUrl = await metadata.handleFetchMetadata(url, originUrl);
+            if (updatedUrl) {
+                setSpotifyUrl(updatedUrl);
+                setSmartSearchInput(updatedUrl);
+            }
+        },
+    });
+    const isSearchMode = omnibar.inputKind === "search";
     useEffect(() => {
         if (!metadata.metadata || !spotifyUrl)
             return;
@@ -614,14 +592,14 @@ function App() {
         }
         if ("artist_info" in metadata.metadata) {
             const { artist_info, album_list, track_list } = metadata.metadata;
-            return (<ArtistInfo artistInfo={artist_info} albumList={album_list} trackList={track_list} searchQuery={searchQuery} sortBy={sortBy} selectedTracks={selectedTracks} downloadedTracks={download.downloadedTracks} failedTracks={download.failedTracks} skippedTracks={download.skippedTracks} currentPage={currentListPage} itemsPerPage={ITEMS_PER_PAGE} downloadedLyrics={lyrics.downloadedLyrics} failedLyrics={lyrics.failedLyrics} skippedLyrics={lyrics.skippedLyrics} downloadingLyricsTrack={lyrics.downloadingLyricsTrack} checkingAvailabilityTrack={availability.checkingTrackId} availabilityMap={availability.availabilityMap} downloadedCovers={cover.downloadedCovers} failedCovers={cover.failedCovers} skippedCovers={cover.skippedCovers} downloadingCoverTrack={cover.downloadingCoverTrack} isBulkDownloadingCovers={cover.isBulkDownloadingCovers} isBulkDownloadingLyrics={lyrics.isBulkDownloadingLyrics} isMetadataLoading={metadata.loading} onSearchChange={handleSearchChange} onSortChange={setSortBy} onToggleTrack={toggleTrackSelection} onToggleSelectAll={toggleSelectAll} onSelectTrackRange={selectTrackRange} onDownloadLyrics={(spotifyId, name, artists, albumName, _folderName, _isArtistDiscography, position, albumArtist, releaseDate, discNumber) => lyrics.handleDownloadLyrics(spotifyId, name, artists, albumName, artist_info.name, position, albumArtist, releaseDate, discNumber)} onDownloadCover={(coverUrl, trackName, artistName, albumName, _folderName, _isArtistDiscography, position, trackId, albumArtist, releaseDate, discNumber) => cover.handleDownloadCover(coverUrl, trackName, artistName, albumName, artist_info.name, position, trackId, albumArtist, releaseDate, discNumber)} onCheckAvailability={availability.checkAvailability} onDownloadAllLyrics={() => lyrics.handleDownloadAllLyrics(track_list, artist_info.name)} onDownloadAllCovers={() => cover.handleDownloadAllCovers(track_list, artist_info.name)} onQueueAll={() => handleQueueCollection({ type: "artist", name: artist_info.name, artist: artist_info.name, info: `${track_list.length.toLocaleString()} tracks`, image: artist_info.images, folderName: artist_info.name, tracks: track_list })} onQueueSelected={() => handleQueueSelectedTracks(track_list, artist_info.name)} onQueueTrack={(queuedTrack, position) => handleQueueTracks([queuedTrack], artist_info.name, position)} onOpenFolder={handleOpenFolder} onAlbumClick={metadata.handleAlbumClick} onBack={metadata.resetMetadata} onArtistClick={async (artist) => {
+            return (<ArtistInfo artistInfo={artist_info} albumList={album_list} trackList={track_list} searchQuery={searchQuery} sortBy={sortBy} selectedTracks={selectedTracks} downloadedTracks={download.downloadedTracks} failedTracks={download.failedTracks} skippedTracks={download.skippedTracks} currentPage={currentListPage} itemsPerPage={ITEMS_PER_PAGE} downloadedLyrics={lyrics.downloadedLyrics} failedLyrics={lyrics.failedLyrics} skippedLyrics={lyrics.skippedLyrics} downloadingLyricsTrack={lyrics.downloadingLyricsTrack} checkingAvailabilityTrack={availability.checkingTrackId} availabilityMap={availability.availabilityMap} downloadedCovers={cover.downloadedCovers} failedCovers={cover.failedCovers} skippedCovers={cover.skippedCovers} downloadingCoverTrack={cover.downloadingCoverTrack} isBulkDownloadingCovers={cover.isBulkDownloadingCovers} isBulkDownloadingLyrics={lyrics.isBulkDownloadingLyrics} isMetadataLoading={metadata.loading} onSearchChange={handleSearchChange} onSortChange={setSortBy} onToggleTrack={toggleTrackSelection} onToggleSelectAll={toggleSelectAll} onSelectTrackRange={selectTrackRange} onDownloadLyrics={(spotifyId, name, artists, albumName, _folderName, _isArtistDiscography, position, albumArtist, releaseDate, discNumber) => lyrics.handleDownloadLyrics(spotifyId, name, artists, albumName, artist_info.name, position, albumArtist, releaseDate, discNumber)} onDownloadCover={(coverUrl, trackName, artistName, albumName, _folderName, _isArtistDiscography, position, trackId, albumArtist, releaseDate, discNumber) => cover.handleDownloadCover(coverUrl, trackName, artistName, albumName, artist_info.name, position, trackId, albumArtist, releaseDate, discNumber)} onCheckAvailability={availability.checkAvailability} onDownloadAllLyrics={() => lyrics.handleDownloadAllLyrics(track_list, artist_info.name)} onDownloadAllCovers={() => cover.handleDownloadAllCovers(track_list, artist_info.name)} onQueueAll={() => handleQueueCollection({ type: "artist", name: artist_info.name, artist: artist_info.name, info: `${track_list.length.toLocaleString()} tracks`, image: artist_info.images, folderName: artist_info.name, tracks: track_list })} onQueueSelected={() => handleQueueSelectedTracks(track_list, artist_info.name)} onQueueTrack={(queuedTrack, position) => handleQueueTracks([queuedTrack], artist_info.name, position)} onOpenFolder={handleOpenFolder} onPageChange={setCurrentListPage} onAlbumClick={metadata.handleAlbumClick} onBack={metadata.resetMetadata} onArtistClick={async (artist) => {
                     const pendingArtistUrl = artist.external_urls.replace(/\/$/, "") + "/discography/all";
                     setSpotifyUrl(pendingArtistUrl);
                     const artistUrl = await metadata.handleArtistClick(artist);
                     if (artistUrl) {
                         setSpotifyUrl(artistUrl);
                     }
-                }} onPageChange={setCurrentListPage} onTrackClick={async (track) => {
+                }} onTrackClick={async (track) => {
                     if (track.external_urls) {
                         setSpotifyUrl(track.external_urls);
                         await metadata.handleFetchMetadata(track.external_urls);
@@ -666,8 +644,6 @@ function App() {
         const savedSettings = getSettings();
         await i18n.changeLanguage(savedSettings.language);
         applyThemeMode(savedSettings.themeMode);
-        applyTheme(savedSettings.theme, savedSettings.baseColor);
-        applyFont(savedSettings.fontFamily, savedSettings.customFonts);
         if (pendingPageChange) {
             commitPageNavigation(pendingPageChange);
             setPendingPageChange(null);
@@ -684,8 +660,10 @@ function App() {
             case "debug":
                 return <DebugLoggerPage />;
             case "history":
-                return <HistoryPage onHistorySelect={(cachedData) => {
-                        metadata.loadFromCache(cachedData);
+                return <HistoryPage onHistorySelect={(item) => {
+                        setSmartSearchInput(item.url);
+                        setSpotifyUrl(item.url);
+                        metadata.loadFromCache(item.data, item.url);
                         setCurrentPage("main");
                     }}/>;
             case "queue":
@@ -710,16 +688,21 @@ function App() {
                 return <EnrichPage />;
             default:
                 return (<>
-                    <Header version={CURRENT_VERSION} hasUpdate={hasUpdate} releaseDate={releaseDate}/>
-
-
-
+                    <CatalogPane
+                      controller={omnibar}
+                      query={smartSearchInput}
+                      history={fetchHistory}
+                      onHistorySelect={handleHistorySelect}
+                      onHistoryRemove={removeFromHistory}
+                      onRecentSearchSelect={omnibar.handleInputChange}
+                      hasMetadata={!!metadata.metadata}
+                    />
 
                     <Dialog open={metadata.showAlbumDialog} onOpenChange={metadata.setShowAlbumDialog}>
-                        <DialogContent className="sm:max-w-106.25 p-6 [&>button]:hidden">
-                            <div className="absolute right-4 top-4">
-                                <Button variant="ghost" size="icon" className="h-6 w-6 opacity-70 hover:opacity-100" onClick={() => metadata.setShowAlbumDialog(false)}>
-                                    <X className="h-4 w-4"/>
+                        <DialogContent className="p-6 sm:max-w-106.25 [&>button]:hidden">
+                            <div className="absolute top-4 right-4">
+                                <Button variant="ghost" size="icon-sm" className="opacity-70 hover:opacity-100" onClick={() => metadata.setShowAlbumDialog(false)}>
+                                    <X className="size-4"/>
                                 </Button>
                             </div>
                             <DialogTitle className="text-sm font-medium">{t("translation.common.fetchAlbum")}</DialogTitle>
@@ -727,7 +710,7 @@ function App() {
                                 {t("translation.album.fetchMetadataConfirm")}
                             </DialogDescription>
                             {metadata.selectedAlbum && (<div className="py-2">
-                                <p className="font-medium bg-muted/50 rounded-md px-3 py-2">{metadata.selectedAlbum.name}</p>
+                                <p className="border bg-muted/50 px-3 py-2 font-medium">{metadata.selectedAlbum.name}</p>
                             </div>)}
                             <DialogFooter>
                                 <Button variant="outline" onClick={() => metadata.setShowAlbumDialog(false)}>
@@ -743,71 +726,49 @@ function App() {
                             setSpotifyUrl(albumUrl);
                         }
                     }}>
-                                    <CloudDownload className="h-4 w-4"/>
                                     {t("translation.common.fetchAlbum")}
                                 </Button>
                             </DialogFooter>
                         </DialogContent>
                     </Dialog>
 
-                    <SearchBar url={smartSearchInput} loading={metadata.loading} onUrlChange={setSmartSearchInput} onFetch={handleFetchMetadata} onFetchUrl={async (url) => {
-                        const originUrl = metadata.metadata ? undefined : smartSearchInput;
-                        setSmartSearchInput(url);
-                        setSpotifyUrl(url);
-                        const updatedUrl = await metadata.handleFetchMetadata(url, originUrl);
-                        if (updatedUrl) {
-                            setSpotifyUrl(updatedUrl);
-                            setSmartSearchInput(updatedUrl);
-                        }
-                    }} history={fetchHistory} onHistorySelect={handleHistorySelect} onHistoryRemove={removeFromHistory} hasResult={!!metadata.metadata} onSearchModeChange={setIsSearchMode}/>
-
                     {!isSearchMode && metadata.metadata && renderMetadata()}
                 </>);
         }
     };
-    const usesWideContent = currentPage === "main"
-        ? isSearchMode || !!metadata.metadata
-        : !["settings", "tools"].includes(currentPage);
-    const pageTitleMap: Record<PageType, string> = {
-        main: t("translation.sidebar.home"),
-        queue: t("translation.queue.queue"),
-        history: t("translation.sidebar.history"),
-        settings: t("translation.sidebar.settings"),
-        debug: t("translation.sidebar.debugLogs"),
-        tools: t("translation.sidebar.tools"),
-        "audio-analysis": t("translation.sidebar.tools"),
-        "tempo-key-analyzer": t("translation.sidebar.tools"),
-        replaygain: t("translation.sidebar.tools"),
-        "audio-converter": t("translation.sidebar.tools"),
-        "audio-resampler": t("translation.sidebar.tools"),
-        "file-manager": t("translation.sidebar.tools"),
-        "lyrics-manager": t("translation.sidebar.tools"),
-        enrich: t("translation.sidebar.tools"),
-    };
     return (<TooltipProvider>
-        <div className="h-full overflow-hidden bg-background">
-            <TitleBar canGoBack={TOOL_NAVIGATION_PAGES.has(currentPage) ? toolNavigation.index > 0 : currentPage === "main" && metadata.canGoBack} canGoForward={TOOL_NAVIGATION_PAGES.has(currentPage) ? toolNavigation.index < toolNavigation.history.length - 1 : currentPage === "main" && metadata.canGoForward} navigationDisabled={currentPage === "main" && metadata.loading} onBack={handleTitleBarBack} onForward={handleTitleBarForward} pageTitle={pageTitleMap[currentPage]}/>
-            <Sidebar currentPage={currentPage} onPageChange={handlePageChange} queueBadgeCount={queue.items.filter((item) => item.status === "pending" || item.status === "running").length}/>
+        <div className="h-full overflow-hidden bg-background text-foreground">
+            <TitleBar
+              canGoBack={TOOL_NAVIGATION_PAGES.has(currentPage) ? toolNavigation.index > 0 : currentPage === "main" && metadata.canGoBack}
+              canGoForward={TOOL_NAVIGATION_PAGES.has(currentPage) ? toolNavigation.index < toolNavigation.history.length - 1 : currentPage === "main" && metadata.canGoForward}
+              navigationDisabled={currentPage === "main" && metadata.loading}
+              onBack={handleTitleBarBack}
+              onForward={handleTitleBarForward}
+              currentPage={currentPage}
+              onPageChange={handlePageChange}
+              queueCount={queue.items.filter((item) => item.status === "pending" || item.status === "running").length}
+              omnibar={{
+                  value: smartSearchInput,
+                  loading: metadata.loading || omnibar.isSearching,
+                  onChange: omnibar.handleInputChange,
+                  onSubmit: omnibar.submit,
+              }}
+            />
 
-
-            <div ref={contentScrollRef} className="fixed top-10 right-0 bottom-0 left-44 overflow-y-auto overflow-x-hidden">
-                <div className="p-4 md:p-8">
-                    <div className={`${usesWideContent ? "w-full" : "max-w-4xl mx-auto"} space-y-6`}>
-                        {renderPage()}
-                    </div>
+            <main
+              data-page={currentPage}
+              className="fixed inset-x-0 top-11 bottom-0 overflow-y-auto overflow-x-hidden"
+            >
+                <div className="px-6 py-5">
+                    {renderPage()}
                 </div>
-            </div>
-
+            </main>
 
             <DownloadProgressToast isPreparing={queue.isProcessing} onOpenQueue={() => handlePageChange("queue")}/>
 
             <CooldownBanner />
 
-
-            {showScrollTop && (<Button onClick={scrollToTop} className="fixed bottom-6 right-6 z-50 h-10 w-10 rounded-full shadow-lg" size="icon">
-                <ArrowUp className="h-5 w-5"/>
-            </Button>)}
-
+            <SmartSearchDialogs controller={omnibar}/>
 
             <Dialog open={showUpdateDialog} onOpenChange={setShowUpdateDialog}>
               <DialogContent className="sm:max-w-125 [&>button]:hidden">
@@ -817,7 +778,7 @@ function App() {
                     {t("translation.app.newVersion")} {updateInfo ? t("translation.migrated.App.v", { value1: updateInfo.version }) : ""} {t("translation.app.availableReV")}{CURRENT_VERSION}
                   </DialogDescription>
                 </DialogHeader>
-                {updateInfo?.changelog ? (<div className="max-h-72 overflow-y-auto rounded-md border bg-muted/40 p-3 custom-scrollbar">
+                {updateInfo?.changelog ? (<div className="custom-scrollbar max-h-72 overflow-y-auto border bg-muted/40 p-3">
                     <MarkdownLite content={updateInfo.changelog}/>
                   </div>) : (<p className="text-sm text-muted-foreground">{t("translation.app.noChangelogProvidedRelease")}</p>)}
             <DialogFooter className="gap-2">
@@ -880,45 +841,45 @@ function App() {
             </Dialog>
 
             <Dialog open={isFFmpegInstalled === false} onOpenChange={() => { }}>
-                <DialogContent className="max-w-112.5 [&>button]:hidden p-6 gap-5">
+                <DialogContent className="max-w-112.5 gap-5 p-6 [&>button]:hidden">
                     <DialogHeader className="space-y-2">
                         <DialogTitle className="text-lg font-bold tracking-tight">
                             {t("translation.migrated.App.ffmpegRequired")}
                         </DialogTitle>
-                        <DialogDescription className="text-sm text-foreground/70 leading-relaxed font-normal">
-                            {t("translation.migrated.App.spotiflacChecksYourSystemForFFmpegAnd")} <span className="text-foreground font-semibold">30-40MB</span> {t("translation.migrated.App.ofData")}
+                        <DialogDescription className="text-sm leading-relaxed font-normal text-foreground/70">
+                            {t("translation.migrated.App.spotiflacChecksYourSystemForFFmpegAnd")} <span className="font-semibold text-foreground">30-40MB</span> {t("translation.migrated.App.ofData")}
                         </DialogDescription>
                     </DialogHeader>
 
                     {isInstallingFFmpeg && (<div className="space-y-4">
                             {ffmpegInstallStatus === "extracting" ? (<div className="flex flex-col items-center justify-center py-2 animate-in fade-in duration-500">
                                     <div className="flex items-center gap-3">
-                                        <div className="h-4 w-4 border-2 border-primary border-t-transparent rounded-full animate-spin"/>
+                                        <div className="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent"/>
                                         <span className="text-sm font-bold tracking-tight">{t("translation.app.extracting")}</span>
                                     </div>
-                                    <span className="text-[10px] text-muted-foreground uppercase tracking-[0.2em] font-bold mt-2">{t("translation.app.finalizingSetup")}</span>
+                                    <span className="mt-2 font-mono text-[10px] tracking-[0.2em] uppercase text-muted-foreground">{t("translation.app.finalizingSetup")}</span>
                                 </div>) : (<div className="space-y-3">
                                     <div className="flex justify-between text-[11px] font-bold">
                                         <div className="flex flex-col gap-0.5">
-                                            <span className="text-muted-foreground uppercase tracking-wider">{t("translation.app.downloading")}</span>
-                                            {downloadProgress.is_downloading && downloadProgress.mb_downloaded > 0 && (<span className="text-primary font-mono tabular-nums">
+                                            <span className="tracking-wider uppercase text-muted-foreground">{t("translation.app.downloading")}</span>
+                                            {downloadProgress.is_downloading && downloadProgress.mb_downloaded > 0 && (<span className="font-mono tabular-nums text-primary">
                                                     {downloadProgress.mb_downloaded.toFixed(1)}{t("literal.common.mb")}
                                                     {downloadProgress.speed_mbps > 0 && <> @ {downloadProgress.speed_mbps.toFixed(1)}{t("literal.downloadProgressToast.mbS")}</>}
                                                 </span>)}
                                         </div>
-                                        <span className="text-xl font-bold tracking-tighter text-primary">{ffmpegInstallProgress}%</span>
+                                        <span className="font-mono text-xl tracking-tighter tabular-nums text-primary">{ffmpegInstallProgress}%</span>
                                     </div>
-                                    <div className="h-1.5 w-full bg-secondary/30 rounded-full overflow-hidden">
-                                        <div className="h-full bg-primary transition-all duration-300 shadow-[0_0_10px_rgba(var(--primary),0.3)]" style={{ width: `${ffmpegInstallProgress}%` }}/>
+                                    <div className="h-1 w-full overflow-hidden bg-secondary">
+                                        <div className="h-full bg-primary transition-all duration-300" style={{ width: `${ffmpegInstallProgress}%` }}/>
                                     </div>
                                 </div>)}
                         </div>)}
 
                     <DialogFooter className="flex-row gap-3 pt-2">
-                        {!isInstallingFFmpeg && (<Button variant="outline" className="flex-1 h-11 text-sm font-bold transition-colors" onClick={() => Quit()}>
+                        {!isInstallingFFmpeg && (<Button variant="outline" className="h-11 flex-1 text-sm" onClick={() => Quit()}>
                                 {t("translation.app.exit")}
                             </Button>)}
-                        <Button className={`${isInstallingFFmpeg ? 'w-full' : 'flex-1'} h-11 text-sm font-bold shadow-lg shadow-primary/10`} onClick={handleInstallFFmpeg} disabled={isInstallingFFmpeg}>
+                        <Button className={`h-11 text-sm ${isInstallingFFmpeg ? 'w-full' : 'flex-1'}`} onClick={handleInstallFFmpeg} disabled={isInstallingFFmpeg}>
                                 {isInstallingFFmpeg ? t("translation.migrated.App.installing") : t("translation.migrated.App.installNow")}
                             </Button>
                     </DialogFooter>
@@ -927,4 +888,16 @@ function App() {
         </div>
     </TooltipProvider>);
 }
+
+function useLayoutEffectInit() {
+    // First paint: honor stored theme mode only. Legacy theme/base/font values
+    // in ~/.auralis are ignored by design; the locked skins live in CSS.
+    useEffect(() => {
+        const savedSettings = getSettings();
+        if (savedSettings) {
+            applyThemeMode(savedSettings.themeMode);
+        }
+    }, []);
+}
+
 export default App;

@@ -13,10 +13,11 @@ import (
 )
 
 var (
-	zarzGrantMu      sync.Mutex
-	zarzGrantWaiters []chan string
-	zarzPendingGrant string
-	zarzRedeliverRe  = regexp.MustCompile(`var redeliverGrant = ("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')`)
+	zarzGrantMu       sync.Mutex
+	zarzGrantWaiters  []chan string
+	zarzPendingGrant  string
+	zarzExpectedState string
+	zarzRedeliverRe   = regexp.MustCompile(`var redeliverGrant = ("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')`)
 )
 
 func HandleProtocolArgs(args []string) {
@@ -31,17 +32,25 @@ func HandleProtocolArgs(args []string) {
 }
 
 func DeliverZarzGrant(grant string) {
-	grant = extractZarzGrant(grant)
-	if grant == "" {
+	parsed := parseZarzGrant(grant)
+	if parsed.Grant == "" {
 		return
 	}
 
 	zarzGrantMu.Lock()
 	defer zarzGrantMu.Unlock()
-	if len(zarzGrantWaiters) == 0 {
-		zarzPendingGrant = grant
+	if zarzExpectedState != "" && parsed.FromURL && parsed.State != zarzExpectedState {
+		fmt.Println("Ignored Zarz grant with mismatched callback state")
 		return
 	}
+	if len(zarzGrantWaiters) == 0 {
+		if zarzExpectedState == "" {
+			return
+		}
+		zarzPendingGrant = parsed.Grant
+		return
+	}
+	grant = parsed.Grant
 	for _, waiter := range zarzGrantWaiters {
 		select {
 		case waiter <- grant:

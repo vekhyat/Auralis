@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { t, translateMessage } from "@/i18n";
 import { downloadTrack, fetchSpotifyMetadata } from "@/lib/api";
-import { getSettings, parseTemplate, sanitizeAutoOrder, getEffectiveAlbumFilenameTemplate, templateUsesAlbumTrackNumber, getAlbumCategoryLabel, type TemplateData } from "@/lib/settings";
+import { getSettings, parseTemplate, extendAutoOrder, getEffectiveAlbumFilenameTemplate, templateUsesAlbumTrackNumber, getAlbumCategoryLabel, type TemplateData } from "@/lib/settings";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { joinPath, sanitizePath, getFirstArtist } from "@/lib/utils";
 import { logger } from "@/lib/logger";
@@ -111,11 +111,22 @@ function isCooldownMessage(message?: string): boolean {
     if (!message)
         return false;
     const lower = message.toLowerCase();
-    return lower.includes("short break") || lower.includes("scheduled") || lower.includes("cooldown");
+    return lower.includes("short break")
+        || lower.includes("scheduled cooldown")
+        || lower.includes("temporarily skipped after rate limit")
+        || (lower.includes("rate limit") && (lower.includes("skip") || lower.includes("remaining")));
 }
 function getCooldownFailure(error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     return isCooldownMessage(message) ? { success: false, error: message } : null;
+}
+function isCancelFailure(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.toLowerCase().includes("download cancelled");
+}
+function cancelledDownloadResponse(error?: unknown) {
+    const message = error instanceof Error ? error.message : (typeof error === "string" ? error : "Download cancelled");
+    return { success: false, cancelled: true, error: message || "Download cancelled" };
 }
 function formatSourceSuffix(response: {
     source_url?: string;
@@ -234,6 +245,16 @@ export function useDownload() {
         shouldStopDownloadRef.current = false;
         shouldPauseDownloadRef.current = false;
     };
+    const runDownload = async (request: Parameters<typeof downloadTrack>[0]) => {
+        if (shouldStopDownloadRef.current) {
+            return { success: false, cancelled: true, error: "Download cancelled", message: "Download cancelled" };
+        }
+        const response = await downloadTrack(request);
+        if (response.cancelled || shouldStopDownloadRef.current) {
+            return { ...response, success: false, cancelled: true, error: response.error || "Download cancelled" };
+        }
+        return response;
+    };
     const downloadWithAutoFallback = async (id: string, settings: any, trackName?: string, artistName?: string, albumName?: string, playlistName?: string, position?: number, spotifyId?: string, durationMs?: number, releaseYear?: string, albumArtist?: string, releaseDate?: string, coverUrl?: string, spotifyTrackNumber?: number, spotifyDiscNumber?: number, spotifyTotalTracks?: number, spotifyTotalDiscs?: number, copyright?: string, publisher?: string) => {
         const service = settings.downloader;
         const os = settings.operatingSystem;
@@ -280,9 +301,9 @@ export function useDownload() {
         }
         const query = trackName && artistName ? `${trackName} ${artistName} ` : undefined;
         const yearValue = releaseYear || finalReleaseDate?.substring(0, 4);
-        const hasSubfolder = settings.folderTemplate && settings.folderTemplate.trim() !== "" && settings.applyFolderToSingleTrack;
+        const hasSubfolder = Boolean(settings.folderTemplate && settings.folderTemplate.trim() !== "" && settings.applyFolderToSingleTrack);
         const trackNumberForTemplate = (hasSubfolder && finalTrackNumber > 0) ? finalTrackNumber : (position || 0);
-        if (hasSubfolder) {
+        if ((hasSubfolder || templateUsesAlbumTrackNumber(settings)) && finalTrackNumber > 0) {
             useAlbumTrackNumber = true;
         }
         const displayArtist = settings.useFirstArtistOnly && artistName
@@ -366,7 +387,7 @@ export function useDownload() {
             itemID = await AddToDownloadQueue(id, trackName || "", displayArtist || "", albumName || "");
         }
         if (service === "auto") {
-            const order = sanitizeAutoOrder(settings.autoOrder).split("-");
+            const order = extendAutoOrder(settings.autoOrder);
             let streamingURLs: any = null;
             if (spotifyId && shouldFetchStreamingURLs(order)) {
                 try {
@@ -386,10 +407,10 @@ export function useDownload() {
             const is24Bit = (settings.autoQuality || "24") === "24";
             const qobuzQuality = is24Bit ? "27" : "6";
             for (const s of order) {
-                if (s === "tidal" && streamingURLs?.tidal_url) {
+                if (s === "tidal") {
                     try {
                         logger.debug(`trying Tidal for: ${trackName} - ${artistName}`);
-                        const response = await downloadTrack({
+                        const response = await runDownload({
                             service: "tidal",
                             query,
                             track_name: trackName,
@@ -404,7 +425,7 @@ export function useDownload() {
                             category: getAlbumCategoryLabel(finalAlbumType),
                             upc: finalUPC,
                             track_number: settings.trackNumber,
-                            position,
+                            position: trackNumberForTemplate,
                             use_album_track_number: useAlbumTrackNumber,
                             spotify_id: spotifyId,
                             embed_lyrics: settings.embedLyrics,
@@ -430,6 +451,8 @@ export function useDownload() {
                             logger.success(`Tidal: ${trackName} - ${artistName}${formatSourceSuffix(response)}`);
                             return response;
                         }
+                        if (response.cancelled)
+                            return response;
                         const errMsg = response.error || response.message || "Failed";
                         if (isCooldownMessage(errMsg))
                             return response;
@@ -439,6 +462,8 @@ export function useDownload() {
                     }
                     catch (err) {
                         logger.error(`Tidal error: ${err}`);
+                        if (shouldStopDownloadRef.current || isCancelFailure(err))
+                            return cancelledDownloadResponse(err);
                         const cooldownFailure = getCooldownFailure(err);
                         if (cooldownFailure)
                             return cooldownFailure;
@@ -446,10 +471,10 @@ export function useDownload() {
                         lastResponse = { success: false, error: String(err) };
                     }
                 }
-                else if (s === "amazon" && streamingURLs?.amazon_url) {
+                else if (s === "amazon") {
                     try {
                         logger.debug(`trying amazon for: ${trackName} - ${artistName}`);
-                        const response = await downloadTrack({
+                        const response = await runDownload({
                             service: "amazon",
                             query,
                             track_name: trackName,
@@ -464,12 +489,12 @@ export function useDownload() {
                             category: getAlbumCategoryLabel(finalAlbumType),
                             upc: finalUPC,
                             track_number: settings.trackNumber,
-                            position,
+                            position: trackNumberForTemplate,
                             use_album_track_number: useAlbumTrackNumber,
                             spotify_id: spotifyId,
                             embed_lyrics: settings.embedLyrics,
                             embed_max_quality_cover: settings.embedMaxQualityCover,
-                            service_url: streamingURLs.amazon_url,
+                            service_url: streamingURLs?.amazon_url,
                             item_id: itemID,
                             audio_format: isAtmos ? "atmos" : (is24Bit ? "24" : "16"),
                             spotify_track_number: spotifyTrackNumber,
@@ -487,6 +512,8 @@ export function useDownload() {
                             logger.success(`amazon: ${trackName} - ${artistName}${formatSourceSuffix(response)}`);
                             return response;
                         }
+                        if (response.cancelled)
+                            return response;
                         const errMsg = response.error || response.message || "Failed";
                         if (isCooldownMessage(errMsg))
                             return response;
@@ -496,6 +523,8 @@ export function useDownload() {
                     }
                     catch (err) {
                         logger.error(`amazon error: ${err}`);
+                        if (shouldStopDownloadRef.current || isCancelFailure(err))
+                            return cancelledDownloadResponse(err);
                         const cooldownFailure = getCooldownFailure(err);
                         if (cooldownFailure)
                             return cooldownFailure;
@@ -506,7 +535,7 @@ export function useDownload() {
                 else if (s === "qobuz") {
                     try {
                         logger.debug(`trying qobuz for: ${trackName} - ${artistName}`);
-                        const response = await downloadTrack({
+                        const response = await runDownload({
                             service: "qobuz",
                             query,
                             track_name: trackName,
@@ -544,6 +573,8 @@ export function useDownload() {
                             logger.success(`qobuz: ${trackName} - ${artistName}${formatSourceSuffix(response)}`);
                             return response;
                         }
+                        if (response.cancelled)
+                            return response;
                         const errMsg = response.error || response.message || "Failed";
                         if (isCooldownMessage(errMsg))
                             return response;
@@ -553,10 +584,74 @@ export function useDownload() {
                     }
                     catch (err) {
                         logger.error(`qobuz error: ${err}`);
+                        if (shouldStopDownloadRef.current || isCancelFailure(err))
+                            return cancelledDownloadResponse(err);
                         const cooldownFailure = getCooldownFailure(err);
                         if (cooldownFailure)
                             return cooldownFailure;
                         fallbackErrors.push(`[Qobuz] ${String(err)}`);
+                        lastResponse = { success: false, error: String(err) };
+                    }
+                }
+                else if (s === "deezer" || s === "apple" || s === "jiosaavn") {
+                    try {
+                        logger.debug(`trying ${s} for: ${trackName} - ${artistName}`);
+                        const response = await runDownload({
+                            service: s,
+                            query,
+                            track_name: trackName,
+                            artist_name: displayArtist,
+                            album_name: albumName,
+                            album_artist: displayAlbumArtist,
+                            release_date: finalReleaseDate || releaseDate,
+                            cover_url: coverUrl,
+                            output_dir: outputDir,
+                            filename_format: settings.filenameTemplate,
+                            artists: artistName,
+                            category: getAlbumCategoryLabel(finalAlbumType),
+                            upc: finalUPC,
+                            track_number: settings.trackNumber,
+                            position: trackNumberForTemplate,
+                            use_album_track_number: useAlbumTrackNumber,
+                            spotify_id: spotifyId,
+                            embed_lyrics: settings.embedLyrics,
+                            embed_max_quality_cover: settings.embedMaxQualityCover,
+                            item_id: itemID,
+                            audio_format: "flac",
+                            duration: durationSeconds,
+                            spotify_track_number: spotifyTrackNumber,
+                            spotify_disc_number: spotifyDiscNumber,
+                            spotify_total_tracks: spotifyTotalTracks,
+                            spotify_total_discs: spotifyTotalDiscs,
+                            isrc: resolvedTemplateISRC || undefined,
+                            copyright: copyright,
+                            publisher: publisher,
+                            use_first_artist_only: settings.useFirstArtistOnly,
+                            use_single_genre: settings.useSingleGenre,
+                            embed_genre: settings.embedGenre,
+                            save_cover: settings.saveCover,
+                        });
+                        if (response.success) {
+                            logger.success(`${s}: ${trackName} - ${artistName}${formatSourceSuffix(response)}`);
+                            return response;
+                        }
+                        if (response.cancelled)
+                            return response;
+                        const errMsg = response.error || response.message || "Failed";
+                        if (isCooldownMessage(errMsg))
+                            return response;
+                        fallbackErrors.push(`[${s}] ${translateMessage(errMsg)}`);
+                        lastResponse = response;
+                        logger.warning(`${s} failed, trying next...`);
+                    }
+                    catch (err) {
+                        logger.error(`${s} error: ${err}`);
+                        if (shouldStopDownloadRef.current || isCancelFailure(err))
+                            return cancelledDownloadResponse(err);
+                        const cooldownFailure = getCooldownFailure(err);
+                        if (cooldownFailure)
+                            return cooldownFailure;
+                        fallbackErrors.push(`[${s}] ${String(err)}`);
                         lastResponse = { success: false, error: String(err) };
                     }
                 }
@@ -579,12 +674,12 @@ export function useDownload() {
         else if (service === "amazon") {
             audioFormat = settings.amazonQuality || "16";
         }
-        else if (service === "deezer") {
+        else if (service === "deezer" || service === "apple" || service === "jiosaavn") {
             audioFormat = "flac";
         }
         logger.debug(`trying ${service} for: ${trackName} - ${artistName}`);
-        const singleServiceResponse = await downloadTrack({
-            service: service as "tidal" | "qobuz" | "amazon",
+        const singleServiceResponse = await runDownload({
+            service: service as "tidal" | "qobuz" | "amazon" | "deezer" | "apple" | "jiosaavn",
             query,
             track_name: trackName,
             artist_name: displayArtist,
@@ -617,8 +712,9 @@ export function useDownload() {
             use_first_artist_only: settings.useFirstArtistOnly,
             use_single_genre: settings.useSingleGenre,
             embed_genre: settings.embedGenre,
+            save_cover: settings.saveCover,
         });
-        if (!singleServiceResponse.success && itemID) {
+        if (!singleServiceResponse.success && !singleServiceResponse.cancelled && !isCooldownMessage(singleServiceResponse.error) && itemID) {
             const { MarkDownloadItemFailed } = await import("../../wailsjs/go/main/App");
             await MarkDownloadItemFailed(itemID, singleServiceResponse.error || "Download failed");
         }
@@ -671,8 +767,11 @@ export function useDownload() {
         }
         const query = trackName && artistName ? `${trackName} ${artistName}` : undefined;
         const yearValue = releaseYear || finalReleaseDate?.substring(0, 4);
-        const hasSubfolder = settings.folderTemplate && settings.folderTemplate.trim() !== "";
+        const hasSubfolder = Boolean(settings.folderTemplate && settings.folderTemplate.trim() !== "");
         const trackNumberForTemplate = (hasSubfolder && finalTrackNumber > 0) ? finalTrackNumber : (position || 0);
+        if ((hasSubfolder || templateUsesAlbumTrackNumber(settings)) && finalTrackNumber > 0) {
+            useAlbumTrackNumber = true;
+        }
         const displayArtist = settings.useFirstArtistOnly && artistName
             ? getFirstArtist(artistName)
             : artistName;
@@ -712,7 +811,7 @@ export function useDownload() {
             }
         }
         if (service === "auto") {
-            const order = sanitizeAutoOrder(settings.autoOrder).split("-");
+            const order = extendAutoOrder(settings.autoOrder);
             let streamingURLs: any = null;
             if (spotifyId && shouldFetchStreamingURLs(order)) {
                 try {
@@ -732,10 +831,10 @@ export function useDownload() {
             const is24Bit = (settings.autoQuality || "24") === "24";
             const qobuzQuality = is24Bit ? "27" : "6";
             for (const s of order) {
-                if (s === "tidal" && streamingURLs?.tidal_url) {
+                if (s === "tidal") {
                     try {
                         logger.debug(`trying Tidal for: ${trackName} - ${artistName}`);
-                        const response = await downloadTrack({
+                        const response = await runDownload({
                             service: "tidal",
                             query,
                             track_name: trackName,
@@ -750,7 +849,7 @@ export function useDownload() {
                             category: getAlbumCategoryLabel(finalAlbumType),
                             upc: finalUPC,
                             track_number: settings.trackNumber,
-                            position,
+                            position: trackNumberForTemplate,
                             use_album_track_number: useAlbumTrackNumber,
                             spotify_id: spotifyId,
                             embed_lyrics: settings.embedLyrics,
@@ -776,6 +875,8 @@ export function useDownload() {
                             logger.success(`Tidal: ${trackName} - ${artistName}${formatSourceSuffix(response)}`);
                             return response;
                         }
+                        if (response.cancelled)
+                            return response;
                         const errMsg = response.error || response.message || "Failed";
                         if (isCooldownMessage(errMsg))
                             return response;
@@ -785,6 +886,8 @@ export function useDownload() {
                     }
                     catch (err) {
                         logger.error(`Tidal error: ${err}`);
+                        if (shouldStopDownloadRef.current || isCancelFailure(err))
+                            return cancelledDownloadResponse(err);
                         const cooldownFailure = getCooldownFailure(err);
                         if (cooldownFailure)
                             return cooldownFailure;
@@ -792,10 +895,10 @@ export function useDownload() {
                         lastResponse = { success: false, error: String(err) };
                     }
                 }
-                else if (s === "amazon" && streamingURLs?.amazon_url) {
+                else if (s === "amazon") {
                     try {
                         logger.debug(`trying amazon for: ${trackName} - ${artistName}`);
-                        const response = await downloadTrack({
+                        const response = await runDownload({
                             service: "amazon",
                             query,
                             track_name: trackName,
@@ -810,12 +913,12 @@ export function useDownload() {
                             category: getAlbumCategoryLabel(finalAlbumType),
                             upc: finalUPC,
                             track_number: settings.trackNumber,
-                            position,
+                            position: trackNumberForTemplate,
                             use_album_track_number: useAlbumTrackNumber,
                             spotify_id: spotifyId,
                             embed_lyrics: settings.embedLyrics,
                             embed_max_quality_cover: settings.embedMaxQualityCover,
-                            service_url: streamingURLs.amazon_url,
+                            service_url: streamingURLs?.amazon_url,
                             item_id: itemID,
                             audio_format: isAtmos ? "atmos" : (is24Bit ? "24" : "16"),
                             spotify_track_number: spotifyTrackNumber,
@@ -834,6 +937,8 @@ export function useDownload() {
                             logger.success(`amazon: ${trackName} - ${artistName}${formatSourceSuffix(response)}`);
                             return response;
                         }
+                        if (response.cancelled)
+                            return response;
                         const errMsg = response.error || response.message || "Failed";
                         if (isCooldownMessage(errMsg))
                             return response;
@@ -843,6 +948,8 @@ export function useDownload() {
                     }
                     catch (err) {
                         logger.error(`amazon error: ${err}`);
+                        if (shouldStopDownloadRef.current || isCancelFailure(err))
+                            return cancelledDownloadResponse(err);
                         const cooldownFailure = getCooldownFailure(err);
                         if (cooldownFailure)
                             return cooldownFailure;
@@ -853,7 +960,7 @@ export function useDownload() {
                 else if (s === "qobuz") {
                     try {
                         logger.debug(`trying qobuz for: ${trackName} - ${artistName}`);
-                        const response = await downloadTrack({
+                        const response = await runDownload({
                             service: "qobuz",
                             query,
                             track_name: trackName,
@@ -893,6 +1000,8 @@ export function useDownload() {
                             logger.success(`qobuz: ${trackName} - ${artistName}${formatSourceSuffix(response)}`);
                             return response;
                         }
+                        if (response.cancelled)
+                            return response;
                         const errMsg = response.error || response.message || "Failed";
                         if (isCooldownMessage(errMsg))
                             return response;
@@ -902,10 +1011,74 @@ export function useDownload() {
                     }
                     catch (err) {
                         logger.error(`qobuz error: ${err}`);
+                        if (shouldStopDownloadRef.current || isCancelFailure(err))
+                            return cancelledDownloadResponse(err);
                         const cooldownFailure = getCooldownFailure(err);
                         if (cooldownFailure)
                             return cooldownFailure;
                         fallbackErrors.push(`[Qobuz] ${String(err)}`);
+                        lastResponse = { success: false, error: String(err) };
+                    }
+                }
+                else if (s === "deezer" || s === "apple" || s === "jiosaavn") {
+                    try {
+                        logger.debug(`trying ${s} for: ${trackName} - ${artistName}`);
+                        const response = await runDownload({
+                            service: s,
+                            query,
+                            track_name: trackName,
+                            artist_name: displayArtist,
+                            album_name: albumName,
+                            album_artist: displayAlbumArtist,
+                            release_date: finalReleaseDate || releaseDate,
+                            cover_url: coverUrl,
+                            output_dir: outputDir,
+                            filename_format: settings.filenameTemplate,
+                            artists: artistName,
+                            category: getAlbumCategoryLabel(finalAlbumType),
+                            upc: finalUPC,
+                            track_number: settings.trackNumber,
+                            position: trackNumberForTemplate,
+                            use_album_track_number: useAlbumTrackNumber,
+                            spotify_id: spotifyId,
+                            embed_lyrics: settings.embedLyrics,
+                            embed_max_quality_cover: settings.embedMaxQualityCover,
+                            duration: durationSeconds,
+                            item_id: itemID,
+                            audio_format: "flac",
+                            spotify_track_number: spotifyTrackNumber,
+                            spotify_disc_number: spotifyDiscNumber,
+                            spotify_total_tracks: spotifyTotalTracks,
+                            spotify_total_discs: spotifyTotalDiscs,
+                            isrc: resolvedTemplateISRC || undefined,
+                            copyright: copyright,
+                            publisher: publisher,
+                            use_first_artist_only: settings.useFirstArtistOnly,
+                            use_single_genre: settings.useSingleGenre,
+                            embed_genre: settings.embedGenre,
+                            save_cover: settings.saveCover,
+                        });
+                        if (response.success) {
+                            logger.success(`${s}: ${trackName} - ${artistName}${formatSourceSuffix(response)}`);
+                            return response;
+                        }
+                        if (response.cancelled)
+                            return response;
+                        const errMsg = response.error || response.message || "Failed";
+                        if (isCooldownMessage(errMsg))
+                            return response;
+                        fallbackErrors.push(`[${s}] ${translateMessage(errMsg)}`);
+                        lastResponse = response;
+                        logger.warning(`${s} failed, trying next...`);
+                    }
+                    catch (err) {
+                        logger.error(`${s} error: ${err}`);
+                        if (shouldStopDownloadRef.current || isCancelFailure(err))
+                            return cancelledDownloadResponse(err);
+                        const cooldownFailure = getCooldownFailure(err);
+                        if (cooldownFailure)
+                            return cooldownFailure;
+                        fallbackErrors.push(`[${s}] ${String(err)}`);
                         lastResponse = { success: false, error: String(err) };
                     }
                 }
@@ -928,8 +1101,11 @@ export function useDownload() {
         else if (service === "amazon") {
             audioFormat = settings.amazonQuality || "16";
         }
-        const singleServiceResponse = await downloadTrack({
-            service: service as "tidal" | "qobuz" | "amazon",
+        else if (service === "deezer" || service === "apple" || service === "jiosaavn") {
+            audioFormat = "flac";
+        }
+        const singleServiceResponse = await runDownload({
+            service: service as "tidal" | "qobuz" | "amazon" | "deezer" | "apple" | "jiosaavn",
             query,
             track_name: trackName,
             artist_name: displayArtist,
@@ -962,8 +1138,9 @@ export function useDownload() {
             use_first_artist_only: settings.useFirstArtistOnly,
             use_single_genre: settings.useSingleGenre,
             embed_genre: settings.embedGenre,
+            save_cover: settings.saveCover,
         });
-        if (!singleServiceResponse.success && itemID) {
+        if (!singleServiceResponse.success && !singleServiceResponse.cancelled && !isCooldownMessage(singleServiceResponse.error) && itemID) {
             const { MarkDownloadItemFailed } = await import("../../wailsjs/go/main/App");
             await MarkDownloadItemFailed(itemID, singleServiceResponse.error || "Download failed");
         }
@@ -1019,13 +1196,14 @@ export function useDownload() {
                     finishDirectQueueItem(directQueueItemId, { trackResults: {}, successCount: 0, skippedCount: 0, failedCount: 0, cancelled: true });
                 return undefined;
             }
+            else if (isCooldownMessage(response.error)) {
+                toast.info(t("translation.migrated.useDownload.serversOnAScheduledBreakPausingDownloads"));
+                if (!queueItemId)
+                    finishDirectQueueItem(directQueueItemId, { trackResults: {}, successCount: 0, skippedCount: 0, failedCount: 0, paused: true });
+                return undefined;
+            }
             else {
-                if (isCooldownMessage(response.error)) {
-                    toast.info(t("translation.migrated.useDownload.serversOnAScheduledBreakPausingDownloads"));
-                }
-                else {
-                    toast.error(translateMessage(response.error || t("translation.download.downloadFailed")));
-                }
+                toast.error(translateMessage(response.error || t("translation.download.downloadFailed")));
                 setFailedTracks((prev) => new Set(prev).add(id));
                 return finishDirectTrack("failed");
             }
@@ -1034,10 +1212,11 @@ export function useDownload() {
             const message = err instanceof Error ? err.message : t("translation.download.downloadFailed");
             if (isCooldownMessage(message)) {
                 toast.info(t("translation.migrated.useDownload.serversOnAScheduledBreakPausingDownloads"));
+                if (!queueItemId)
+                    finishDirectQueueItem(directQueueItemId, { trackResults: {}, successCount: 0, skippedCount: 0, failedCount: 0, paused: true });
+                return undefined;
             }
-            else {
-                toast.error(translateMessage(message));
-            }
+            toast.error(translateMessage(message));
             setFailedTracks((prev) => new Set(prev).add(id));
             return finishDirectTrack("failed");
         }
@@ -1139,8 +1318,10 @@ export function useDownload() {
             const failedErrorMessages = new Map<string, string>();
             const completedSpotifyIDs = new Set<string>();
             for (let i = 0; i < tracksToDownload.length; i++) {
-                if (shouldStopDownloadRef.current) {
-                    toast.info(t("translation.download.stopped", { count: successCount, remaining: tracksToDownload.length - i }));
+                if (shouldStopDownloadRef.current || shouldPauseDownloadRef.current) {
+                    if (shouldStopDownloadRef.current) {
+                        toast.info(t("translation.download.stopped", { count: successCount, remaining: tracksToDownload.length - i }));
+                    }
                     break;
                 }
                 const { track, originalIndex } = tracksToDownload[i];
@@ -1177,21 +1358,29 @@ export function useDownload() {
                             return newSet;
                         });
                     }
+                    else if (isCooldownMessage(response.error)) {
+                        const remaining = tracksToDownload.length - i - 1;
+                        toast.info(t("translation.migrated.useDownload.serversOnAScheduledBreakPausingDownloads"));
+                        logger.info(`cooldown detected, pausing queue with ${remaining} track(s) remaining`);
+                        shouldPauseDownloadRef.current = true;
+                        break;
+                    }
                     else {
                         errorCount++;
                         logger.error(`failed: ${track.name} - ${displayArtist}`);
                         failedErrorMessages.set(id, translateMessage(response.error || t("translation.download.downloadFailed")));
                         setFailedTracks((prev) => new Set(prev).add(id));
-                        if (isCooldownMessage(response.error)) {
-                            const remaining = tracksToDownload.length - i - 1;
-                            toast.info(t("translation.migrated.useDownload.serversOnAScheduledBreakPausingDownloads"));
-                            logger.info(`cooldown detected, pausing queue with ${remaining} track(s) remaining`);
-                            break;
-                        }
                     }
                 }
                 catch (err) {
                     const message = err instanceof Error ? err.message : String(err);
+                    if (isCooldownMessage(message)) {
+                        const remaining = tracksToDownload.length - i - 1;
+                        toast.info(t("translation.migrated.useDownload.serversOnAScheduledBreakPausingDownloads"));
+                        logger.info(`cooldown detected, pausing queue with ${remaining} track(s) remaining`);
+                        shouldPauseDownloadRef.current = true;
+                        break;
+                    }
                     errorCount++;
                     logger.error(`error: ${track.name} - ${err}`);
                     failedErrorMessages.set(id, translateMessage(message));
@@ -1200,21 +1389,25 @@ export function useDownload() {
                         const { MarkDownloadItemFailed } = await import("../../wailsjs/go/main/App");
                         await MarkDownloadItemFailed(itemID, message);
                     }
-                    if (isCooldownMessage(message)) {
-                        const remaining = tracksToDownload.length - i - 1;
-                        toast.info(t("translation.migrated.useDownload.serversOnAScheduledBreakPausingDownloads"));
-                        logger.info(`cooldown detected, pausing queue with ${remaining} track(s) remaining`);
-                        break;
-                    }
                 }
             }
             const wasStopped = shouldStopDownloadRef.current;
-            try {
-                const { CancelAllQueuedItems } = await import("../../wailsjs/go/main/App");
-                await CancelAllQueuedItems();
+            const wasPaused = shouldPauseDownloadRef.current && !wasStopped;
+            if (wasStopped) {
+                try {
+                    const { CancelAllQueuedItems } = await import("../../wailsjs/go/main/App");
+                    await CancelAllQueuedItems();
+                }
+                catch (err) {
+                    logger.error(`failed to clear queued download items: ${err}`);
+                }
             }
-            catch (err) {
-                logger.error(`failed to clear queued download items: ${err}`);
+            if (wasPaused) {
+                logger.info(`batch paused: ${successCount} downloaded, ${skippedCount} skipped, ${errorCount} failed`);
+                const result = buildQueueExecutionResult(selectedTrackObjects, existingSpotifyIDs, failedErrorMessages, completedSpotifyIDs, false, true);
+                if (!queueItemId)
+                    finishDirectQueueItem(directQueueItemId, result);
+                return result;
             }
             if (settings.autoReplayGainTags && completedSpotifyIDs.size > 0) {
                 const albumPaths = !wasStopped && errorCount === 0 && isAlbum && settings.autoReplayGainMode === "album"
@@ -1459,22 +1652,30 @@ export function useDownload() {
                         }
                         updateQueueTrackResult(directQueueItemId, trackId, response.already_exists ? "skipped" : "done", response.file || undefined);
                     }
+                    else if (isCooldownMessage(response.error)) {
+                        const remaining = tracksToDownload.length - i - 1;
+                        toast.info(t("translation.migrated.useDownload.serversOnAScheduledBreakPausingDownloads"));
+                        logger.info(`cooldown detected, pausing queue with ${remaining} track(s) remaining`);
+                        shouldPauseDownloadRef.current = true;
+                        break;
+                    }
                     else {
                         errorCount++;
                         logger.error(`failed: ${track.name} - ${displayArtist}`);
                         failedErrorMessages.set(trackId, translateMessage(response.error || t("translation.download.downloadFailed")));
                         setFailedTracks((prev) => new Set(prev).add(trackId));
                         updateQueueTrackResult(directQueueItemId, trackId, "failed");
-                        if (isCooldownMessage(response.error)) {
-                            const remaining = tracksToDownload.length - i - 1;
-                            toast.info(t("translation.migrated.useDownload.serversOnAScheduledBreakPausingDownloads"));
-                            logger.info(`cooldown detected, pausing queue with ${remaining} track(s) remaining`);
-                            break;
-                        }
                     }
                 }
                 catch (err) {
                     const message = err instanceof Error ? err.message : String(err);
+                    if (isCooldownMessage(message)) {
+                        const remaining = tracksToDownload.length - i - 1;
+                        toast.info(t("translation.migrated.useDownload.serversOnAScheduledBreakPausingDownloads"));
+                        logger.info(`cooldown detected, pausing queue with ${remaining} track(s) remaining`);
+                        shouldPauseDownloadRef.current = true;
+                        break;
+                    }
                     errorCount++;
                     logger.error(`error: ${track.name} - ${err}`);
                     failedErrorMessages.set(trackId, translateMessage(message));
@@ -1482,22 +1683,18 @@ export function useDownload() {
                     updateQueueTrackResult(directQueueItemId, trackId, "failed");
                     const { MarkDownloadItemFailed } = await import("../../wailsjs/go/main/App");
                     await MarkDownloadItemFailed(itemID, message);
-                    if (isCooldownMessage(message)) {
-                        const remaining = tracksToDownload.length - i - 1;
-                        toast.info(t("translation.migrated.useDownload.serversOnAScheduledBreakPausingDownloads"));
-                        logger.info(`cooldown detected, pausing queue with ${remaining} track(s) remaining`);
-                        break;
-                    }
                 }
             }
             const wasStopped = shouldStopDownloadRef.current;
             const wasPaused = shouldPauseDownloadRef.current && !wasStopped;
-            try {
-                const { CancelAllQueuedItems: CancelQueued } = await import("../../wailsjs/go/main/App");
-                await CancelQueued();
-            }
-            catch (err) {
-                logger.error(`failed to clear queued download items: ${err}`);
+            if (wasStopped) {
+                try {
+                    const { CancelAllQueuedItems: CancelQueued } = await import("../../wailsjs/go/main/App");
+                    await CancelQueued();
+                }
+                catch (err) {
+                    logger.error(`failed to clear queued download items: ${err}`);
+                }
             }
             const resultFilePaths = Object.fromEntries(queueTrackFilePaths);
             if (wasPaused) {

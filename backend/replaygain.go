@@ -456,6 +456,8 @@ func applyReplayGainTags(entry ReplayGainTagWrite) error {
 				return err
 			}
 			replaceReplayGainTag(tags, "R128_ALBUM_GAIN", strconv.Itoa(int(albumGain)))
+		} else {
+			removeReplayGainTag(tags, "R128_ALBUM_GAIN")
 		}
 	} else {
 		removeReplayGainTag(tags, "R128_TRACK_GAIN", "R128_ALBUM_GAIN")
@@ -464,6 +466,8 @@ func applyReplayGainTags(entry ReplayGainTagWrite) error {
 		if entry.AlbumGainDB != nil {
 			replaceReplayGainTag(tags, "REPLAYGAIN_ALBUM_GAIN", formatReplayGainDB(*entry.AlbumGainDB))
 			replaceReplayGainTag(tags, "REPLAYGAIN_ALBUM_PEAK", fmt.Sprintf("%.6f", *entry.AlbumPeak))
+		} else {
+			removeReplayGainTag(tags, "REPLAYGAIN_ALBUM_GAIN", "REPLAYGAIN_ALBUM_PEAK")
 		}
 		extension := strings.ToLower(filepath.Ext(filePath))
 		if extension == ".m4a" || extension == ".mp4" || extension == ".m4b" {

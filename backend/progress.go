@@ -37,6 +37,7 @@ var (
 	currentProgress     float64
 	currentProgressLock sync.RWMutex
 	isDownloading       bool
+	downloadActiveCount int
 	downloadingLock     sync.RWMutex
 	currentSpeed        float64
 	speedLock           sync.RWMutex
@@ -191,15 +192,30 @@ func SetDownloadProgress(mbDownloaded float64) {
 
 func SetDownloading(downloading bool) {
 	downloadingLock.Lock()
-	isDownloading = downloading
+	if downloading {
+		downloadActiveCount++
+	} else if downloadActiveCount > 0 {
+		downloadActiveCount--
+	}
+	isDownloading = downloadActiveCount > 0
+	idle := !isDownloading
 	downloadingLock.Unlock()
 
-	if !downloading {
-
+	if idle {
 		SetDownloadProgress(0)
 		SetDownloadSpeed(0)
 		ClearRateLimitCooldown()
 	}
+}
+
+func ResetDownloading() {
+	downloadingLock.Lock()
+	downloadActiveCount = 0
+	isDownloading = false
+	downloadingLock.Unlock()
+	SetDownloadProgress(0)
+	SetDownloadSpeed(0)
+	ClearRateLimitCooldown()
 }
 
 type ProgressWriter struct {

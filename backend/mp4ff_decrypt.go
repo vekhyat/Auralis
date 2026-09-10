@@ -213,6 +213,7 @@ func decryptMP4FFFileWithKeyMap(r, initR io.Reader, w io.Writer, key []byte, key
 }
 
 func decryptMP4FFSegmentWithSparseSenc(segment *mp4.MediaSegment, decryptInfo mp4.DecryptInfo, key []byte, keysByKID map[string][]byte, strictKIDMode bool) error {
+	decrypted := 0
 	for _, fragment := range segment.Fragments {
 		if !mp4FragmentContainsSenc(fragment) {
 			continue
@@ -220,6 +221,10 @@ func decryptMP4FFSegmentWithSparseSenc(segment *mp4.MediaSegment, decryptInfo mp
 		if err := mp4.DecryptFragmentWithKeys(fragment, decryptInfo, key, keysByKID, strictKIDMode); err != nil {
 			return err
 		}
+		decrypted++
+	}
+	if decrypted == 0 && len(segment.Fragments) > 0 {
+		return fmt.Errorf("encrypted MP4 fragment had no senc box")
 	}
 
 	if len(segment.Sidxs) > 0 {

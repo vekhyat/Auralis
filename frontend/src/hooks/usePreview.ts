@@ -8,6 +8,7 @@ export function usePreview() {
     const [loadingPreview, setLoadingPreview] = useState<string | null>(null);
     const [playingTrack, setPlayingTrack] = useState<string | null>(null);
     const currentPlaybackRef = useRef<PreviewPlayback | null>(null);
+    const previewRequestRef = useRef(0);
     const stopCurrentAudio = () => {
         if (!currentPlaybackRef.current) {
             return;
@@ -17,23 +18,32 @@ export function usePreview() {
     };
     useEffect(() => {
         return () => {
+            previewRequestRef.current += 1;
             stopCurrentAudio();
         };
     }, []);
     const playPreview = async (trackId: string, trackName: string) => {
+        let requestId = 0;
         try {
             const currentAudio = currentPlaybackRef.current?.audio;
             if (playingTrack === trackId && currentAudio) {
+                previewRequestRef.current += 1;
                 stopCurrentAudio();
                 setPlayingTrack(null);
+                setLoadingPreview(null);
                 return;
             }
+            previewRequestRef.current += 1;
+            requestId = previewRequestRef.current;
             if (currentAudio) {
                 stopCurrentAudio();
                 setPlayingTrack(null);
             }
             setLoadingPreview(trackId);
             const previewURL = await GetPreviewURL(trackId);
+            if (requestId !== previewRequestRef.current) {
+                return;
+            }
             if (!previewURL) {
                 toast.error(t("translation.download.previewNotAvailable"), {
                     description: t("translation.download.noPreviewFoundValue1", { value1: trackName }),
@@ -42,19 +52,32 @@ export function usePreview() {
                 return;
             }
             const playback = await createPreviewPlayback(previewURL, getPreviewVolume());
+            if (requestId !== previewRequestRef.current) {
+                playback.destroy();
+                return;
+            }
             const audio = playback.audio;
-            audio.addEventListener("loadeddata", () => {
+            const onLoadedData = () => {
+                if (requestId !== previewRequestRef.current) {
+                    return;
+                }
                 setLoadingPreview(null);
                 setPlayingTrack(trackId);
-            });
-            audio.addEventListener("ended", () => {
-                setPlayingTrack(null);
+            };
+            const onEnded = () => {
+                if (requestId !== previewRequestRef.current) {
+                    return;
+                }
                 if (currentPlaybackRef.current?.audio === audio) {
                     currentPlaybackRef.current.destroy();
                     currentPlaybackRef.current = null;
+                    setPlayingTrack(null);
                 }
-            });
-            audio.addEventListener("error", () => {
+            };
+            const onError = () => {
+                if (requestId !== previewRequestRef.current) {
+                    return;
+                }
                 toast.error(t("translation.download.failedPlayPreview"), {
                     description: t("translation.download.couldNotPlayPreviewValue1", { value1: trackName }),
                 });
@@ -64,11 +87,24 @@ export function usePreview() {
                     currentPlaybackRef.current.destroy();
                     currentPlaybackRef.current = null;
                 }
-            });
+            };
+            audio.addEventListener("loadeddata", onLoadedData);
+            audio.addEventListener("ended", onEnded);
+            audio.addEventListener("error", onError);
+            const innerDestroy = playback.destroy;
+            playback.destroy = () => {
+                audio.removeEventListener("loadeddata", onLoadedData);
+                audio.removeEventListener("ended", onEnded);
+                audio.removeEventListener("error", onError);
+                innerDestroy();
+            };
             currentPlaybackRef.current = playback;
             await audio.play();
         }
         catch (error: unknown) {
+            if (requestId !== 0 && requestId !== previewRequestRef.current) {
+                return;
+            }
             stopCurrentAudio();
             console.error("Preview error:", error);
             toast.error(t("translation.download.previewNotAvailable"), {
@@ -79,8 +115,10 @@ export function usePreview() {
         }
     };
     const stopPreview = () => {
+        previewRequestRef.current += 1;
         stopCurrentAudio();
         setPlayingTrack(null);
+        setLoadingPreview(null);
     };
     return {
         playPreview,

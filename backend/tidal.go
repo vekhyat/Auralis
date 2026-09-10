@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -245,20 +246,89 @@ func (t *TidalDownloader) GetAvailableAPIs() ([]string, error) {
 	return nil, err
 }
 
+const (
+	tidalPublicAPIBase = "https://tidal.com/v1"
+	tidalPublicToken   = "49YxDN9a2aFV6RTG"
+)
+
+func tidalPublicSearchPath(query string, limit int) string {
+	if limit <= 0 {
+		limit = 8
+	}
+	values := url.Values{}
+	values.Set("query", strings.TrimSpace(query))
+	values.Set("limit", fmt.Sprintf("%d", limit))
+	values.Set("offset", "0")
+	values.Set("countryCode", "US")
+	values.Set("locale", "en_US")
+	values.Set("deviceType", "BROWSER")
+	return tidalPublicAPIBase + "/search/tracks?" + values.Encode()
+}
+
+func lookupTidalURLByISRC(isrc string) (string, error) {
+	isrc = strings.TrimSpace(isrc)
+	if isrc == "" {
+		return "", fmt.Errorf("isrc is empty")
+	}
+	req, err := http.NewRequest(http.MethodGet, tidalPublicSearchPath(isrc, 8), nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", DefaultDownloaderUserAgent)
+	req.Header.Set("x-tidal-token", tidalPublicToken)
+
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("tidal search returned HTTP %d", resp.StatusCode)
+	}
+	var parsed struct {
+		Items []struct {
+			ID   json.Number `json:"id"`
+			ISRC string      `json:"isrc"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 256*1024)).Decode(&parsed); err != nil {
+		return "", err
+	}
+	want := strings.ToUpper(isrc)
+	for _, item := range parsed.Items {
+		if strings.ToUpper(strings.TrimSpace(item.ISRC)) != want {
+			continue
+		}
+		id := strings.TrimSpace(item.ID.String())
+		if id == "" {
+			continue
+		}
+		return "https://listen.tidal.com/track/" + id, nil
+	}
+	return "", fmt.Errorf("tidal search returned no tracks for %s", isrc)
+}
+
 func (t *TidalDownloader) GetTidalURLFromSpotify(spotifyTrackID string) (string, error) {
 	fmt.Println("Getting Tidal URL...")
 	client := NewSongLinkClient()
 	urls, err := client.GetAllURLsFromSpotify(spotifyTrackID, "")
+	if urls != nil && strings.TrimSpace(urls.TidalURL) != "" {
+		fmt.Printf("Found Tidal URL: %s\n", urls.TidalURL)
+		return urls.TidalURL, nil
+	}
+	if urls != nil && strings.TrimSpace(urls.ISRC) != "" {
+		tidalURL, searchErr := lookupTidalURLByISRC(urls.ISRC)
+		if searchErr == nil {
+			fmt.Printf("Found Tidal URL via ISRC search: %s\n", tidalURL)
+			return tidalURL, nil
+		}
+		fmt.Printf("Tidal ISRC search failed: %v\n", searchErr)
+	}
 	if err != nil {
 		return "", fmt.Errorf("failed to get Tidal URL: %w", err)
 	}
-
-	tidalURL := urls.TidalURL
-	if tidalURL == "" {
-		return "", fmt.Errorf("tidal link not found")
-	}
-	fmt.Printf("Found Tidal URL: %s\n", tidalURL)
-	return tidalURL, nil
+	return "", fmt.Errorf("tidal link not found")
 }
 
 func (t *TidalDownloader) GetTrackIDFromURL(tidalURL string) (int64, error) {
@@ -344,9 +414,14 @@ func (t *TidalDownloader) GetDownloadURL(trackID int64, quality string) (string,
 	}
 
 	var v2Response TidalAPIResponseV2
-	if err := json.Unmarshal(body, &v2Response); err == nil && v2Response.Data.Manifest != "" {
-		fmt.Println("Tidal manifest found (v2 API)")
-		return "MANIFEST:" + v2Response.Data.Manifest, nil
+	if err := json.Unmarshal(body, &v2Response); err == nil {
+		if strings.EqualFold(v2Response.Data.AssetPresentation, "PREVIEW") {
+			return "", fmt.Errorf("tidal returned a preview asset")
+		}
+		if v2Response.Data.Manifest != "" {
+			fmt.Println("Tidal manifest found (v2 API)")
+			return "MANIFEST:" + v2Response.Data.Manifest, nil
+		}
 	}
 
 	var apiResponses []TidalAPIResponse
@@ -434,11 +509,19 @@ func (t *TidalDownloader) DownloadFromManifest(manifestB64, outputPath string, q
 	}
 
 	doRequest := func(url string) (*http.Response, error) {
+		if err := CheckDownloadCancelled(); err != nil {
+			return nil, err
+		}
 		req, err := NewRequestWithDefaultHeaders(http.MethodGet, url, nil)
 		if err != nil {
 			return nil, err
 		}
-		return client.Do(req)
+		req = req.WithContext(ActiveDownloadContext())
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, WrapDownloadCancelled(err)
+		}
+		return resp, nil
 	}
 
 	if directURL != "" && (strings.Contains(strings.ToLower(mimeType), "flac") || mimeType == "") {
@@ -528,20 +611,25 @@ func (t *TidalDownloader) DownloadFromManifest(manifestB64, outputPath string, q
 			os.Remove(tempPath)
 			return fmt.Errorf("init segment download failed with status %d", resp.StatusCode)
 		}
-		_, err = io.Copy(out, resp.Body)
+		pw := NewProgressWriter(out)
+		_, err = io.Copy(pw, resp.Body)
 		resp.Body.Close()
 		if err != nil {
 			out.Close()
 			os.Remove(tempPath)
-			return fmt.Errorf("failed to write init segment: %w", err)
+			return fmt.Errorf("failed to write init segment: %w", WrapDownloadCancelled(err))
 		}
 		fmt.Println("OK")
 
 		totalSegments := len(mediaURLs)
-		var totalBytes int64
-		lastTime := time.Now()
+		var lastTime = time.Now()
 		var lastBytes int64
 		for i, mediaURL := range mediaURLs {
+			if err := CheckDownloadCancelled(); err != nil {
+				out.Close()
+				os.Remove(tempPath)
+				return err
+			}
 			resp, err := doRequest(mediaURL)
 			if err != nil {
 				out.Close()
@@ -554,14 +642,14 @@ func (t *TidalDownloader) DownloadFromManifest(manifestB64, outputPath string, q
 				os.Remove(tempPath)
 				return fmt.Errorf("segment %d download failed with status %d", i+1, resp.StatusCode)
 			}
-			n, err := io.Copy(out, resp.Body)
-			totalBytes += n
+			_, err = io.Copy(pw, resp.Body)
 			resp.Body.Close()
 			if err != nil {
 				out.Close()
 				os.Remove(tempPath)
-				return fmt.Errorf("failed to write segment %d: %w", i+1, err)
+				return fmt.Errorf("failed to write segment %d: %w", i+1, WrapDownloadCancelled(err))
 			}
+			totalBytes := pw.GetTotal()
 
 			mbDownloaded := float64(totalBytes) / (1024 * 1024)
 			now := time.Now()
@@ -621,12 +709,9 @@ func (t *TidalDownloader) DownloadFromManifest(manifestB64, outputPath string, q
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		m4aPath := outputPath
-		if !isAtmos {
-			m4aPath = strings.TrimSuffix(outputPath, ".flac") + ".m4a"
-		}
-		os.Rename(tempPath, m4aPath)
-		return fmt.Errorf("ffmpeg conversion failed (M4A saved as %s): %w - %s", m4aPath, err, stderr.String())
+		_ = os.Remove(tempPath)
+		cleanupTidalDownloadArtifacts(outputPath)
+		return fmt.Errorf("ffmpeg conversion failed: %w - %s", err, stderr.String())
 	}
 
 	os.Remove(tempPath)
@@ -709,7 +794,15 @@ func (t *TidalDownloader) DownloadByURL(tidalURL, outputDir, quality, filenameFo
 		lastErr = candidateErr
 	}
 	if lastErr != nil {
-		return outputFilename, fmt.Errorf("all requested Tidal qualities failed: %w", lastErr)
+		fmt.Printf("Community/Zarz Tidal failed, trying Antra mirror: %v\n", lastErr)
+		if antraPath, antraErr := antraStreamToFile("tidal", fmt.Sprintf("%d", trackID), outputFilename, antraQualityQuery("tidal", quality)); antraErr == nil {
+			outputFilename = antraPath
+			lastErr = nil
+			t.SourceURL = fmt.Sprintf("https://listen.tidal.com/track/%d", trackID)
+		} else {
+			fmt.Printf("Antra Tidal mirror failed: %v\n", antraErr)
+			return outputFilename, fmt.Errorf("all requested Tidal qualities failed: %w", lastErr)
+		}
 	}
 
 	finalizeTidalDownload(outputFilename, spotifyTrackName, spotifyArtistName, spotifyAlbumName, spotifyAlbumArtist, spotifyReleaseDate, spotifyCoverURL, embedMaxQualityCover, spotifyTrackNumber, spotifyDiscNumber, spotifyTotalTracks, spotifyTotalDiscs, spotifyCopyright, spotifyPublisher, spotifyComposer, metadataSeparator, isrcOverride, spotifyURL, useSingleGenre, embedGenre)
@@ -1010,6 +1103,10 @@ func cleanupTidalDownloadArtifacts(outputPath string) {
 
 	_ = os.Remove(outputPath)
 	_ = os.Remove(outputPath + ".m4a.tmp")
+	if strings.HasSuffix(strings.ToLower(outputPath), ".flac") {
+		_ = os.Remove(strings.TrimSuffix(outputPath, ".flac") + ".m4a")
+		_ = os.Remove(strings.TrimSuffix(outputPath, ".FLAC") + ".m4a")
+	}
 }
 
 func isTidalHiResQuality(quality string) bool {

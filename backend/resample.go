@@ -250,6 +250,15 @@ func ResampleAudio(req ResampleRequest) ([]ResampleResult, error) {
 			outputFile := filepath.Join(outputDir, baseName+".flac")
 			result.OutputFile = outputFile
 
+			if _, existsErr := os.Stat(outputFile); existsErr == nil {
+				result.Error = "output file already exists"
+				result.Success = false
+				mu.Lock()
+				results[idx] = result
+				mu.Unlock()
+				return
+			}
+
 			args := []string{
 				"-i", inputFile,
 				"-y",

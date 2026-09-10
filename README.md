@@ -1,6 +1,6 @@
 # Auralis
 
-Desktop app for fetching lossless audio from streaming links. Paste a Spotify URL or search, then download from Tidal, Qobuz, or Amazon Music.
+Desktop app for fetching lossless audio from streaming links. Paste a Spotify URL or search, then download from Tidal, Qobuz, Amazon Music, Deezer, Apple Music, or JioSaavn.
 
 Based on MIT-licensed [SpotiFLAC](https://github.com/spotbye/SpotiFLAC) by afkarxyz. See [LICENSE](LICENSE).
 

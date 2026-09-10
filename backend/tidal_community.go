@@ -16,7 +16,7 @@ type tidalCommunityResponse struct {
 	Lyric   string `json:"lyric"`
 }
 
-var tidalCommunityClient = &http.Client{Timeout: 12 * time.Second}
+var tidalCommunityClient = NewSignedHTTPClient(12 * time.Second)
 
 func mapTidalQualityToCommunity(quality string) string {
 	switch strings.ToUpper(strings.TrimSpace(quality)) {

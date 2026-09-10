@@ -333,7 +333,7 @@ export function AudioConverterPage() {
             setIsDragging(false);
         }} style={{ "--wails-drop-target": "drop" } as React.CSSProperties}>
             {files.length === 0 ? (<>
-                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted">
+                <div className="mb-4 flex size-14 items-center justify-center border border-border bg-muted/50">
                     <Upload className="h-8 w-8 text-primary"/>
                 </div>
                 <p className="text-sm text-muted-foreground mb-4 text-center">

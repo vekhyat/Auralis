@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -71,13 +72,46 @@ type qobuzPublicSearchResponse struct {
 	} `json:"tracks"`
 }
 
-var qobuzStreamingURLPattern = regexp.MustCompile(`https?://[^\s"'<>\\)]+`)
+var (
+	qobuzStreamingURLPattern = regexp.MustCompile(`https?://[^\s"'<>\\)]+`)
+	qobuzTrackURLPattern     = regexp.MustCompile(`(?i)/(?:track|tracks)/(\d+)(?:[/?#]|$)`)
+)
+
+const qobuzZarzCatalogAppID = "798273057"
+
+func qobuzZarzSearchPath(objectPath, query string, limit int) string {
+	if limit <= 0 {
+		limit = 10
+	}
+	values := url.Values{}
+	values.Set("query", strings.TrimSpace(query))
+	values.Set("limit", strconv.Itoa(limit))
+	values.Set("app_id", qobuzZarzCatalogAppID)
+	return "/qbz/" + strings.TrimLeft(objectPath, "/") + "?" + values.Encode()
+}
+
+func doQobuzCatalogSearch(query string, limit int) (*qobuzPublicSearchResponse, error) {
+	var parsed qobuzPublicSearchResponse
+	body, zarzErr := zarzSignedJSON(zarzAppVersionForProvider("qbz"), http.MethodGet, qobuzZarzSearchPath("track/search", query, limit), nil, nil)
+	if zarzErr == nil {
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			return nil, fmt.Errorf("invalid zarz qobuz search response: %w", err)
+		}
+		return &parsed, nil
+	}
+
+	if err := doQobuzSignedJSONRequest("track/search", url.Values{
+		"query": {strings.TrimSpace(query)},
+		"limit": {strconv.Itoa(limit)},
+	}, &parsed); err != nil {
+		return nil, fmt.Errorf("zarz qobuz search: %v; official: %w", zarzErr, err)
+	}
+	return &parsed, nil
+}
 
 func NewQobuzDownloader() *QobuzDownloader {
 	return &QobuzDownloader{
-		client: &http.Client{
-			Timeout: 60 * time.Second,
-		},
+		client: NewSignedHTTPClient(60 * time.Second),
 	}
 }
 
@@ -226,6 +260,80 @@ func qobuzSearchQueries(isrc, spotifyTrackName, spotifyArtistName, spotifyAlbumN
 		add(titles[len(titles)-1], artist, album)
 	}
 	return queries
+}
+
+func parseQobuzTrackID(raw string) (int64, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, fmt.Errorf("qobuz url is empty")
+	}
+	match := qobuzTrackURLPattern.FindStringSubmatch(raw)
+	if len(match) < 2 {
+		return 0, fmt.Errorf("no qobuz track id in url")
+	}
+	id, err := strconv.ParseInt(match[1], 10, 64)
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("invalid qobuz track id")
+	}
+	return id, nil
+}
+
+func qobuzTrackFromID(id int64, title, artist, album, isrc string) *QobuzTrack {
+	track := &QobuzTrack{
+		ID:    id,
+		Title: strings.TrimSpace(title),
+		ISRC:  strings.TrimSpace(isrc),
+	}
+	track.Performer.Name = strings.TrimSpace(artist)
+	track.Album.Title = strings.TrimSpace(album)
+	track.Album.Artist.Name = strings.TrimSpace(artist)
+	return track
+}
+
+func lookupQobuzTrackFromExternalLinks(isrc, spotifyURL string) (int64, error) {
+	if id, err := parseQobuzTrackID(spotifyURL); err == nil {
+		return id, nil
+	}
+	if spotifyID, err := extractSpotifyTrackID(spotifyURL); err == nil && spotifyID != "" {
+		if resolved, resolveErr := lookupZarzResolveLinks(spotifyID); resolveErr == nil {
+			if id, parseErr := parseQobuzTrackID(resolved.QobuzURL); parseErr == nil {
+				fmt.Printf("Found Qobuz track via Zarz resolve: %d\n", id)
+				return id, nil
+			}
+		}
+	}
+
+	client := NewSongLinkClient()
+	pages := make([]string, 0, 2)
+	if trimmedISRC := strings.TrimSpace(isrc); trimmedISRC != "" && !strings.HasPrefix(trimmedISRC, "qobuz_") {
+		pages = append(pages, "https://song.link/isrc/"+url.PathEscape(strings.ToUpper(trimmedISRC)))
+	}
+	if spotifyID, err := extractSpotifyTrackID(spotifyURL); err == nil && spotifyID != "" {
+		pages = append(pages, "https://song.link/s/"+url.PathEscape(spotifyID))
+	}
+
+	var lastErr error
+	for _, page := range pages {
+		result, err := client.scrapeSongLinkPage(page, "")
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if result == nil {
+			continue
+		}
+		id, err := parseQobuzTrackID(result.QobuzURL)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		fmt.Printf("Found Qobuz track via song.link: %d\n", id)
+		return id, nil
+	}
+	if lastErr != nil {
+		return 0, lastErr
+	}
+	return 0, fmt.Errorf("qobuz track id not found via external links")
 }
 
 func qobuzTrackDisplayArtist(track QobuzTrack) string {
@@ -412,7 +520,7 @@ func extractQobuzStreamingURL(body []byte) string {
 	return ""
 }
 
-func (q *QobuzDownloader) searchByISRC(isrc string, spotifyTrackName string, spotifyArtistName string, spotifyAlbumName string) (*QobuzTrack, error) {
+func (q *QobuzDownloader) searchByISRC(isrc string, spotifyTrackName string, spotifyArtistName string, spotifyAlbumName string, spotifyURL string) (*QobuzTrack, error) {
 	if strings.HasPrefix(isrc, "qobuz_") {
 		trackID := strings.TrimSpace(strings.TrimPrefix(isrc, "qobuz_"))
 		resp, err := doQobuzSignedRequest(http.MethodGet, "track/get", url.Values{"track_id": {trackID}}, q.client)
@@ -442,16 +550,13 @@ func (q *QobuzDownloader) searchByISRC(isrc string, spotifyTrackName string, spo
 			continue
 		}
 
-		var searchResp qobuzPublicSearchResponse
-		if err := doQobuzSignedJSONRequest("track/search", url.Values{
-			"query": {strings.TrimSpace(query)},
-			"limit": {"10"},
-		}, &searchResp); err != nil {
-			lastErr = fmt.Errorf("failed to search Qobuz public API: %w", err)
+		searchResp, err := doQobuzCatalogSearch(query, 10)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to search Qobuz catalog: %w", err)
 			continue
 		}
 
-		if searchResp.Tracks.Total == 0 || len(searchResp.Tracks.Items) == 0 {
+		if searchResp == nil || searchResp.Tracks.Total == 0 || len(searchResp.Tracks.Items) == 0 {
 			lastErr = fmt.Errorf("track not found for query: %s", query)
 			continue
 		}
@@ -468,6 +573,11 @@ func (q *QobuzDownloader) searchByISRC(isrc string, spotifyTrackName string, spo
 
 		selected := searchResp.Tracks.Items[bestIndex]
 		return &selected, nil
+	}
+
+	if id, lookupErr := lookupQobuzTrackFromExternalLinks(isrc, spotifyURL); lookupErr == nil {
+		fmt.Println("Official Qobuz catalog search returned no matches; using song.link Qobuz track id")
+		return qobuzTrackFromID(id, spotifyTrackName, spotifyArtistName, spotifyAlbumName, isrc), nil
 	}
 
 	if lastErr == nil {
@@ -567,7 +677,7 @@ func (q *QobuzDownloader) GetDownloadURL(trackID int64, quality string, allowFal
 	return "", fmt.Errorf("all APIs and fallbacks failed. Last error: %v", err)
 }
 
-func (q *QobuzDownloader) DownloadFile(url, filepath string) error {
+func (q *QobuzDownloader) DownloadFile(url, filepath string) (err error) {
 	fmt.Println("Starting file download...")
 
 	downloadClient := &http.Client{
@@ -578,10 +688,11 @@ func (q *QobuzDownloader) DownloadFile(url, filepath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create download request: %w", err)
 	}
+	req = req.WithContext(ActiveDownloadContext())
 
 	resp, err := downloadClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to download file: %w", err)
+		return fmt.Errorf("failed to download file: %w", WrapDownloadCancelled(err))
 	}
 	defer resp.Body.Close()
 
@@ -594,14 +705,19 @@ func (q *QobuzDownloader) DownloadFile(url, filepath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create file: %w", err)
 	}
-	defer out.Close()
+	defer func() {
+		out.Close()
+		if err != nil {
+			os.Remove(filepath)
+		}
+	}()
 
 	fmt.Println("Downloading...")
 
 	pw := NewProgressWriter(out)
 	_, err = io.Copy(pw, resp.Body)
 	if err != nil {
-		return fmt.Errorf("failed to write file: %w", err)
+		return fmt.Errorf("failed to write file: %w", WrapDownloadCancelled(err))
 	}
 
 	fmt.Printf("\rDownloaded: %.2f MB (Complete)\n", float64(pw.GetTotal())/(1024*1024))
@@ -744,7 +860,7 @@ func (q *QobuzDownloader) DownloadTrackWithISRC(isrc, outputDir, quality, filena
 		}
 	}
 
-	track, err := q.searchByISRC(isrc, spotifyTrackName, spotifyArtistName, spotifyAlbumName)
+	track, err := q.searchByISRC(isrc, spotifyTrackName, spotifyArtistName, spotifyAlbumName, spotifyURL)
 	if err != nil {
 		return "", err
 	}
@@ -777,19 +893,26 @@ func (q *QobuzDownloader) DownloadTrackWithISRC(isrc, outputDir, quality, filena
 
 	fmt.Println("Getting download URL...")
 	downloadURL, err := q.GetDownloadURL(track.ID, quality, allowFallback)
+	useAntraStream := false
 	if err != nil {
-		return "", fmt.Errorf("failed to get download URL: %w", err)
+		if IsDownloadCancelledError(err) {
+			return "", err
+		}
+		fmt.Printf("Qobuz community/Zarz failed, trying Antra mirror: %v\n", err)
+		useAntraStream = true
 	}
 
-	if downloadURL == "" {
+	if !useAntraStream && downloadURL == "" {
 		return "", fmt.Errorf("received empty download URL")
 	}
 
-	urlPreview := downloadURL
-	if len(downloadURL) > 60 {
-		urlPreview = downloadURL[:60] + "..."
+	if !useAntraStream {
+		urlPreview := downloadURL
+		if len(downloadURL) > 60 {
+			urlPreview = downloadURL[:60] + "..."
+		}
+		fmt.Printf("Download URL obtained: %s\n", urlPreview)
 	}
-	fmt.Printf("Download URL obtained: %s\n", urlPreview)
 
 	safeArtist := sanitizeFilename(artists)
 	safeAlbumArtist := sanitizeFilename(spotifyAlbumArtist)
@@ -811,8 +934,19 @@ func (q *QobuzDownloader) DownloadTrackWithISRC(isrc, outputDir, quality, filena
 	}
 
 	fmt.Printf("Downloading FLAC file to: %s\n", filepath)
-	if err := q.DownloadFile(downloadURL, filepath); err != nil {
-		return "", fmt.Errorf("failed to download file: %w", err)
+	if useAntraStream {
+		antraPath, antraErr := antraStreamToFile("qobuz", fmt.Sprintf("%d", track.ID), filepath, antraQualityQuery("qobuz", quality))
+		if antraErr != nil {
+			return "", fmt.Errorf("failed to get download URL: %w", err)
+		}
+		filepath = antraPath
+	} else if err := q.DownloadFile(downloadURL, filepath); err != nil {
+		fmt.Printf("Qobuz file download failed, trying Antra mirror: %v\n", err)
+		antraPath, antraErr := antraStreamToFile("qobuz", fmt.Sprintf("%d", track.ID), filepath, antraQualityQuery("qobuz", quality))
+		if antraErr != nil {
+			return "", fmt.Errorf("failed to download file: %w", err)
+		}
+		filepath = antraPath
 	}
 
 	fmt.Printf("Downloaded: %s\n", filepath)

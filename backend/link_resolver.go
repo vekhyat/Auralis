@@ -10,6 +10,7 @@ type resolvedTrackLinks struct {
 	TidalURL  string
 	AmazonURL string
 	DeezerURL string
+	QobuzURL  string
 	ISRC      string
 }
 
@@ -27,6 +28,12 @@ func (s *SongLinkClient) resolveSpotifyTrackLinks(spotifyTrackID string, region 
 		attempts = append(attempts, fmt.Sprintf("spotify isrc: %v", err))
 	} else {
 		links.ISRC = isrc
+	}
+
+	if added, zarzErr := s.resolveLinksViaZarz(links, spotifyTrackID); zarzErr != nil {
+		attempts = append(attempts, fmt.Sprintf("zarz resolve: %v", zarzErr))
+	} else if added {
+		fmt.Println("Using Zarz resolve for Amazon/Qobuz links")
 	}
 
 	resolvers := orderedLinkResolvers()

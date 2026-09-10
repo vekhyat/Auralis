@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { TagPlusIcon } from "@/components/ui/tag-plus";
+import { Tags } from "lucide-react";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { getSettings } from "@/lib/settings";
 import { EnrichAudioFiles, GetDefaults, InspectEnrichFile, InspectEnrichFiles, ListDirectoryFiles, SelectFolder } from "../../wailsjs/go/main/App";
@@ -231,7 +231,7 @@ export function EnrichPage() {
             setPreviewLoading(false);
         }
     };
-    const statusIcon = (status: EnrichResult["status"]) => status === "enriched" ? <CircleCheckBig className="size-4 text-emerald-500"/> : status === "conflict" ? <AlertTriangle className="size-4 text-amber-500"/> : <XCircle className="size-4 text-destructive"/>;
+    const statusIcon = (status: EnrichResult["status"]) => status === "enriched" ? <CircleCheckBig className="size-4"/> : status === "conflict" ? <AlertTriangle className="size-4 text-muted-foreground"/> : <XCircle className="size-4 text-destructive"/>;
     const unavailableReason = (preview: MetadataPreview) => {
         if (preview.inspection_error)
             return t("translation.enrich.metadataUnreadable");
@@ -260,11 +260,11 @@ export function EnrichPage() {
           <div className={`flex items-center gap-2 rounded px-2 py-1.5 hover:bg-muted/50 ${node.is_dir || eligible ? "cursor-pointer" : "cursor-default"} ${!node.is_dir && eligible && selectedFiles.has(node.path) ? "bg-primary/10" : ""}`} style={{ paddingLeft: `${depth * 16 + 8}px` }} onClick={activate} onKeyDown={(event) => handleTreeKeyDown(event, activate)} role={node.is_dir || eligible ? "button" : undefined} tabIndex={node.is_dir || eligible ? 0 : undefined} aria-expanded={node.is_dir ? !!node.expanded : undefined} aria-pressed={!node.is_dir && eligible ? selectedFiles.has(node.path) : undefined}>
             <Checkbox checked={node.is_dir ? folderState(node) : eligible && selectedFiles.has(node.path)} disabled={!eligible} onCheckedChange={() => node.is_dir ? toggleFolder(node) : toggleFile(node.path)} onClick={(event) => event.stopPropagation()} className="shrink-0"/>
             {node.is_dir && (node.expanded ? <ChevronDown className="size-4 shrink-0 text-muted-foreground"/> : <ChevronRight className="size-4 shrink-0 text-muted-foreground"/>)}
-            {node.is_dir ? <Folder className="size-4 shrink-0 text-yellow-500"/> : result ? statusIcon(result.status) : identity && !eligible ? <AlertTriangle className="size-4 shrink-0 text-amber-500"/> : <FileMusic className="size-4 shrink-0 text-primary"/>}
+            {node.is_dir ? <Folder className="size-4 shrink-0 text-muted-foreground"/> : result ? statusIcon(result.status) : identity && !eligible ? <AlertTriangle className="size-4 shrink-0 text-muted-foreground"/> : <FileMusic className="size-4 shrink-0 text-primary"/>}
             <span className={`min-w-0 flex-1 truncate text-sm ${!node.is_dir && !eligible ? "text-muted-foreground" : ""}`}>{node.name}{node.is_dir && <span className="ml-1 text-muted-foreground">({scanCompleted && <>{eligibleFolderFiles(node).length}/</>}{files.length})</span>}</span>
             {result?.source && <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase">{result.source}</span>}
-            {!node.is_dir && identity && !eligible && <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">{t("translation.enrich.unavailable")}</span>}
-            {!node.is_dir && missing !== null && !identity?.inspection_error && <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${missing > 0 ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"}`}>{missing} {t("translation.enrich.missing")}</span>}
+            {!node.is_dir && identity && !eligible && <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{t("translation.enrich.unavailable")}</span>}
+            {!node.is_dir && missing !== null && !identity?.inspection_error && <span className={`shrink-0 font-mono text-[10px] uppercase tracking-wider ${missing > 0 ? "text-muted-foreground" : "text-foreground"}`}>{missing} {t("translation.enrich.missing")}</span>}
             {!node.is_dir && <><span className="shrink-0 text-xs text-muted-foreground">{formatFileSize(node.size)}</span>{scanCompleted && <Tooltip><TooltipTrigger asChild><button className="shrink-0 rounded p-1 hover:bg-muted" onClick={(event) => { event.stopPropagation(); void openPreview(node.path); }}><Info className="size-3.5 text-muted-foreground"/></button></TooltipTrigger><TooltipContent>{t("translation.fileManager.viewMetadata")}</TooltipContent></Tooltip>}</>}
           </div>
           {!node.is_dir && result?.message && <p className="truncate pb-1 pl-14 text-xs text-muted-foreground">{translateMessage(result.message)}</p>}
@@ -332,14 +332,14 @@ export function EnrichPage() {
       </div>
       <div className="flex shrink-0 justify-center gap-2">
         <Button variant={scanCompleted ? "outline" : "default"} className="px-4" onClick={scanFiles} disabled={loading || scanning || processing || audioFiles.length === 0}><ScanText className={`size-4 ${scanning ? "animate-pulse" : ""}`}/>{scanning ? t("translation.enrich.scanning") : t("translation.enrich.scan")}</Button>
-        {scanCompleted && <Button className="px-4" onClick={enrich} disabled={processing || selectedEligibleFiles.length === 0}>{processing ? <Spinner className="size-4"/> : <TagPlusIcon size={16} animated={false}/>}{processing ? t("translation.enrich.processing") : t("translation.enrich.start")}</Button>}
+        {scanCompleted && <Button className="px-4" onClick={enrich} disabled={processing || selectedEligibleFiles.length === 0}>{processing ? <Spinner className="size-4"/> : <Tags className="size-4"/>}{processing ? t("translation.enrich.processing") : t("translation.enrich.start")}</Button>}
       </div>
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="max-w-md [&>button]:hidden">
-          <DialogHeader><DialogTitle className="flex items-center gap-2">{t("translation.enrich.metadataPreview")}{preview && missingCount > 0 && <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">{missingCount} {t("translation.enrich.missing")}</span>}</DialogTitle><DialogDescription className="break-all">{previewFile.split(/[/\\]/).pop()}</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle className="flex items-center gap-2">{t("translation.enrich.metadataPreview")}{preview && missingCount > 0 && <span className="font-mono text-xs tabular-nums text-muted-foreground">{missingCount} {t("translation.enrich.missing")}</span>}</DialogTitle><DialogDescription className="break-all">{previewFile.split(/[/\\]/).pop()}</DialogDescription></DialogHeader>
           {previewLoading ? <div className="flex justify-center py-10"><Spinner className="size-6"/></div> : preview && <>
-            {!canEnrich(preview, priority, allowFallback) && <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300"><AlertTriangle className="mt-0.5 size-4 shrink-0"/><span>{unavailableReason(preview)}</span></div>}
-            <div className="max-h-[55vh] space-y-3 overflow-y-auto py-2 custom-scrollbar">{previewRows.map(([label, value]) => <div key={label} className="grid grid-cols-[100px_minmax(0,1fr)] gap-2 text-sm"><span className="text-muted-foreground">{label}</span>{value ? <span className="break-words">{value}</span> : <span className="w-fit rounded-full bg-amber-500/15 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-300">{t("translation.enrich.missing")}</span>}</div>)}</div>
+            {!canEnrich(preview, priority, allowFallback) && <div className="flex items-start gap-2 border border-border bg-muted/40 p-3 text-sm text-foreground"><AlertTriangle className="mt-0.5 size-4 shrink-0"/><span>{unavailableReason(preview)}</span></div>}
+            <div className="max-h-[55vh] space-y-3 overflow-y-auto py-2 custom-scrollbar">{previewRows.map(([label, value]) => <div key={label} className="grid grid-cols-[100px_minmax(0,1fr)] gap-2 text-sm"><span className="text-muted-foreground">{label}</span>{value ? <span className="break-words">{value}</span> : <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">{t("translation.enrich.missing")}</span>}</div>)}</div>
           </>}
           <DialogFooter><Button onClick={() => setPreviewOpen(false)}>{t("translation.common.close")}</Button></DialogFooter>
         </DialogContent>

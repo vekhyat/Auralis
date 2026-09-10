@@ -15,21 +15,25 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	zarzBaseURL           = "https://api.zarz.moe/v2"
 	zarzSchemeLabel       = "ZARZ-HMAC-V1"
 	zarzHeaderPrefix      = "X-Zarz-"
 	zarzPlatform          = "extension"
 	zarzTimeWindowSeconds = 300
 	zarzSessionSkew       = 5 * time.Minute
+	zarzRefreshSkew       = time.Hour
 	zarzVerifyTimeout     = 5 * time.Minute
 	zarzMaxProviderTries  = 4
 )
+
+// Var (not const) so tests can point the client at a local gateway stub.
+var zarzBaseURL = "https://api.zarz.moe/v2"
 
 type zarzSessionRecord struct {
 	InstallID     string `json:"install_id"`
@@ -91,7 +95,11 @@ func (e *zarzAPIError) shouldRetry() bool {
 }
 
 func parseZarzAPIError(status int, body []byte) *zarzAPIError {
-	err := &zarzAPIError{Status: status, Body: body}
+	return parseZarzAPIErrorWithRetryAfter(status, body, 0)
+}
+
+func parseZarzAPIErrorWithRetryAfter(status int, body []byte, retryAfterSeconds int) *zarzAPIError {
+	err := &zarzAPIError{Status: status, Body: body, RetryAfterSeconds: retryAfterSeconds}
 	var parsed struct {
 		Error             string `json:"error"`
 		Code              string `json:"code"`
@@ -106,9 +114,37 @@ func parseZarzAPIError(status int, body []byte) *zarzAPIError {
 		err.Origin = parsed.Origin
 		err.Retryable = parsed.Retryable
 		err.RetryMode = parsed.RetryMode
-		err.RetryAfterSeconds = parsed.RetryAfterSeconds
+		if parsed.RetryAfterSeconds > 0 {
+			err.RetryAfterSeconds = parsed.RetryAfterSeconds
+		}
 	}
 	return err
+}
+
+// zarzRetryAfterHeaderSeconds parses a numeric or HTTP-date Retry-After
+// header into seconds, mirroring the gateway contract that also exposes
+// retry_after_seconds in error bodies.
+func zarzRetryAfterHeaderSeconds(header http.Header) int {
+	if header == nil {
+		return 0
+	}
+	value := strings.TrimSpace(header.Get("Retry-After"))
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil {
+		if seconds > 0 {
+			return seconds
+		}
+		return 0
+	}
+	if retryAt, err := http.ParseTime(value); err == nil {
+		seconds := int(time.Until(retryAt).Seconds())
+		if seconds > 0 {
+			return seconds
+		}
+	}
+	return 0
 }
 
 func zarzAppVersionForProvider(provider string) string {
@@ -125,7 +161,7 @@ func zarzAppVersionForProvider(provider string) string {
 }
 
 func zarzUserAgentFor(appVersion string) string {
-	return "SpotiFLAC-Mobile/" + appVersion
+	return "Auralis/" + appVersion
 }
 
 type zarzSessionExchange struct {
@@ -141,7 +177,7 @@ type zarzSessionExchange struct {
 var (
 	zarzSessionMu sync.Mutex
 	zarzStoreMem  *zarzSessionStore
-	zarzHTTP      = &http.Client{Timeout: 60 * time.Second}
+	zarzHTTP      = NewSignedHTTPClient(60 * time.Second)
 )
 
 func zarzSessionPath() (string, error) {
@@ -250,7 +286,7 @@ func loadZarzStore() (*zarzSessionStore, error) {
 			return nil, err
 		}
 		if migrated {
-			fmt.Println("Imported Zarz session from existing SpotiFLAC data folder")
+			fmt.Println("Imported Zarz session from legacy .spotiflac profile")
 		}
 	}
 	return store, nil
@@ -277,7 +313,7 @@ func saveZarzStore(store *zarzSessionStore) error {
 		_ = os.Remove(tempPath)
 		return err
 	}
-	return os.Chmod(path, 0600)
+	return restrictPrivateFile(path)
 }
 
 func zarzSessionValid(record *zarzSessionRecord) bool {
@@ -298,6 +334,22 @@ func ensureZarzSession(appVersion string) (*zarzSessionRecord, error) {
 	record.InstallID = store.InstallID
 	record.AppVersion = appVersion
 	if zarzSessionValid(&record) {
+		if zarzRefreshDue(&record) {
+			if refreshed, refreshErr := refreshZarzSessionLocked(&record, appVersion); refreshErr == nil && zarzSessionValid(refreshed) {
+				refreshed.InstallID = store.InstallID
+				refreshed.AppVersion = appVersion
+				store.Sessions[appVersion] = *refreshed
+				if err := saveZarzStore(store); err != nil {
+					return nil, err
+				}
+				if refreshed.ExpiresAt != "" {
+					fmt.Printf("Zarz session refreshed for %s until %s\n", appVersion, refreshed.ExpiresAt)
+				}
+				return refreshed, nil
+			} else if refreshErr != nil {
+				fmt.Printf("Zarz session refresh failed for %s: %v; keeping the current session\n", appVersion, refreshErr)
+			}
+		}
 		return &record, nil
 	}
 	if err := runZarzBootstrapLocked(&record, appVersion); err != nil {
@@ -316,6 +368,59 @@ func ensureZarzSession(appVersion string) (*zarzSessionRecord, error) {
 		fmt.Printf("Zarz session saved for %s\n", appVersion)
 	}
 	return &record, nil
+}
+
+// zarzRefreshDue reports whether a still-valid session should be silently
+// renewed via /session/refresh so downloads never stall on browser
+// re-verification just because the credentials aged out.
+func zarzRefreshDue(record *zarzSessionRecord) bool {
+	expiresAt, ok := parseSessionExpiry(record.ExpiresAt)
+	if !ok {
+		return false
+	}
+	return time.Until(expiresAt) <= zarzRefreshSkew
+}
+
+// refreshZarzSessionLocked exchanges the current signed session for renewed
+// credentials. The caller must hold zarzSessionMu.
+func refreshZarzSessionLocked(record *zarzSessionRecord, appVersion string) (*zarzSessionRecord, error) {
+	payload, err := json.Marshal(map[string]string{"install_id": record.InstallID})
+	if err != nil {
+		return nil, err
+	}
+	result, err := doZarzSignedRequest(record, appVersion, http.MethodPost, "/session/refresh", payload, nil)
+	if err != nil {
+		return nil, err
+	}
+	if result.Status != http.StatusOK {
+		return nil, parseZarzAPIError(result.Status, result.Body)
+	}
+	var refreshed struct {
+		SessionID     string `json:"session_id"`
+		SessionSecret string `json:"session_secret"`
+		ExpiresAt     string `json:"expires_at"`
+	}
+	if err := json.Unmarshal(result.Body, &refreshed); err != nil {
+		return nil, fmt.Errorf("invalid zarz session refresh response: %w", err)
+	}
+	next := *record
+	changed := false
+	if value := strings.TrimSpace(refreshed.SessionID); value != "" {
+		next.SessionID = value
+		changed = true
+	}
+	if value := strings.TrimSpace(refreshed.SessionSecret); value != "" {
+		next.SessionSecret = value
+		changed = true
+	}
+	if value := strings.TrimSpace(refreshed.ExpiresAt); value != "" && value != next.ExpiresAt {
+		next.ExpiresAt = value
+		changed = true
+	}
+	if !changed {
+		return nil, fmt.Errorf("zarz session refresh response did not change the session")
+	}
+	return &next, nil
 }
 
 func clearZarzSessionCredentials(appVersion string) {
@@ -400,9 +505,24 @@ func runZarzBootstrapLocked(record *zarzSessionRecord, appVersion string) error 
 	return nil
 }
 
+// foregroundAuralisWindow brings the main app window forward after verification
+// so the user lands back in the app. It reuses the community handler registered
+// at startup (WindowShow + WindowUnminimise); a no-op when unavailable.
+func foregroundAuralisWindow() {
+	communityBrowserMu.RLock()
+	foreground := communityWindowForeground
+	communityBrowserMu.RUnlock()
+	if foreground != nil {
+		foreground()
+	}
+}
+
 func completeZarzChallenge(_ *zarzSessionRecord, challenge string) (string, error) {
 	parsed, err := url.Parse(challenge)
-	if err != nil || parsed.Scheme != "https" {
+	if err != nil {
+		return "", fmt.Errorf("zarz returned an invalid challenge URL")
+	}
+	if err := validateVerificationChallengeURL(parsed.String()); err != nil {
 		return "", fmt.Errorf("zarz returned an invalid challenge URL")
 	}
 	if err := RegisterAuralisProtocol(); err != nil {
@@ -410,25 +530,49 @@ func completeZarzChallenge(_ *zarzSessionRecord, challenge string) (string, erro
 	}
 
 	callbackState := zarzRandomHex(16)
+	zarzGrantMu.Lock()
+	zarzExpectedState = callbackState
+	zarzPendingGrant = ""
+	zarzGrantMu.Unlock()
+	defer func() {
+		zarzGrantMu.Lock()
+		zarzExpectedState = ""
+		zarzGrantMu.Unlock()
+	}()
 	query := parsed.Query()
-	query.Set("cb", "spotiflac://session-grant?cb_version=v2grant&state="+callbackState)
+	query.Set("cb", "auralis://session-grant?cb_version=v2grant&state="+callbackState)
 	parsed.RawQuery = query.Encode()
 
 	communityBrowserMu.RLock()
 	openBrowser := communityBrowserOpen
 	communityBrowserMu.RUnlock()
-	if openBrowser == nil {
-		return "", fmt.Errorf("browser integration is not ready for zarz verification")
-	}
 
+	// Host the challenge in an embedded browser window owned by Auralis so the
+	// verification flow stays inside the app (and carries Auralis branding).
+	// The page never navigates back on desktop — grants are picked up by the
+	// redelivery poller below, with the protocol handler as a legacy backup.
 	stopPoll := make(chan struct{})
 	defer close(stopPoll)
 	go pollZarzChallengeGrant(query.Get("id"), stopPoll)
 
+	windowDone := make(chan struct{})
+	go func() {
+		defer close(windowDone)
+		if err := OpenVerificationWindow(parsed.String()); err != nil {
+			fmt.Printf("Embedded verification window unavailable (%v); falling back to the system browser\n", err)
+			if openBrowser == nil {
+				return
+			}
+			openBrowser(parsed.String())
+		}
+	}()
+
 	fmt.Println("Zarz API requires a one-time verification in your browser...")
-	openBrowser(parsed.String())
+	foregroundAuralisWindow()
 
 	grant, err := waitForZarzGrant(zarzVerifyTimeout)
+	CloseVerificationWindow()
+	<-windowDone // ensure the window goroutine has fully unwound
 	if err != nil {
 		return "", err
 	}
@@ -436,22 +580,35 @@ func completeZarzChallenge(_ *zarzSessionRecord, challenge string) (string, erro
 	return grant, nil
 }
 
+type parsedZarzGrant struct {
+	Grant   string
+	State   string
+	FromURL bool
+}
+
 func extractZarzGrant(raw string) string {
+	return parseZarzGrant(raw).Grant
+}
+
+func parseZarzGrant(raw string) parsedZarzGrant {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return ""
+		return parsedZarzGrant{}
 	}
 	if strings.HasPrefix(strings.ToLower(raw), "grant=") {
 		value, err := url.QueryUnescape(raw[6:])
 		if err != nil {
-			return strings.TrimSpace(raw[6:])
+			value = raw[6:]
 		}
-		return strings.TrimSpace(value)
+		return parsedZarzGrant{Grant: strings.TrimSpace(value), FromURL: true}
 	}
-	if parsed, err := url.Parse(raw); err == nil {
-		if grant := strings.TrimSpace(parsed.Query().Get("grant")); grant != "" {
-			return grant
+	if parsed, err := url.Parse(raw); err == nil && parsed.Scheme != "" {
+		grant := strings.TrimSpace(parsed.Query().Get("grant"))
+		state := strings.TrimSpace(parsed.Query().Get("state"))
+		if grant != "" {
+			return parsedZarzGrant{Grant: grant, State: state, FromURL: true}
 		}
+		return parsedZarzGrant{}
 	}
 	if idx := strings.Index(raw, "grant="); idx >= 0 {
 		value := raw[idx+6:]
@@ -460,14 +617,14 @@ func extractZarzGrant(raw string) string {
 		}
 		decoded, err := url.QueryUnescape(value)
 		if err != nil {
-			return strings.TrimSpace(value)
+			decoded = value
 		}
-		return strings.TrimSpace(decoded)
+		return parsedZarzGrant{Grant: strings.TrimSpace(decoded), FromURL: true}
 	}
-	if !strings.ContainsAny(raw, " \t\n") && len(raw) >= 16 {
-		return raw
+	if !strings.ContainsAny(raw, " \t\n") && !strings.Contains(raw, "://") && len(raw) >= 16 {
+		return parsedZarzGrant{Grant: raw}
 	}
-	return ""
+	return parsedZarzGrant{}
 }
 
 func exchangeZarzGrant(record *zarzSessionRecord, grant, appVersion string) (*zarzSessionExchange, error) {
@@ -484,7 +641,7 @@ func exchangeZarzGrant(record *zarzSessionRecord, grant, appVersion string) (*za
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", zarzUserAgentFor(appVersion))
-	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
+	resp, err := NewSignedHTTPClient(20 * time.Second).Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -545,33 +702,41 @@ func zarzSignedJSON(appVersion, method, requestPath string, payload any, extraHe
 		return nil, err
 	}
 
-	status, respBody, err := doZarzSignedRequest(record, appVersion, method, requestPath, body, extraHeaders)
+	result, err := doZarzSignedRequest(record, appVersion, method, requestPath, body, extraHeaders)
 	if err != nil {
 		return nil, err
 	}
-	if isGatewaySessionFailure(status, respBody) {
+	if isGatewaySessionFailure(result.Status, result.Body) {
 		fmt.Printf("Zarz session for %s was rejected; completing one-time verification again...\n", appVersion)
 		clearZarzSessionCredentials(appVersion)
 		record, err = ensureZarzSession(appVersion)
 		if err != nil {
 			return nil, err
 		}
-		status, respBody, err = doZarzSignedRequest(record, appVersion, method, requestPath, body, extraHeaders)
+		result, err = doZarzSignedRequest(record, appVersion, method, requestPath, body, extraHeaders)
 		if err != nil {
 			return nil, err
 		}
 	}
-	if status != http.StatusOK {
-		return nil, parseZarzAPIError(status, respBody)
+	if result.Status != http.StatusOK {
+		return nil, parseZarzAPIErrorWithRetryAfter(result.Status, result.Body, result.RetryAfterSeconds)
 	}
-	return respBody, nil
+	return result.Body, nil
 }
 
-func doZarzSignedRequest(record *zarzSessionRecord, appVersion, method, requestPath string, body []byte, extraHeaders map[string]string) (int, []byte, error) {
+// zarzHTTPResult carries everything the signed-request callers need from one
+// gateway response, including the Retry-After hint for rate-limit handling.
+type zarzHTTPResult struct {
+	Status            int
+	Body              []byte
+	RetryAfterSeconds int
+}
+
+func doZarzSignedRequest(record *zarzSessionRecord, appVersion, method, requestPath string, body []byte, extraHeaders map[string]string) (*zarzHTTPResult, error) {
 	fullURL := strings.TrimRight(zarzBaseURL, "/") + "/" + strings.TrimLeft(requestPath, "/")
 	parsed, err := url.Parse(fullURL)
 	if err != nil {
-		return 0, nil, err
+		return nil, err
 	}
 	ts := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 	nonce := zarzRandomHex(12)
@@ -597,7 +762,7 @@ func doZarzSignedRequest(record *zarzSessionRecord, appVersion, method, requestP
 
 	req, err := http.NewRequest(method, fullURL, bytes.NewReader(body))
 	if err != nil {
-		return 0, nil, err
+		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
 	if len(body) > 0 {
@@ -617,14 +782,18 @@ func doZarzSignedRequest(record *zarzSessionRecord, appVersion, method, requestP
 
 	resp, err := zarzHTTP.Do(req)
 	if err != nil {
-		return 0, nil, err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
-		return resp.StatusCode, nil, err
+		return &zarzHTTPResult{Status: resp.StatusCode, RetryAfterSeconds: zarzRetryAfterHeaderSeconds(resp.Header)}, err
 	}
-	return resp.StatusCode, respBody, nil
+	return &zarzHTTPResult{
+		Status:            resp.StatusCode,
+		Body:              respBody,
+		RetryAfterSeconds: zarzRetryAfterHeaderSeconds(resp.Header),
+	}, nil
 }
 
 func mintZarzTicket(provider, resourceType, id string) (string, error) {

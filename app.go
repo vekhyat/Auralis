@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/vekhyat/Auralis/backend"
@@ -27,6 +28,7 @@ type App struct {
 	replayGainAnalysisMu         sync.Mutex
 	replayGainAnalysisCancel     context.CancelFunc
 	replayGainAnalysisGeneration uint64
+	metadataStreamGeneration     uint64
 }
 
 type CurrentIPInfo struct {
@@ -580,8 +582,13 @@ func (a *App) GetSpotifyMetadata(req SpotifyMetadataRequest) (string, error) {
 		}
 	}
 
+	streamID := atomic.AddUint64(&a.metadataStreamGeneration, 1)
+	runtime.EventsEmit(a.ctx, "metadata-stream-begin", streamID)
 	data, err := backend.GetFilteredSpotifyData(ctx, req.URL, req.Batch, time.Duration(req.Delay*float64(time.Second)), separator, func(tracks interface{}) {
-		runtime.EventsEmit(a.ctx, "metadata-stream", tracks)
+		runtime.EventsEmit(a.ctx, "metadata-stream", map[string]interface{}{
+			"id":      streamID,
+			"payload": tracks,
+		})
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch metadata: %v", err)
@@ -888,6 +895,39 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 		filename, err = downloader.DownloadTrackWithISRC(isrc, req.OutputDir, quality, req.FilenameFormat, req.TrackNumber, req.Position, req.TrackName, req.ArtistName, req.AlbumName, req.AlbumArtist, req.ReleaseDate, req.UseAlbumTrackNumber, req.CoverURL, req.EmbedMaxQualityCover, req.SpotifyTrackNumber, req.SpotifyDiscNumber, req.SpotifyTotalTracks, req.SpotifyTotalDiscs, req.Copyright, req.Publisher, req.Composer, metadataSeparator, spotifyURL, req.AllowFallback, req.UseFirstArtistOnly, req.UseSingleGenre, req.EmbedGenre)
 		sourceURL = downloader.SourceURL
 		sourceLabel = downloader.SourceLabel
+
+	case "deezer", "apple", "jiosaavn":
+		filename, sourceURL, err = backend.DownloadExtraService(backend.ExtraDownloadParams{
+			Service:              req.Service,
+			ISRC:                 req.ISRC,
+			SpotifyID:            req.SpotifyID,
+			ServiceURL:           req.ServiceURL,
+			OutputDir:            req.OutputDir,
+			FilenameFormat:       req.FilenameFormat,
+			TrackName:            req.TrackName,
+			ArtistName:           req.ArtistName,
+			AlbumName:            req.AlbumName,
+			AlbumArtist:          req.AlbumArtist,
+			ReleaseDate:          req.ReleaseDate,
+			CoverURL:             req.CoverURL,
+			SpotifyURL:           spotifyURL,
+			IncludeTrackNumber:   req.TrackNumber,
+			Position:             req.Position,
+			UseAlbumTrackNumber:  req.UseAlbumTrackNumber,
+			SpotifyTrackNumber:   req.SpotifyTrackNumber,
+			SpotifyDiscNumber:    req.SpotifyDiscNumber,
+			SpotifyTotalTracks:   req.SpotifyTotalTracks,
+			SpotifyTotalDiscs:    req.SpotifyTotalDiscs,
+			Copyright:            req.Copyright,
+			Publisher:            req.Publisher,
+			Composer:             req.Composer,
+			MetadataSeparator:    metadataSeparator,
+			EmbedMaxQualityCover: req.EmbedMaxQualityCover,
+			UseFirstArtistOnly:   req.UseFirstArtistOnly,
+			UseSingleGenre:       req.UseSingleGenre,
+			EmbedGenre:           req.EmbedGenre,
+			DurationSeconds:      req.Duration,
+		})
 
 	default:
 		return DownloadResponse{
@@ -1357,6 +1397,12 @@ func (a *App) CheckAPIStatus(apiType string, apiURL string) bool {
 			return checkGroupedAPIStatus("qobuz", buildQobuzStatusCheckURLs(apiURL)), nil
 		case "amazon":
 			return checkGroupedAPIStatus("amazon", buildAmazonStatusCheckURLs(apiURL)), nil
+		case "deezer":
+			return backend.AntraMirrorHealth("deezer"), nil
+		case "apple":
+			return backend.AntraMirrorHealth("apple"), nil
+		case "jiosaavn":
+			return backend.JioSaavnHealth(), nil
 		case "lrclib":
 			return checkGroupedAPIStatus("lrclib", buildLRCLIBStatusCheckURLs(apiURL)), nil
 		case "musicbrainz":
@@ -1389,6 +1435,15 @@ func (a *App) CheckAPIStatusReport(apiType string, apiURL string) APIStatusRepor
 			return buildGroupedAPIStatusReport("qobuz", buildQobuzStatusCheckURLs(apiURL), false), nil
 		case "amazon":
 			return buildGroupedAPIStatusReport("amazon", buildAmazonStatusCheckURLs(apiURL), false), nil
+		case "deezer":
+			online := backend.AntraMirrorHealth("deezer")
+			return APIStatusReport{Online: online}, nil
+		case "apple":
+			online := backend.AntraMirrorHealth("apple")
+			return APIStatusReport{Online: online}, nil
+		case "jiosaavn":
+			online := backend.JioSaavnHealth()
+			return APIStatusReport{Online: online}, nil
 		case "lrclib":
 			return buildGroupedAPIStatusReport("lrclib", buildLRCLIBStatusCheckURLs(apiURL), false), nil
 		case "musicbrainz":
@@ -1443,7 +1498,7 @@ func fetchSpotiFLACStatusPayload(statusURL string) (map[string]string, error) {
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("SpotiFLAC status returned %d: %s", resp.StatusCode, previewResponseBody(body, 200))
+		return nil, fmt.Errorf("API status returned %d: %s", resp.StatusCode, previewResponseBody(body, 200))
 	}
 
 	var payload map[string]string
@@ -1934,16 +1989,22 @@ type LyricsDownloadRequest struct {
 	SpotifyID             string `json:"spotify_id"`
 	TrackName             string `json:"track_name"`
 	ArtistName            string `json:"artist_name"`
+	Artists               string `json:"artists,omitempty"`
 	AlbumName             string `json:"album_name"`
 	AlbumArtist           string `json:"album_artist"`
 	ReleaseDate           string `json:"release_date"`
 	ISRC                  string `json:"isrc,omitempty"`
 	OutputDir             string `json:"output_dir"`
 	FilenameFormat        string `json:"filename_format"`
+	PlaylistName          string `json:"playlist_name,omitempty"`
+	Category              string `json:"category,omitempty"`
+	UPC                   string `json:"upc,omitempty"`
 	TrackNumber           bool   `json:"track_number"`
 	Position              int    `json:"position"`
 	UseAlbumTrackNumber   bool   `json:"use_album_track_number"`
 	DiscNumber            int    `json:"disc_number"`
+	TotalTracks           int    `json:"total_tracks,omitempty"`
+	TotalDiscs            int    `json:"total_discs,omitempty"`
 	LyricsTranslationMode string `json:"lyrics_translation_mode,omitempty"`
 	LyricsTranslationLang string `json:"lyrics_translation_lang,omitempty"`
 	LyricsAutoFallback    *bool  `json:"lyrics_translation_auto_fallback,omitempty"`
@@ -1963,16 +2024,22 @@ func (a *App) DownloadLyrics(req LyricsDownloadRequest) (backend.LyricsDownloadR
 		SpotifyID:             req.SpotifyID,
 		TrackName:             req.TrackName,
 		ArtistName:            req.ArtistName,
+		Artists:               req.Artists,
 		AlbumName:             req.AlbumName,
 		AlbumArtist:           req.AlbumArtist,
 		ReleaseDate:           req.ReleaseDate,
 		ISRC:                  req.ISRC,
 		OutputDir:             req.OutputDir,
 		FilenameFormat:        req.FilenameFormat,
+		PlaylistName:          req.PlaylistName,
+		Category:              req.Category,
+		UPC:                   req.UPC,
 		TrackNumber:           req.TrackNumber,
 		Position:              req.Position,
 		UseAlbumTrackNumber:   req.UseAlbumTrackNumber,
 		DiscNumber:            req.DiscNumber,
+		TotalTracks:           req.TotalTracks,
+		TotalDiscs:            req.TotalDiscs,
 		LyricsTranslationMode: req.LyricsTranslationMode,
 		LyricsTranslationLang: req.LyricsTranslationLang,
 		LyricsAutoFallback:    req.LyricsAutoFallback,
@@ -1991,17 +2058,25 @@ func (a *App) DownloadLyrics(req LyricsDownloadRequest) (backend.LyricsDownloadR
 }
 
 type CoverDownloadRequest struct {
-	CoverURL       string `json:"cover_url"`
-	TrackName      string `json:"track_name"`
-	ArtistName     string `json:"artist_name"`
-	AlbumName      string `json:"album_name"`
-	AlbumArtist    string `json:"album_artist"`
-	ReleaseDate    string `json:"release_date"`
-	OutputDir      string `json:"output_dir"`
-	FilenameFormat string `json:"filename_format"`
-	TrackNumber    bool   `json:"track_number"`
-	Position       int    `json:"position"`
-	DiscNumber     int    `json:"disc_number"`
+	CoverURL            string `json:"cover_url"`
+	TrackName           string `json:"track_name"`
+	ArtistName          string `json:"artist_name"`
+	Artists             string `json:"artists,omitempty"`
+	AlbumName           string `json:"album_name"`
+	AlbumArtist         string `json:"album_artist"`
+	ReleaseDate         string `json:"release_date"`
+	OutputDir           string `json:"output_dir"`
+	FilenameFormat      string `json:"filename_format"`
+	PlaylistName        string `json:"playlist_name,omitempty"`
+	Category            string `json:"category,omitempty"`
+	UPC                 string `json:"upc,omitempty"`
+	ISRC                string `json:"isrc,omitempty"`
+	TrackNumber         bool   `json:"track_number"`
+	Position            int    `json:"position"`
+	DiscNumber          int    `json:"disc_number"`
+	TotalTracks         int    `json:"total_tracks,omitempty"`
+	TotalDiscs          int    `json:"total_discs,omitempty"`
+	UseAlbumTrackNumber bool   `json:"use_album_track_number,omitempty"`
 }
 
 func (a *App) DownloadCover(req CoverDownloadRequest) (backend.CoverDownloadResponse, error) {
@@ -2014,17 +2089,25 @@ func (a *App) DownloadCover(req CoverDownloadRequest) (backend.CoverDownloadResp
 
 	client := backend.NewCoverClient()
 	backendReq := backend.CoverDownloadRequest{
-		CoverURL:       req.CoverURL,
-		TrackName:      req.TrackName,
-		ArtistName:     req.ArtistName,
-		AlbumName:      req.AlbumName,
-		AlbumArtist:    req.AlbumArtist,
-		ReleaseDate:    req.ReleaseDate,
-		OutputDir:      req.OutputDir,
-		FilenameFormat: req.FilenameFormat,
-		TrackNumber:    req.TrackNumber,
-		Position:       req.Position,
-		DiscNumber:     req.DiscNumber,
+		CoverURL:            req.CoverURL,
+		TrackName:           req.TrackName,
+		ArtistName:          req.ArtistName,
+		Artists:             req.Artists,
+		AlbumName:           req.AlbumName,
+		AlbumArtist:         req.AlbumArtist,
+		ReleaseDate:         req.ReleaseDate,
+		OutputDir:           req.OutputDir,
+		FilenameFormat:      req.FilenameFormat,
+		PlaylistName:        req.PlaylistName,
+		Category:            req.Category,
+		UPC:                 req.UPC,
+		ISRC:                req.ISRC,
+		TrackNumber:         req.TrackNumber,
+		Position:            req.Position,
+		DiscNumber:          req.DiscNumber,
+		TotalTracks:         req.TotalTracks,
+		TotalDiscs:          req.TotalDiscs,
+		UseAlbumTrackNumber: req.UseAlbumTrackNumber,
 	}
 
 	resp, err := client.DownloadCover(backendReq)
@@ -2509,9 +2592,10 @@ func (a *App) DecodeAudioForTempoKey(filePath string) (*backend.TempoKeyDecodeRe
 }
 
 func (a *App) RenameFileTo(oldPath, newName string) error {
-	dir := filepath.Dir(oldPath)
-	ext := filepath.Ext(oldPath)
-	newPath := filepath.Join(dir, newName+ext)
+	newPath, err := backend.ManualRenamePath(oldPath, newName)
+	if err != nil {
+		return err
+	}
 	if err := os.Rename(oldPath, newPath); err != nil {
 		return err
 	}

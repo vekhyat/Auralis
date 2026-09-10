@@ -35,10 +35,10 @@ func main() {
 
 	err := wails.Run(&options.App{
 		Title:     "Auralis",
-		Width:     1100,
-		Height:    640,
-		MinWidth:  1100,
-		MinHeight: 640,
+		Width:     1280,
+		Height:    800,
+		MinWidth:  1200,
+		MinHeight: 720,
 		Frameless: true,
 		AssetServer: &assetserver.Options{
 			Assets: assets,

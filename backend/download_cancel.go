@@ -22,9 +22,14 @@ func BeginDownloadCancellationScope() (context.Context, func()) {
 	downloadCancelState.Lock()
 	defer downloadCancelState.Unlock()
 
-	if downloadCancelState.ctx == nil || downloadCancelState.active == 0 {
+	reuse := downloadCancelState.ctx != nil &&
+		downloadCancelState.active > 0 &&
+		!downloadCancelState.stopping &&
+		downloadCancelState.ctx.Err() == nil
+	if !reuse {
 		downloadCancelState.ctx, downloadCancelState.cancel = context.WithCancel(context.Background())
 		downloadCancelState.stopping = false
+		downloadCancelState.active = 0
 	}
 
 	downloadCancelState.active++
@@ -36,6 +41,9 @@ func BeginDownloadCancellationScope() (context.Context, func()) {
 			downloadCancelState.Lock()
 			defer downloadCancelState.Unlock()
 
+			if downloadCancelState.ctx != ctx {
+				return
+			}
 			if downloadCancelState.active > 0 {
 				downloadCancelState.active--
 			}
@@ -74,7 +82,7 @@ func ForceStopActiveDownloads() {
 	}
 
 	CancelQueuedAndDownloadingItems()
-	SetDownloading(false)
+	ResetDownloading()
 }
 
 func IsDownloadForceStopRequested() bool {

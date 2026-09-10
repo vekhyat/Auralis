@@ -2,7 +2,7 @@ import { t } from "@/i18n";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { PlugZap, CircleCheckBig, Loader2, Wrench, Server, Clock3 } from "lucide-react";
-import { TidalIcon, QobuzIcon, AmazonIcon, DeezerIcon } from "./PlatformIcons";
+import { TidalIcon, QobuzIcon, AmazonIcon, DeezerIcon, AppleIcon, JioSaavnIcon } from "./PlatformIcons";
 import { useApiStatus } from "@/hooks/useApiStatus";
 import { SPOTIFLAC_NEXT_SOURCES } from "@/lib/api-status";
 import { openExternal } from "@/lib/utils";
@@ -47,6 +47,12 @@ function renderPlatformIcon(type: string) {
     }
     if (type === "deezer") {
         return <DeezerIcon className="w-5 h-5 shrink-0 text-muted-foreground"/>;
+    }
+    if (type === "apple") {
+        return <AppleIcon className="w-5 h-5 shrink-0 text-muted-foreground"/>;
+    }
+    if (type === "jiosaavn") {
+        return <JioSaavnIcon className="w-5 h-5 shrink-0 text-muted-foreground"/>;
     }
     return <QobuzIcon className="w-5 h-5 shrink-0 text-muted-foreground"/>;
 }
@@ -96,7 +102,7 @@ export function ApiStatusTab() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {sources.map((source) => {
             const status = statuses[source.id] || "idle";
-            return (<div key={source.id} className="space-y-3 p-4 border rounded-lg bg-card text-card-foreground shadow-sm">
+            return (<div key={source.id} className="space-y-3 p-4 border rounded-[2px] bg-card text-card-foreground">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
                     {renderPlatformIcon(source.type)}
@@ -104,10 +110,10 @@ export function ApiStatusTab() {
                   </div>
                   <div className="flex items-center">{renderStatusIndicator(status)}</div>
                 </div>
-                <div className="flex items-center gap-2 border-t pt-3">
+                {source.id === "tidal" || source.id === "qobuz" || source.id === "amazon" ? (<div className="flex items-center gap-2 border-t pt-3">
                   <Clock3 className="h-3.5 w-3.5 shrink-0 text-muted-foreground"/>
                   {renderBreakInfo(breakStatuses[source.id], isCheckingBreaks)}
-                </div>
+                </div>) : null}
               </div>);
         })}
         </div>
@@ -124,7 +130,7 @@ export function ApiStatusTab() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {SPOTIFLAC_NEXT_SOURCES.map((source) => {
             const status = nextStatuses[source.id] || "idle";
-            return (<div key={source.id} className="flex items-center justify-between p-4 border rounded-lg bg-card text-card-foreground shadow-sm">
+            return (<div key={source.id} className="flex items-center justify-between p-4 border rounded-[2px] bg-card text-card-foreground">
               <div className="flex items-center gap-3">
                 {renderPlatformIcon(source.id)}
                 <p className="font-medium leading-none">{source.name}</p>

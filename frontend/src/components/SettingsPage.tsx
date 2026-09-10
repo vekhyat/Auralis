@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { flushSync } from "react-dom";
 import { Button } from "@/components/ui/button";
@@ -7,17 +7,16 @@ import { InputWithContext } from "@/components/ui/input-with-context";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger, } from "@/components/ui/tooltip";
-import { FolderOpen, Save, RotateCcw, CircleHelp, ArrowRight, MonitorCog, FolderCog, Router, FolderLock, Plus, Trash2, ExternalLink, PlugZap, Download, Tags, FileSignature, DatabaseBackup, Search } from "lucide-react";
+import { FolderOpen, Save, RotateCcw, CircleHelp, ArrowRight, Trash2, ExternalLink, PlugZap, DatabaseBackup, Search, FolderLock } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import { getSettings, getSettingsWithDefaults, loadSettings, saveSettings, resetToDefaultSettings, applyThemeMode, applyFont, getFontOptions, parseGoogleFontUrl, loadGoogleFontUrl, loadCustomFonts, saveCustomFonts, TEMPLATE_VARIABLES, DEFAULT_SETTINGS, sanitizeAutoOrder, type Settings as SettingsType, type MetadataTagToggles, type FontFamily, type CustomFontFamily, type ExistingFileCheckMode, } from "@/lib/settings";
+import { getSettings, getSettingsWithDefaults, loadSettings, saveSettings, resetToDefaultSettings, applyThemeMode, TEMPLATE_VARIABLES, DEFAULT_SETTINGS, sanitizeAutoOrder, type Settings as SettingsType, type MetadataTagToggles, type ExistingFileCheckMode, } from "@/lib/settings";
 import { FormatEditor } from "@/components/FormatEditor";
-import { baseColors, getThemesForBaseColor, normalizeThemeName, applyTheme, type BaseColorName } from "@/lib/themes";
 import { BackupSettings, RestoreSettings, SelectFolder, OpenConfigFolder, CheckCustomTidalAPI, CheckCustomQobuzAPI } from "../../wailsjs/go/main/App";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { openExternal } from "@/lib/utils";
 import { ApiStatusTab } from "./ApiStatusTab";
-import { AmazonIcon, QobuzIcon, SonglinkIcon, SongstatsIcon, TidalIcon } from "./PlatformIcons";
+import { AmazonIcon, AppleIcon, DeezerIcon, JioSaavnIcon, QobuzIcon, SonglinkIcon, SongstatsIcon, TidalIcon } from "./PlatformIcons";
 import i18n, { APP_LANGUAGES, type AppLanguage } from "@/i18n";
 import chatGPTIcon from "@/assets/icons/chatgpt.svg";
 import geminiIcon from "@/assets/icons/gemini.png";
@@ -27,7 +26,6 @@ interface SettingsPageProps {
 }
 type CustomTidalApiStatus = "idle" | "checking" | "online" | "offline";
 const AUTO_CONVERT_BITRATES: SettingsType["autoConvertBitrate"][] = ["320k", "256k", "192k", "128k"];
-const THEME_PREVIEW_DEBOUNCE_MS = 50;
 const LYRICS_TRANSLATION_LANGUAGES = [
     { code: "en", labelKey: "translation.sources.english", flag: "gb" },
     { code: "id", labelKey: "translation.sources.indonesian", flag: "id" },
@@ -87,28 +85,17 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
     const { t } = useTranslation();
     const [savedSettings, setSavedSettings] = useState<SettingsType>(getSettings());
     const [tempSettings, setTempSettings] = useState<SettingsType>(savedSettings);
-    const [isDark, setIsDark] = useState(document.documentElement.classList.contains("dark"));
     const [showResetConfirm, setShowResetConfirm] = useState(false);
     const [showMetadataAdvanced, setShowMetadataAdvanced] = useState(false);
     const [showLyricsAdvanced, setShowLyricsAdvanced] = useState(false);
     const [lyricsLanguageSearch, setLyricsLanguageSearch] = useState("");
     const [showBackupDialog, setShowBackupDialog] = useState(false);
     const [backupAction, setBackupAction] = useState<"backup" | "restore" | "open" | null>(null);
-    const [showAddFontDialog, setShowAddFontDialog] = useState(false);
     const [showCustomTidalApiDialog, setShowCustomTidalApiDialog] = useState(false);
     const [showCustomQobuzApiDialog, setShowCustomQobuzApiDialog] = useState(false);
-    const [addFontUrl, setAddFontUrl] = useState("");
     const [customTidalApiStatus, setCustomTidalApiStatus] = useState<CustomTidalApiStatus>("idle");
     const [customQobuzApiStatus, setCustomQobuzApiStatus] = useState<CustomTidalApiStatus>("idle");
-    const parsedAddFont = parseGoogleFontUrl(addFontUrl);
-    const fontOptions = getFontOptions(tempSettings.customFonts);
-    const availableThemes = getThemesForBaseColor(tempSettings.baseColor);
     const hasUnsavedChanges = JSON.stringify(savedSettings) !== JSON.stringify(tempSettings);
-    const themePreviewTimerRef = useRef<number | null>(null);
-    const selectedThemeConfigRef = useRef({
-        baseColor: tempSettings.baseColor,
-        theme: tempSettings.theme,
-    });
     const normalizedLyricsLanguageSearch = lyricsLanguageSearch.trim().toLocaleLowerCase();
     const filteredLyricsTranslationLanguages = normalizedLyricsLanguageSearch
         ? LYRICS_TRANSLATION_LANGUAGES.filter((language) => language.code.includes(normalizedLyricsLanguageSearch)
@@ -121,68 +108,12 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
     const isAtmosSelected = (effectiveDownloader === "tidal" && tempSettings.tidalQuality === "ATMOS") ||
         (effectiveDownloader === "amazon" && tempSettings.amazonQuality === "atmos") ||
         (effectiveDownloader === "auto" && tempSettings.autoQuality === "atmos");
-    const cancelThemePreview = useCallback(() => {
-        if (themePreviewTimerRef.current !== null) {
-            window.clearTimeout(themePreviewTimerRef.current);
-            themePreviewTimerRef.current = null;
-        }
-    }, []);
-    const previewThemeConfig = useCallback((themeName: SettingsType["theme"], baseColorName: BaseColorName) => {
-        cancelThemePreview();
-        themePreviewTimerRef.current = window.setTimeout(() => {
-            themePreviewTimerRef.current = null;
-            applyTheme(themeName, baseColorName);
-        }, THEME_PREVIEW_DEBOUNCE_MS);
-    }, [cancelThemePreview]);
-    const previewTheme = useCallback((themeName: SettingsType["theme"]) => {
-        previewThemeConfig(themeName, selectedThemeConfigRef.current.baseColor);
-    }, [previewThemeConfig]);
-    const previewBaseColor = useCallback((baseColorName: BaseColorName) => {
-        const themeName = normalizeThemeName(selectedThemeConfigRef.current.theme, baseColorName);
-        previewThemeConfig(themeName, baseColorName);
-    }, [previewThemeConfig]);
-    const restoreSelectedTheme = useCallback(() => {
-        cancelThemePreview();
-        const selectedTheme = selectedThemeConfigRef.current;
-        applyTheme(selectedTheme.theme, selectedTheme.baseColor);
-    }, [cancelThemePreview]);
-    const handleThemeChange = useCallback((themeName: SettingsType["theme"]) => {
-        cancelThemePreview();
-        const baseColorName = selectedThemeConfigRef.current.baseColor;
-        selectedThemeConfigRef.current = { baseColor: baseColorName, theme: themeName };
-        applyTheme(themeName, baseColorName);
-        setTempSettings((prev) => ({ ...prev, theme: themeName }));
-    }, [cancelThemePreview]);
-    const handleBaseColorChange = useCallback((baseColorName: BaseColorName) => {
-        cancelThemePreview();
-        const themeName = normalizeThemeName(selectedThemeConfigRef.current.theme, baseColorName);
-        selectedThemeConfigRef.current = { baseColor: baseColorName, theme: themeName };
-        applyTheme(themeName, baseColorName);
-        setTempSettings((prev) => ({ ...prev, baseColor: baseColorName, theme: themeName }));
-    }, [cancelThemePreview]);
     const resetToSaved = useCallback(() => {
-        cancelThemePreview();
         const freshSavedSettings = getSettings();
-        selectedThemeConfigRef.current = {
-            baseColor: freshSavedSettings.baseColor,
-            theme: freshSavedSettings.theme,
-        };
         flushSync(() => {
             setTempSettings(freshSavedSettings);
-            setIsDark(document.documentElement.classList.contains("dark"));
         });
-    }, [cancelThemePreview]);
-    useEffect(() => {
-        selectedThemeConfigRef.current = {
-            baseColor: tempSettings.baseColor,
-            theme: tempSettings.theme,
-        };
-    }, [tempSettings.baseColor, tempSettings.theme]);
-    useEffect(() => () => {
-        cancelThemePreview();
-        const persistedSettings = getSettings();
-        applyTheme(persistedSettings.theme, persistedSettings.baseColor);
-    }, [cancelThemePreview]);
+    }, []);
     useEffect(() => {
         if (onResetRequest) {
             onResetRequest(resetToSaved);
@@ -196,30 +127,18 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
     }, [tempSettings.language]);
     useEffect(() => {
         applyThemeMode(savedSettings.themeMode);
-        applyTheme(savedSettings.theme, savedSettings.baseColor);
         const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
         const handleChange = () => {
             if (savedSettings.themeMode === "auto") {
                 applyThemeMode("auto");
-                applyTheme(savedSettings.theme, savedSettings.baseColor);
             }
         };
         mediaQuery.addEventListener("change", handleChange);
         return () => mediaQuery.removeEventListener("change", handleChange);
-    }, [savedSettings.themeMode, savedSettings.baseColor, savedSettings.theme]);
+    }, [savedSettings.themeMode]);
     useEffect(() => {
         applyThemeMode(tempSettings.themeMode);
-        applyTheme(tempSettings.theme, tempSettings.baseColor);
-        applyFont(tempSettings.fontFamily, tempSettings.customFonts);
-        setTimeout(() => {
-            setIsDark(document.documentElement.classList.contains("dark"));
-        }, 0);
-    }, [tempSettings.themeMode, tempSettings.baseColor, tempSettings.theme, tempSettings.fontFamily, tempSettings.customFonts]);
-    useEffect(() => {
-        if (showAddFontDialog && parsedAddFont) {
-            loadGoogleFontUrl(parsedAddFont.url, "auralis-add-font-preview");
-        }
-    }, [showAddFontDialog, parsedAddFont]);
+    }, [tempSettings.themeMode]);
     useEffect(() => {
         const loadDefaults = async () => {
             const currentSettings = getSettings();
@@ -231,14 +150,6 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
             }
         };
         loadDefaults();
-    }, []);
-    useEffect(() => {
-        const syncCustomFonts = async () => {
-            const customFonts = await loadCustomFonts();
-            setSavedSettings((prev) => ({ ...prev, customFonts }));
-            setTempSettings((prev) => ({ ...prev, customFonts }));
-        };
-        void syncCustomFonts();
     }, []);
     const handleSave = async () => {
         await saveSettings(tempSettings);
@@ -254,8 +165,6 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
         setTempSettings(defaultSettings);
         setSavedSettings(defaultSettings);
         applyThemeMode(defaultSettings.themeMode);
-        applyTheme(defaultSettings.theme, defaultSettings.baseColor);
-        applyFont(defaultSettings.fontFamily, defaultSettings.customFonts);
         await i18n.changeLanguage(defaultSettings.language);
         setShowResetConfirm(false);
         toast.success(t("translation.settings.settingsResetDefault"));
@@ -310,8 +219,6 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
             setTempSettings(restoredSettings);
             await i18n.changeLanguage(restoredSettings.language);
             applyThemeMode(restoredSettings.themeMode);
-            applyTheme(restoredSettings.theme, restoredSettings.baseColor);
-            applyFont(restoredSettings.fontFamily, restoredSettings.customFonts);
             setShowBackupDialog(false);
             toast.success(t("translation.settings.restoreSettingsSuccess"));
             onUnsavedChangesChange?.(false);
@@ -322,51 +229,6 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
         finally {
             setBackupAction(null);
         }
-    };
-    const closeAddFontDialog = () => {
-        setShowAddFontDialog(false);
-        setAddFontUrl("");
-    };
-    const handleAddFont = async () => {
-        if (!parsedAddFont) {
-            toast.error(t("translation.settings.enterValidGoogleFontsUrl2"));
-            return;
-        }
-        const existingFonts = tempSettings.customFonts || [];
-        const existingIndex = existingFonts.findIndex((font) => font.value === parsedAddFont.value || font.url === parsedAddFont.url);
-        const customFonts = existingIndex >= 0
-            ? existingFonts.map((font, index) => index === existingIndex ? parsedAddFont : font)
-            : [...existingFonts, parsedAddFont];
-        const savedCustomFonts = await saveCustomFonts(customFonts);
-        setSavedSettings((prev) => ({ ...prev, customFonts: savedCustomFonts }));
-        setTempSettings((prev) => ({
-            ...prev,
-            customFonts: savedCustomFonts,
-            fontFamily: parsedAddFont.value,
-        }));
-        closeAddFontDialog();
-        toast.success(t("translation.migrated.SettingsPage.added", { value1: parsedAddFont.label }));
-    };
-    const handleDeleteCustomFont = async (fontValue: CustomFontFamily) => {
-        const customFonts = (tempSettings.customFonts || []).filter((font) => font.value !== fontValue);
-        const savedCustomFonts = await saveCustomFonts(customFonts);
-        const shouldResetSavedFont = savedSettings.fontFamily === fontValue;
-        const shouldResetTempFont = tempSettings.fontFamily === fontValue;
-        const nextSavedSettings: SettingsType = {
-            ...savedSettings,
-            customFonts: savedCustomFonts,
-            fontFamily: shouldResetSavedFont ? "google-sans" : savedSettings.fontFamily,
-        };
-        setSavedSettings(nextSavedSettings);
-        setTempSettings((prev) => ({
-            ...prev,
-            customFonts: savedCustomFonts,
-            fontFamily: shouldResetTempFont ? "google-sans" : prev.fontFamily,
-        }));
-        if (shouldResetSavedFont) {
-            await saveSettings(nextSavedSettings);
-        }
-        toast.success(t("translation.settings.fontDeleted"));
     };
     const handleTidalQualityChange = async (value: "LOSSLESS" | "HI_RES_LOSSLESS" | "ATMOS") => {
         setTempSettings((prev) => ({ ...prev, tidalQuality: value }));
@@ -456,10 +318,9 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
             toast.error(t("translation.migrated.SettingsPage.failedToCheckQobuzDLInstance", { value1: error }));
         }
     };
-    const [activeTab, setActiveTab] = useState<"general" | "download" | "naming" | "files" | "metadata" | "status">("general");
-    return (<div className="space-y-4 h-full flex flex-col">
-      <div className="flex items-center justify-between shrink-0">
-        <h1 className="text-2xl font-bold">{t("translation.common.settings")}</h1>
+    return (<div className="mx-auto w-full max-w-5xl space-y-10 pb-10">
+      <div className="flex items-center justify-between">
+        <h1 className="text-lg font-semibold tracking-tight">{t("translation.common.settings")}</h1>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => setShowResetConfirm(true)} className="gap-1.5">
             <RotateCcw className="h-4 w-4"/>
@@ -472,40 +333,13 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
         </div>
       </div>
 
-      <div className="flex gap-2 border-b shrink-0">
-        <Button variant={activeTab === "general" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("general")} className="rounded-b-none gap-2">
-          <MonitorCog className="h-4 w-4"/>
-          {t("translation.settings.general")}
-        </Button>
-        <Button variant={activeTab === "download" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("download")} className="rounded-b-none gap-2">
-          <Download className="h-4 w-4"/>
-          {t("translation.trackInfo.download")}
-        </Button>
-        <Button variant={activeTab === "naming" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("naming")} className="rounded-b-none gap-2">
-          <FileSignature className="h-4 w-4"/>
-          {t("translation.settings.naming")}
-        </Button>
-        <Button variant={activeTab === "files" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("files")} className="rounded-b-none gap-2">
-          <FolderCog className="h-4 w-4"/>
-          {t("translation.settings.fileManagement")}
-        </Button>
-        <Button variant={activeTab === "metadata" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("metadata")} className="rounded-b-none gap-2">
-          <Tags className="h-4 w-4"/>
-          {t("translation.common.metadata")}
-        </Button>
-        <Button variant={activeTab === "status" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("status")} className="rounded-b-none gap-2">
-          <Router className="h-4 w-4"/>
-          {t("translation.queue.status")}
-        </Button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto pt-4">
-        {activeTab === "general" && (<div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
-            <div className="space-y-4 md:pr-8 md:border-r border-border">
+      <div className="flex-1 space-y-10">
+        <section className="max-w-2xl space-y-4">
+          <h2 className="border-b border-border pb-1.5 text-sm font-semibold tracking-tight">{t("translation.settings.general")}</h2>
               <div className="space-y-2">
                 <Label htmlFor="language">{t("translation.settings.language")}</Label>
                 <Select value={tempSettings.language} onValueChange={(value: AppLanguage) => setTempSettings((prev) => ({ ...prev, language: value }))}>
-                  <SelectTrigger id="language">
+                  <SelectTrigger id="language" className="w-fit min-w-44">
                     <SelectValue placeholder={t("translation.settings.selectLanguage")}/>
                   </SelectTrigger>
                   <SelectContent>
@@ -519,10 +353,9 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                 </Select>
               </div>
 
-              <div className="grid grid-cols-[8rem_8rem] gap-4">
-                <div className="min-w-0 space-y-2">
-                  <Label htmlFor="theme-mode">{t("translation.settings.mode")}</Label>
-                  <Select value={tempSettings.themeMode} onValueChange={(value: "auto" | "light" | "dark") => setTempSettings((prev) => ({ ...prev, themeMode: value }))}>
+              <div className="min-w-0 max-w-56 space-y-2">
+                <Label htmlFor="theme-mode">{t("translation.settings.mode")}</Label>
+                <Select value={tempSettings.themeMode} onValueChange={(value: "auto" | "light" | "dark") => setTempSettings((prev) => ({ ...prev, themeMode: value }))}>
                     <SelectTrigger id="theme-mode" className="w-full">
                       <SelectValue placeholder={t("translation.settings.selectThemeMode")}/>
                     </SelectTrigger>
@@ -533,94 +366,6 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                     </SelectContent>
                   </Select>
                 </div>
-
-                <div className="min-w-0 space-y-2">
-                  <Label htmlFor="base-color">{t("translation.settings.baseColor")}</Label>
-                  <Select value={tempSettings.baseColor} onValueChange={(value) => handleBaseColorChange(value as BaseColorName)} onOpenChange={(open) => {
-                if (!open) {
-                    restoreSelectedTheme();
-                }
-            }}>
-                    <SelectTrigger id="base-color" className="w-full">
-                      <SelectValue placeholder={t("translation.settings.selectBaseColor")}/>
-                    </SelectTrigger>
-                    <SelectContent onMouseLeave={restoreSelectedTheme}>
-                      {baseColors.map((baseColor) => (<SelectItem key={baseColor.name} value={baseColor.name} onMouseMove={() => previewBaseColor(baseColor.name)} onFocus={() => previewBaseColor(baseColor.name)}>
-                          <span className="flex items-center gap-2">
-                            <span className="w-3 h-3 rounded-full border border-border" style={{
-                    backgroundColor: isDark
-                        ? baseColor.cssVars.dark["muted-foreground"]
-                        : baseColor.cssVars.light["muted-foreground"],
-                }}/>
-                            {baseColor.label}
-                          </span>
-                        </SelectItem>))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="theme">{t("translation.settings.theme")}</Label>
-                <Select value={tempSettings.theme} onValueChange={(value) => handleThemeChange(value as SettingsType["theme"])} onOpenChange={(open) => {
-                if (!open) {
-                    restoreSelectedTheme();
-                }
-            }}>
-                  <SelectTrigger id="theme" className="w-32">
-                    <SelectValue placeholder={t("translation.settings.selectTheme")}/>
-                  </SelectTrigger>
-                  <SelectContent onMouseLeave={restoreSelectedTheme}>
-                    {availableThemes.map((theme) => (<SelectItem key={theme.name} value={theme.name} onMouseMove={() => previewTheme(theme.name)} onFocus={() => previewTheme(theme.name)}>
-                        <span className="flex items-center gap-2">
-                          <span className="w-3 h-3 rounded-full border border-border" style={{
-                    backgroundColor: isDark
-                        ? theme.cssVars.dark[theme.name === tempSettings.baseColor ? "muted-foreground" : "primary"]
-                        : theme.cssVars.light[theme.name === tempSettings.baseColor ? "muted-foreground" : "primary"],
-                }}/>
-                          {theme.label}
-                        </span>
-                      </SelectItem>))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="font">{t("translation.settings.font")}</Label>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Select value={tempSettings.fontFamily} onValueChange={(value: FontFamily) => setTempSettings((prev) => ({ ...prev, fontFamily: value }))}>
-                    <SelectTrigger id="font" className="max-w-full min-w-40">
-                      <SelectValue placeholder={t("translation.settings.selectFont")}/>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {fontOptions.map((font) => {
-                const isCustomFont = font.value.startsWith("custom-");
-                return (<SelectItem key={font.value} value={font.value} indicatorPosition="inline" trailingAction={isCustomFont ? (<Button type="button" variant="ghost" size="icon" className="h-8 w-8 cursor-pointer text-muted-foreground hover:bg-transparent hover:text-destructive" aria-label={t("translation.migrated.SettingsPage.delete", { value1: font.label })} onPointerDown={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                        }} onPointerUp={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                        }} onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            void handleDeleteCustomFont(font.value as CustomFontFamily);
-                        }}>
-                              <Trash2 className="h-3.5 w-3.5 text-inherit"/>
-                            </Button>) : undefined}>
-                          <span style={{ fontFamily: font.fontFamily }}>
-                            {font.label}
-                          </span>
-                        </SelectItem>);
-            })}
-                    </SelectContent>
-                  </Select>
-                  <Button type="button" variant="outline" onClick={() => setShowAddFontDialog(true)} className="shrink-0 gap-1.5">
-                    <Plus className="h-4 w-4"/>
-                    {t("translation.settings.addFont")}
-                  </Button>
-                </div>
-              </div>
 
               <div className="flex items-center gap-3 pt-2">
                 <Switch id="sfx-enabled" checked={tempSettings.sfxEnabled} onCheckedChange={(checked) => setTempSettings((prev) => ({
@@ -641,9 +386,10 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                   {t("translation.settings.updateNotifications")}
                 </Label>
               </div>
-            </div>
+        </section>
 
-            <div className="space-y-4 md:pl-8">
+        <section className="max-w-2xl space-y-4">
+          <h2 className="border-b border-border pb-1.5 text-sm font-semibold tracking-tight">{t("translation.settings.downloadPath")}</h2>
               <div className="space-y-2">
                 <Label htmlFor="download-path">{t("translation.settings.downloadPath")}</Label>
                 <div className="flex gap-2">
@@ -701,11 +447,9 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                   </Button>
                 </div>
               </div>
-            </div>
-          </div>)}
-
-        {activeTab === "download" && (<div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] lg:gap-8 items-start">
-            <div className="space-y-4 lg:pr-8 lg:border-r">
+        </section>
+        <section className="max-w-2xl space-y-4">
+          <h2 className="border-b border-border pb-1.5 text-sm font-semibold tracking-tight">{t("translation.trackInfo.download")}</h2>
               <div className="space-y-2">
                 <Label htmlFor="link-resolver">{t("translation.migrated.SettingsPage.linkResolver")}</Label>
                 <div className="flex items-center gap-3 flex-wrap">
@@ -786,6 +530,24 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                         <span className="flex items-center gap-2">
                           <AmazonIcon />
                           {t("literal.common.amazonMusic")}
+                        </span>
+                      </SelectItem>
+                      <SelectItem value="deezer">
+                        <span className="flex items-center gap-2">
+                          <DeezerIcon />
+                          {t("literal.common.deezer")}
+                        </span>
+                      </SelectItem>
+                      <SelectItem value="apple">
+                        <span className="flex items-center gap-2">
+                          <AppleIcon />
+                          {t("literal.common.appleMusic")}
+                        </span>
+                      </SelectItem>
+                      <SelectItem value="jiosaavn">
+                        <span className="flex items-center gap-2">
+                          <JioSaavnIcon />
+                          {t("literal.common.jiosaavn")}
                         </span>
                       </SelectItem>
                     </SelectContent>
@@ -985,12 +747,10 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                       </Label>
                   </div>)}
               </div>
-            </div>
+        </section>
 
-            <div className="space-y-4">
-              <div className="space-y-1">
-                <Label className="text-base font-semibold">{t("translation.sources.custom")}</Label>
-              </div>
+        <section className="max-w-2xl space-y-4">
+          <h2 className="border-b border-border pb-1.5 text-sm font-semibold tracking-tight">{t("translation.sources.custom")}</h2>
 
               <div className="space-y-2">
                 <Label>{t("literal.common.tidal")}</Label>
@@ -1017,10 +777,11 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                     </span>)}
                 </div>
               </div>
-            </div>
-          </div>)}
+        </section>
 
-        {activeTab === "naming" && (() => {
+        <section className="max-w-3xl space-y-4">
+          <h2 className="border-b border-border pb-1.5 text-sm font-semibold tracking-tight">{t("translation.settings.naming")}</h2>
+        {(() => {
             const separateToggle = (<div className="flex items-center gap-2">
               <Label htmlFor="separate-album-filename" className="text-sm cursor-pointer font-normal">{t("translation.settings.separateFilename")}</Label>
               <Switch id="separate-album-filename" checked={tempSettings.useSeparateAlbumFilename} onCheckedChange={(checked) => setTempSettings((prev) => ({ ...prev, useSeparateAlbumFilename: checked }))}/>
@@ -1041,10 +802,13 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                 ]}/>
             </div>);
         })()}
+        </section>
 
-        {activeTab === "files" && (<div className="grid grid-cols-1 lg:grid-cols-2 lg:gap-8 items-start">
+        <section className="space-y-6">
+          <h2 className="border-b border-border pb-1.5 text-sm font-semibold tracking-tight">{t("translation.settings.fileManagement")}</h2>
+          <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
             <div className="space-y-4 lg:pr-8 lg:border-r">
-              <h3 className="text-sm font-semibold text-muted-foreground">{t("translation.settings.fileOutput")}</h3>
+              <h3 className="text-[11px] font-semibold tracking-widest uppercase text-muted-foreground">{t("translation.settings.fileOutput")}</h3>
 
               <div className="flex items-center gap-3">
                 <Switch id="create-playlist-folder" checked={tempSettings.createPlaylistFolder} onCheckedChange={(checked) => setTempSettings((prev) => ({
@@ -1116,7 +880,7 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
 
             <div className="space-y-6 lg:pl-0">
               <div className="space-y-4">
-                <h3 className="text-sm font-semibold text-muted-foreground">{t("translation.settings.audioProcessing")}</h3>
+                <h3 className="text-[11px] font-semibold tracking-widest uppercase text-muted-foreground">{t("translation.settings.audioProcessing")}</h3>
                 <div className="flex items-center gap-3">
                   <Switch id="auto-convert-audio" checked={tempSettings.autoConvertAudio} onCheckedChange={(checked) => setTempSettings((prev) => ({ ...prev, autoConvertAudio: checked }))}/>
                   <Label htmlFor="auto-convert-audio" className="text-sm font-normal cursor-pointer">{t("translation.settings.autoConvertAudio")}</Label>
@@ -1167,7 +931,7 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
               </div>
 
               <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-muted-foreground">{t("translation.settings.m3u8Playlist")}</h3>
+              <h3 className="text-[11px] font-semibold tracking-widest uppercase text-muted-foreground">{t("translation.settings.m3u8Playlist")}</h3>
 
               <div className="flex items-center gap-3">
                 <Switch id="create-m3u8-file" checked={tempSettings.createM3u8File} onCheckedChange={(checked) => setTempSettings((prev) => ({
@@ -1180,12 +944,14 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
               </div>
               </div>
             </div>
-          </div>)}
+          </div>
+        </section>
 
-        {activeTab === "metadata" && (<div className="min-w-0 overflow-hidden space-y-6">
-          <div className="space-y-4">
+        <section className="max-w-4xl space-y-4">
+          <h2 className="border-b border-border pb-1.5 text-sm font-semibold tracking-tight">{t("translation.common.metadata")}</h2>
+          <div className="min-w-0 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h3 className="text-sm font-semibold text-muted-foreground">{t("translation.settings.embeddedTags")}</h3>
+              <h3 className="text-[11px] font-semibold tracking-widest uppercase text-muted-foreground">{t("translation.settings.embeddedTags")}</h3>
               <div className="flex gap-2">
                 <Button type="button" variant="outline" size="sm" onClick={() => setTempSettings((prev) => ({ ...prev, metadataTags: Object.fromEntries(METADATA_TAG_OPTIONS.map(({ key }) => [key, true])) as unknown as MetadataTagToggles }))}>{t("translation.settings.enableAll")}</Button>
                 <Button type="button" variant="outline" size="sm" onClick={() => setTempSettings((prev) => ({ ...prev, metadataTags: Object.fromEntries(METADATA_TAG_OPTIONS.map(({ key }) => [key, false])) as unknown as MetadataTagToggles }))}>{t("translation.settings.disableAll")}</Button>
@@ -1204,58 +970,13 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
               </div>))}
             </div>
           </div>
+        </section>
 
-        </div>)}
-
-        {activeTab === "status" && (<ApiStatusTab />)}
+        <section className="space-y-4">
+          <h2 className="border-b border-border pb-1.5 text-sm font-semibold tracking-tight">{t("translation.queue.status")}</h2>
+          <ApiStatusTab />
+        </section>
       </div>
-
-      <Dialog open={showAddFontDialog} onOpenChange={(open) => open ? setShowAddFontDialog(true) : closeAddFontDialog()}>
-        <DialogContent className="sm:max-w-115 [&>button]:hidden">
-          <DialogHeader>
-            <div className="flex items-center justify-between gap-3">
-              <DialogTitle>{t("translation.settings.addFont")}</DialogTitle>
-              <button type="button" onClick={() => openExternal("https://fonts.google.com")} className="inline-flex cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline">
-                {t("translation.settings.openGoogleFonts")}
-                <ExternalLink className="h-3 w-3"/>
-              </button>
-            </div>
-            <DialogDescription />
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="google-font-url">{t("translation.settings.googleFontUrl")}</Label>
-              <Input id="google-font-url" value={addFontUrl} onChange={(event) => setAddFontUrl(event.target.value)} onKeyDown={(event) => {
-            if (event.key === "Enter" && parsedAddFont) {
-                void handleAddFont();
-            }
-        }} placeholder={t("literal.settings.httpsFontsGoogleComSpecimen")} autoFocus/>
-              {addFontUrl.trim() && !parsedAddFont && (<p className="text-xs text-destructive">
-                  {t("translation.settings.enterValidGoogleFontsUrl")}
-                </p>)}
-            </div>
-            <div className="rounded-md border bg-muted/20 p-4">
-              <p className="mb-2 text-xs font-medium text-muted-foreground">
-                {t("translation.common.preview")}
-              </p>
-              <p className="text-2xl font-semibold leading-tight" style={{ fontFamily: parsedAddFont?.fontFamily }}>
-                {t("literal.settings.aaQuickBrownFox")}
-              </p>
-              <p className="mt-2 text-sm text-muted-foreground" style={{ fontFamily: parsedAddFont?.fontFamily }}>
-                {t("literal.settings.kendrickLamarAllStars")}
-              </p>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={closeAddFontDialog}>
-              {t("translation.common.cancel")}
-            </Button>
-            <Button onClick={() => void handleAddFont()} disabled={!parsedAddFont}>
-              {t("translation.common.add")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={showCustomTidalApiDialog} onOpenChange={setShowCustomTidalApiDialog}>
         <DialogContent className="sm:max-w-md [&>button]:hidden">
@@ -1368,9 +1089,9 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
           </DialogHeader>
           <div className="flex items-center justify-between gap-4">
             <Label>{t("translation.settings.dateFormat")}</Label>
-            <div className="flex w-fit rounded-lg bg-muted p-1">
-              <button type="button" onClick={() => setTempSettings((prev) => ({ ...prev, metadataDateFormat: "full" }))} className={`cursor-pointer rounded-md px-3 py-1 text-sm font-medium transition-colors ${tempSettings.metadataDateFormat === "full" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>{t("translation.settings.fullDateFormat")}</button>
-              <button type="button" onClick={() => setTempSettings((prev) => ({ ...prev, metadataDateFormat: "year" }))} className={`cursor-pointer rounded-md px-3 py-1 text-sm font-medium transition-colors ${tempSettings.metadataDateFormat === "year" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>{t("translation.settings.yearOnlyFormat")}</button>
+            <div className="flex w-fit border border-border bg-muted/50 p-0.5">
+              <button type="button" onClick={() => setTempSettings((prev) => ({ ...prev, metadataDateFormat: "full" }))} className={`cursor-pointer px-3 py-1 text-sm font-medium transition-colors ${tempSettings.metadataDateFormat === "full" ? "bg-background text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{t("translation.settings.fullDateFormat")}</button>
+              <button type="button" onClick={() => setTempSettings((prev) => ({ ...prev, metadataDateFormat: "year" }))} className={`cursor-pointer px-3 py-1 text-sm font-medium transition-colors ${tempSettings.metadataDateFormat === "year" ? "bg-background text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{t("translation.settings.yearOnlyFormat")}</button>
             </div>
           </div>
           <DialogFooter>

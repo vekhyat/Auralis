@@ -278,7 +278,7 @@ func ClearFetchHistoryByType(itemType string, appName string) error {
 			var item FetchHistoryItem
 			if err := json.Unmarshal(v, &item); err == nil {
 				if item.Type == itemType {
-					keysToDelete = append(keysToDelete, k)
+					keysToDelete = append(keysToDelete, append([]byte(nil), k...))
 				}
 			}
 		}

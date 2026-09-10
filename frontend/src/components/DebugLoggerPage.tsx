@@ -71,7 +71,7 @@ export function DebugLoggerPage() {
     };
     return (<div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">{t("translation.common.debugLogs")}</h1>
+        <h1 className="text-lg font-semibold tracking-tight">{t("translation.common.debugLogs")}</h1>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" className="gap-1.5" onClick={handleExportFailed}>
             <FileDown className="h-4 w-4"/>
@@ -88,7 +88,7 @@ export function DebugLoggerPage() {
         </div>
       </div>
 
-      <div ref={scrollRef} className="h-[calc(100vh-220px)] overflow-y-auto bg-muted/50 rounded-lg p-4 font-mono text-xs">
+      <div ref={scrollRef} className="custom-scrollbar h-[calc(100vh-200px)] overflow-y-auto border border-border bg-card p-4 font-mono text-xs">
         {logs.length === 0 ? (<p className="text-muted-foreground lowercase">{t("translation.debugLogger.noLogsYet")}</p>) : (logs.map((log, i) => (<div key={i} className="flex gap-2 py-0.5">
               <span className="text-muted-foreground shrink-0">
                 [{formatTime(log.timestamp)}]

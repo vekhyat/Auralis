@@ -1,0 +1,11 @@
+/* Auralis verification branding — applied inside the embedded window.
+   Cosmetic only: hides upstream SpotiFLAC chrome so the flow reads as Auralis. */
+
+/* Zarz challenge page (api.zarz.moe) */
+nav, footer, section, .footer-note { display: none !important; }
+.hero { padding-top: 88px !important; padding-bottom: 72px !important; }
+
+/* SpotBye verify page (verify.spotbye.qzz.io) */
+.brand, .tagline, .coffee-button { display: none !important; }
+
+html { background: #000 !important; }

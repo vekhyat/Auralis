@@ -204,13 +204,23 @@ export function initializeQueuePersistence(): Promise<void> {
         }
         const persisted = parseQueue(databasePayload, "database", true);
         if (!persisted) {
+            console.error("Download queue database payload is corrupt; leaving the stored queue untouched.");
             cache = [];
-            needsFullReplace = true;
             return;
         }
         const restored = restoreInterruptedItems(persisted);
         cache = restored.items;
-        if (restored.changed) {
+        let rawCount = persisted.length;
+        try {
+            const rawParsed = JSON.parse(databasePayload);
+            if (Array.isArray(rawParsed)) {
+                rawCount = rawParsed.length;
+            }
+        }
+        catch {
+            rawCount = persisted.length;
+        }
+        if (restored.changed || cache.length !== rawCount) {
             try {
                 await replacePersistentQueue(cache);
                 persistedCache = cache;

@@ -135,7 +135,7 @@ export function useQueue(download: QueueDownloadHandlers) {
     const pause = useCallback((type?: QueueItemType) => {
         if (!isProcessingRef.current || shouldPauseRef.current)
             return;
-        if (type !== undefined && processingTypeRef.current !== type)
+        if (type !== undefined && processingTypeRef.current !== null && processingTypeRef.current !== type)
             return;
         shouldPauseRef.current = true;
         setIsPausing(true);
@@ -146,7 +146,7 @@ export function useQueue(download: QueueDownloadHandlers) {
     const stop = useCallback((type?: QueueItemType) => {
         if (!isProcessingRef.current)
             return;
-        if (type !== undefined && processingTypeRef.current !== type)
+        if (type !== undefined && processingTypeRef.current !== null && processingTypeRef.current !== type)
             return;
         shouldStopRef.current = true;
         shouldPauseRef.current = false;

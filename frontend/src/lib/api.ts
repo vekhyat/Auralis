@@ -71,6 +71,7 @@ export async function downloadLyrics(request: LyricsDownloadRequest): Promise<Ly
 }
 export async function downloadCover(request: CoverDownloadRequest): Promise<CoverDownloadResponse> {
     const req = new main.CoverDownloadRequest(request);
+    Object.assign(req, request);
     return await DownloadCover(req);
 }
 export async function downloadHeader(request: HeaderDownloadRequest): Promise<HeaderDownloadResponse> {

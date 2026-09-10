@@ -20,12 +20,15 @@ func ValidateDownloadedTrackDuration(filePath string, expectedSeconds int) (bool
 
 	actualDuration, err := GetAudioDuration(filePath)
 	if err != nil || actualDuration <= 0 {
-		return false, nil
+		if err != nil {
+			return true, fmt.Errorf("downloaded file is not readable audio: %w", err)
+		}
+		return true, fmt.Errorf("downloaded file has no audio duration")
 	}
 
 	actualSeconds := int(math.Round(actualDuration))
 	if actualSeconds <= 0 {
-		return false, nil
+		return true, fmt.Errorf("downloaded file has no audio duration")
 	}
 
 	if expectedSeconds >= previewExpectedMinSeconds && actualSeconds <= previewMaxSeconds {

@@ -1,7 +1,7 @@
 import { t } from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { CircleCheckBig, XCircle, FileCheck, FileText, Globe, ImageDown, Play, Pause, ListPlus, CircleCheck } from "lucide-react";
+import { XCircle, FileCheck, FileText, Globe, ImageDown, Play, Pause, ListPlus, CircleCheck } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger, } from "@/components/ui/tooltip";
 import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious, } from "@/components/ui/pagination";
@@ -190,35 +190,35 @@ export function TrackList({ tracks, searchQuery, sortBy, selectedTracks, downloa
             return <Globe className="h-4 w-4"/>;
         }
         if (hasAvailabilityLinks(availability)) {
-            return <CircleCheck className="h-4 w-4 text-green-500"/>;
+            return <CircleCheck className="h-4 w-4"/>;
         }
-        return <XCircle className="h-4 w-4 text-red-500"/>;
+        return <XCircle className="h-4 w-4"/>;
     };
-    return (<div className="space-y-4">
-    <div className="rounded-md border">
+    return (<div className="space-y-3">
+    <div>
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
-            <tr className="border-b bg-muted/50">
-              {showCheckboxes && (<th className="h-12 px-4 text-left align-middle w-12">
+            <tr className="border-b border-border">
+              {showCheckboxes && (<th className="h-9 w-10 px-3 text-left align-middle">
                 <Checkbox checked={allSelected} onCheckedChange={() => onToggleSelectAll(filteredTracks)}/>
               </th>)}
-              <th className="h-12 px-4 text-left align-middle font-medium text-muted-foreground w-12">
+              <th className="h-9 w-10 px-2 text-left align-middle font-mono text-[10px] font-semibold tracking-widest uppercase text-muted-foreground">
                 #
               </th>
-              <th className="h-12 px-4 text-left align-middle font-medium text-muted-foreground">
+              <th className="h-9 px-3 text-left align-middle text-[10px] font-semibold tracking-widest uppercase text-muted-foreground">
                 {t("translation.common.title")}
               </th>
-              {!hideAlbumColumn && (<th className="h-12 px-4 text-left align-middle font-medium text-muted-foreground hidden md:table-cell">
+              {!hideAlbumColumn && (<th className="hidden h-9 px-3 text-left align-middle text-[10px] font-semibold tracking-widest uppercase text-muted-foreground md:table-cell">
                 {t("translation.common.album")}
               </th>)}
-              <th className="h-12 px-4 text-left align-middle font-medium text-muted-foreground hidden lg:table-cell w-24">
+              <th className="hidden h-9 w-20 px-3 text-left align-middle text-[10px] font-semibold tracking-widest uppercase text-muted-foreground lg:table-cell">
                 {t("translation.trackList.duration")}
               </th>
-              <th className="h-12 px-4 text-left align-middle font-medium text-muted-foreground hidden xl:table-cell w-32">
+              <th className="hidden h-9 w-28 px-3 text-left align-middle text-[10px] font-semibold tracking-widest uppercase text-muted-foreground xl:table-cell">
                 {t("translation.migrated.TrackList.plays")}
               </th>
-              <th className="h-12 px-4 text-center align-middle font-medium text-muted-foreground w-32">
+              <th className="h-9 w-32 px-3 text-center align-middle text-[10px] font-semibold tracking-widest uppercase text-muted-foreground">
                 {t("translation.common.actions")}
               </th>
             </tr>
@@ -244,35 +244,31 @@ export function TrackList({ tracks, searchQuery, sortBy, selectedTracks, downloa
                 }
             };
             const trackQueued = isQueued(track.spotify_id);
-            return (<tr key={getTrackKey(track)} onClick={showCheckboxes ? handleRowSelect : undefined} className={`border-b transition-colors hover:bg-muted/50 ${showCheckboxes && track.spotify_id ? "cursor-pointer select-none" : ""}`}>
-              {showCheckboxes && (<td className="p-4 align-middle">
+            const trackStatusWord = !track.spotify_id ? null : skippedTracks.has(track.spotify_id) ? t("translation.queue.skipped") : downloadedTracks.has(track.spotify_id) ? t("translation.queue.done") : failedTracks.has(track.spotify_id) ? t("translation.queue.failed") : null;
+            const trackStatusTone = trackStatusWord === t("translation.queue.failed") ? "text-destructive" : "text-muted-foreground";
+            return (<tr key={getTrackKey(track)} onClick={showCheckboxes ? handleRowSelect : undefined} className={`border-b border-border transition-colors hover:bg-muted/60 ${showCheckboxes && track.spotify_id ? "cursor-pointer select-none" : ""}`}>
+              {showCheckboxes && (<td className="px-3 py-2 align-middle">
                 {track.spotify_id && (<Checkbox checked={selectedTracks.includes(track.spotify_id)} className="pointer-events-none"/>)}
               </td>)}
-              <td className="p-4 align-middle text-sm text-muted-foreground">
+              <td className="px-2 py-2 text-right align-middle font-mono text-xs tabular-nums text-muted-foreground">
                 <div className="flex flex-col items-center gap-0.5">
                   <span>{startIndex + index + 1}</span>
-                  {track.status && (track.status === "UP" || track.status === "DOWN" || track.status === "NEW") && (<span className={`text-xs ${track.status === "UP"
-                        ? "text-green-500"
-                        : track.status === "DOWN"
-                            ? "text-red-500"
-                            : track.status === "NEW"
-                                ? "text-blue-500"
-                                : ""}`}>
+                  {track.status && (track.status === "UP" || track.status === "DOWN" || track.status === "NEW") && (<span className="font-mono text-[10px] text-muted-foreground">
                     {track.status === "NEW" ? "●" : track.status === "UP" ? "▲" : "▼"}
                   </span>)}
                 </div>
               </td>
-              <td className="p-4 align-middle">
+              <td className="px-3 py-2 align-middle">
                 <div className="flex items-center gap-3">
-                  {track.images && (<img src={track.images} alt={track.name} className="w-10 h-10 rounded object-cover"/>)}
-                  <div className="flex flex-col">
-                    <div className="flex items-center gap-2">
-                      {onTrackClick ? (<button type="button" className="font-medium cursor-pointer rounded-sm bg-transparent p-0 text-left text-inherit hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60" onClick={(event) => { event.stopPropagation(); onTrackClick(track); }}>
+                  {track.images && (<img src={track.images} alt={track.name} loading="lazy" referrerPolicy="no-referrer" className="size-7 rounded-[2px] object-cover"/>)}
+                  <div className="flex min-w-0 flex-col">
+                    <div className="flex min-w-0 items-baseline gap-2">
+                      {onTrackClick ? (<button type="button" className="cursor-pointer truncate bg-transparent p-0 text-left text-[13px] font-medium text-inherit underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60" onClick={(event) => { event.stopPropagation(); onTrackClick(track); }}>
                         {track.name}
-                      </button>) : (<span className="font-medium">{track.name}</span>)}
-                      {track.is_explicit && (<span className="inline-flex items-center justify-center bg-red-600 text-white text-[10px] h-4 w-4 rounded shrink-0" title={t("translation.common.explicit")}>E</span>)}
+                      </button>) : (<span className="truncate text-[13px] font-medium">{track.name}</span>)}
+                      {track.is_explicit && (<span className="shrink-0 font-mono text-[9px] tracking-widest uppercase text-muted-foreground" title={t("translation.common.explicit")}>{t("translation.common.explicit")}</span>)}
 
-                      {track.spotify_id && skippedTracks.has(track.spotify_id) ? (<FileCheck className="h-4 w-4 text-yellow-500 shrink-0"/>) : track.spotify_id && downloadedTracks.has(track.spotify_id) ? (<CircleCheckBig className="h-4 w-4 text-green-500 shrink-0"/>) : track.spotify_id && failedTracks.has(track.spotify_id) ? (<XCircle className="h-4 w-4 text-red-500 shrink-0"/>) : null}
+                      {trackStatusWord && (<span className={`shrink-0 font-mono text-[10px] uppercase tracking-wider ${trackStatusTone}`}>{trackStatusWord}</span>)}
                     </div>
                     <span className="text-sm text-muted-foreground">
                       {(() => {
@@ -298,8 +294,8 @@ export function TrackList({ tracks, searchQuery, sortBy, selectedTracks, downloa
                   </div>
                 </div>
               </td>
-              {!hideAlbumColumn && (<td className="p-4 align-middle text-sm text-muted-foreground hidden md:table-cell">
-                {onAlbumClick && track.album_id && track.album_url ? (<button type="button" className="cursor-pointer rounded-sm bg-transparent p-0 text-left text-inherit hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60" onClick={(event) => {
+              {!hideAlbumColumn && (<td className="hidden px-3 py-2 align-middle text-sm text-muted-foreground md:table-cell">
+                {onAlbumClick && track.album_id && track.album_url ? (<button type="button" className="cursor-pointer truncate bg-transparent p-0 text-left text-inherit underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60" onClick={(event) => {
                             event.stopPropagation();
                             onAlbumClick({
                                 id: track.album_id!,
@@ -310,13 +306,13 @@ export function TrackList({ tracks, searchQuery, sortBy, selectedTracks, downloa
                   {track.album_name}
                 </button>) : (track.album_name)}
               </td>)}
-              <td className="p-4 align-middle text-sm text-muted-foreground hidden lg:table-cell">
+              <td className="hidden px-3 py-2 align-middle font-mono text-xs tabular-nums text-muted-foreground lg:table-cell">
                 {formatDuration(track.duration_ms)}
               </td>
-              <td className="p-4 align-middle text-sm text-muted-foreground hidden xl:table-cell">
+              <td className="hidden px-3 py-2 align-middle font-mono text-xs tabular-nums text-muted-foreground xl:table-cell">
                 {track.plays ? formatPlays(track.plays) : ""}
               </td>
-              <td className="p-4 align-middle text-center">
+              <td className="px-3 py-2 text-center align-middle">
                 <div className="flex items-center justify-center gap-1" onClick={(event) => event.stopPropagation()}>
                   {track.spotify_id && onQueueTrack && (<Tooltip>
                     <TooltipTrigger asChild>
@@ -339,7 +335,7 @@ export function TrackList({ tracks, searchQuery, sortBy, selectedTracks, downloa
                   {track.spotify_id && onDownloadLyrics && (<Tooltip>
                     <TooltipTrigger asChild>
                       <Button onClick={() => onDownloadLyrics(track.spotify_id!, track.name, track.artists, track.album_name, folderName, isArtistDiscography, startIndex + index + 1, track.album_artist, track.release_date, track.disc_number)} size="icon" variant="outline" disabled={downloadingLyricsTrack === track.spotify_id}>
-                        {downloadingLyricsTrack === track.spotify_id ? (<Spinner />) : skippedLyrics?.has(track.spotify_id) ? (<FileCheck className="h-4 w-4 text-yellow-500"/>) : downloadedLyrics?.has(track.spotify_id) ? (<CircleCheck className="h-4 w-4 text-green-500"/>) : failedLyrics?.has(track.spotify_id) ? (<XCircle className="h-4 w-4 text-red-500"/>) : (<FileText className="h-4 w-4"/>)}
+                        {downloadingLyricsTrack === track.spotify_id ? (<Spinner />) : skippedLyrics?.has(track.spotify_id) ? (<FileCheck className="h-4 w-4"/>) : downloadedLyrics?.has(track.spotify_id) ? (<CircleCheck className="h-4 w-4"/>) : failedLyrics?.has(track.spotify_id) ? (<XCircle className="h-4 w-4"/>) : (<FileText className="h-4 w-4"/>)}
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>
@@ -352,7 +348,7 @@ export function TrackList({ tracks, searchQuery, sortBy, selectedTracks, downloa
                         const trackId = track.spotify_id || `${track.name}-${track.artists}`;
                         onDownloadCover(track.images, track.name, track.artists, track.album_name, folderName, isArtistDiscography, startIndex + index + 1, trackId, track.album_artist, track.release_date, track.disc_number);
                     }} size="icon" variant="outline" disabled={downloadingCoverTrack === (track.spotify_id || `${track.name}-${track.artists}`)}>
-                        {downloadingCoverTrack === (track.spotify_id || `${track.name}-${track.artists}`) ? (<Spinner />) : skippedCovers?.has(track.spotify_id || `${track.name}-${track.artists}`) ? (<FileCheck className="h-4 w-4 text-yellow-500"/>) : downloadedCovers?.has(track.spotify_id || `${track.name}-${track.artists}`) ? (<CircleCheck className="h-4 w-4 text-green-500"/>) : failedCovers?.has(track.spotify_id || `${track.name}-${track.artists}`) ? (<XCircle className="h-4 w-4 text-red-500"/>) : (<ImageDown className="h-4 w-4"/>)}
+                        {downloadingCoverTrack === (track.spotify_id || `${track.name}-${track.artists}`) ? (<Spinner />) : skippedCovers?.has(track.spotify_id || `${track.name}-${track.artists}`) ? (<FileCheck className="h-4 w-4"/>) : downloadedCovers?.has(track.spotify_id || `${track.name}-${track.artists}`) ? (<CircleCheck className="h-4 w-4"/>) : failedCovers?.has(track.spotify_id || `${track.name}-${track.artists}`) ? (<XCircle className="h-4 w-4"/>) : (<ImageDown className="h-4 w-4"/>)}
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>

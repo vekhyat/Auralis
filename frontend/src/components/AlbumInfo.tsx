@@ -1,11 +1,12 @@
-import { t, translateMessage } from "@/i18n";
+import { translateMessage } from "@/i18n";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { FolderOpen, ImageDown, FileText, XCircle, ListPlus, CircleCheck } from "lucide-react";
+import { FolderOpen, ImageDown, FileText, ListPlus, CircleCheck } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SearchAndSort } from "./SearchAndSort";
 import { TrackList } from "./TrackList";
+import { InspectorPane } from "./InspectorPane";
 import { getSettings } from "@/lib/settings";
 import { downloadCover } from "@/lib/api";
 import { useState } from "react";
@@ -72,6 +73,7 @@ interface AlbumInfoProps {
     onBack?: () => void;
 }
 export function AlbumInfo({ albumInfo, trackList, searchQuery, sortBy, selectedTracks, downloadedTracks, failedTracks, skippedTracks, currentPage, itemsPerPage, downloadedLyrics, failedLyrics, skippedLyrics, downloadingLyricsTrack, checkingAvailabilityTrack, availabilityMap, downloadedCovers, failedCovers, skippedCovers, downloadingCoverTrack, isBulkDownloadingCovers, isBulkDownloadingLyrics, isMetadataLoading = false, onSearchChange, onSortChange, onToggleTrack, onToggleSelectAll, onSelectTrackRange, onDownloadLyrics, onDownloadCover, onCheckAvailability, onDownloadAllLyrics, onDownloadAllCovers, onQueueAll, onQueueSelected, onQueueTrack, onOpenFolder, onPageChange, onArtistClick, onTrackClick, onBack, }: AlbumInfoProps) {
+    const { t } = useTranslation();
     const settings = getSettings();
     const albumArtistNames = splitArtistNames(albumInfo.artists);
     const artistSeparator = albumInfo.artists.includes(";") ? "; " : ", ";
@@ -178,102 +180,82 @@ export function AlbumInfo({ albumInfo, trackList, searchQuery, sortBy, selectedT
             setDownloadingAlbumCover(false);
         }
     };
-    return (<div className="space-y-6">
-      <Card className="relative">
-      {onBack && (<div className="absolute top-4 right-4 z-10">
-          <Button variant="ghost" size="icon" onClick={onBack} className="text-muted-foreground hover:bg-transparent hover:text-foreground">
-              <XCircle className="h-5 w-5"/>
-          </Button>
-      </div>)}
-        <CardContent className="px-6">
-          <div className="flex gap-6 items-start">
-            {albumInfo.images && (<div className="relative group shrink-0 w-48 h-48">
-                <img src={albumInfo.images} alt={albumInfo.name} className="w-48 h-48 rounded-md shadow-lg object-cover"/>
-                <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity rounded-md">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button variant="secondary" size="icon" className="h-9 w-9 shadow-lg" onClick={handleDownloadAlbumCover} disabled={downloadingAlbumCover}>
-                        {downloadingAlbumCover ? <Spinner /> : <ImageDown className="h-4 w-4"/>}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent><p>{t("translation.albumInfo.downloadSeparateAlbumCover")}</p></TooltipContent>
-                  </Tooltip>
-                </div>
-              </div>)}
-            <div className="flex-1 space-y-4">
-              <div className="space-y-2">
-                <p className="text-sm font-medium flex items-center gap-2">
-                  {albumInfo.is_explicit && (<span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded bg-red-600 text-[10px] text-white" title={t("translation.common.explicit")}>E</span>)}
-                  <span>{t("translation.common.album")}</span>
-                </p>
-                <h2 className="text-4xl font-bold">{albumInfo.name}</h2>
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <span className="font-medium text-muted-foreground">
-                    {clickableAlbumArtists.length > 0 ? clickableAlbumArtists.map((artist, index) => (<span key={getClickableArtistKey(artist)}>
-                          {onArtistClick && artist.external_urls ? (<button type="button" className="cursor-pointer rounded-sm bg-transparent p-0 text-inherit hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60" onClick={() => onArtistClick({
-                    id: artist.id,
-                    name: artist.name,
-                    external_urls: artist.external_urls,
-                })}>
-                              {artist.name}
-                            </button>) : (artist.name)}
-                          {index < clickableAlbumArtists.length - 1 && artistSeparator}
-                        </span>)) : albumInfo.artists}
-                  </span>
-                  <span>•</span>
-                  <span>{albumInfo.release_date}</span>
-                  <span>•</span>
-                  <span>
-                    {showStreamingProgress
-            ? t("translation.migrated.AlbumInfo.tracks", { value1: fetchedTrackCount.toLocaleString(), value2: totalTrackCount.toLocaleString() })
-            : t("translation.migrated.AlbumInfo.text", { value1: Math.max(totalTrackCount, fetchedTrackCount).toLocaleString(), value2: Math.max(totalTrackCount, fetchedTrackCount) === 1 ? t("translation.artistInfo.track") : t("translation.artistInfo.tracks") })}
-                  </span>
-                </div>
-              </div>
-              <div className="flex gap-2 flex-wrap">
-                <Button onClick={onQueueAll} variant={allTracksQueued ? "outline" : "default"}>
-                  {allTracksQueued ? (<CircleCheck className="h-4 w-4 text-primary"/>) : (<ListPlus className="h-4 w-4"/>)}
-                  {t(allTracksQueued ? "translation.queue.alreadyInQueue" : "translation.queue.addToQueue")}
-                </Button>
-                {selectedTracks.length > 0 && onQueueSelected && (<Button onClick={onQueueSelected} variant="outline">{selectedTracksQueued ? (<CircleCheck className="h-4 w-4 text-primary"/>) : (<ListPlus className="h-4 w-4"/>)}{selectedTracksQueued ? t("translation.queue.alreadyInQueue") : t("translation.queue.addSelectedQueueValue1", { value1: selectedTracks.length.toLocaleString() })}</Button>)}
-                {onDownloadAllLyrics && (<Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button onClick={onDownloadAllLyrics} variant="outline" size="icon" disabled={isBulkDownloadingLyrics}>
-                        {isBulkDownloadingLyrics ? <Spinner /> : <FileText className="h-4 w-4"/>}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>{t("translation.common.downloadAllLyrics")}</p>
-                    </TooltipContent>
-                  </Tooltip>)}
-                {onDownloadAllCovers && (<Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button onClick={onDownloadAllCovers} variant="outline" size="icon" disabled={isBulkDownloadingCovers}>
-                        {isBulkDownloadingCovers ? <Spinner /> : <ImageDown className="h-4 w-4"/>}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>{t("translation.common.downloadAllSeparateCovers")}</p>
-                    </TooltipContent>
-                  </Tooltip>)}
-                {downloadedTracks.size > 0 && (<Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button onClick={onOpenFolder} variant="outline" size="icon">
-                        <FolderOpen className="h-4 w-4"/>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>{t("translation.common.openFolder")}</p>
-                    </TooltipContent>
-                  </Tooltip>)}
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-      <div className="space-y-4">
+    return (<div className="flex items-start gap-6">
+      <div className="min-w-0 flex-1 space-y-4">
         <SearchAndSort searchQuery={searchQuery} sortBy={sortBy} onSearchChange={onSearchChange} onSortChange={onSortChange}/>
         <TrackList tracks={trackList} searchQuery={searchQuery} sortBy={sortBy} selectedTracks={selectedTracks} downloadedTracks={downloadedTracks} failedTracks={failedTracks} skippedTracks={skippedTracks} currentPage={currentPage} itemsPerPage={itemsPerPage} showCheckboxes={true} hideAlbumColumn={true} folderName={albumInfo.name} downloadedLyrics={downloadedLyrics} failedLyrics={failedLyrics} skippedLyrics={skippedLyrics} downloadingLyricsTrack={downloadingLyricsTrack} checkingAvailabilityTrack={checkingAvailabilityTrack} availabilityMap={availabilityMap} onToggleTrack={onToggleTrack} onToggleSelectAll={onToggleSelectAll} onSelectTrackRange={onSelectTrackRange} onQueueTrack={onQueueTrack} onDownloadLyrics={onDownloadLyrics} onDownloadCover={onDownloadCover} downloadedCovers={downloadedCovers} failedCovers={failedCovers} skippedCovers={skippedCovers} downloadingCoverTrack={downloadingCoverTrack} onCheckAvailability={onCheckAvailability} onPageChange={onPageChange} onArtistClick={onArtistClick} onTrackClick={onTrackClick}/>
       </div>
+
+      <InspectorPane
+        eyebrow={t("translation.common.album")}
+        title={albumInfo.name}
+        subtitle={albumInfo.is_explicit ? t("translation.common.explicit") : undefined}
+        cover={albumInfo.images || undefined}
+        rows={[
+            {
+                label: t("translation.common.artist"),
+                value: clickableAlbumArtists.length > 0 ? clickableAlbumArtists.map((artist, index) => (<span key={getClickableArtistKey(artist)}>
+                      {onArtistClick && artist.external_urls ? (<button type="button" className="cursor-pointer bg-transparent p-0 text-inherit underline decoration-border underline-offset-4 transition-colors hover:text-primary hover:decoration-primary" onClick={() => onArtistClick({
+                            id: artist.id,
+                            name: artist.name,
+                            external_urls: artist.external_urls,
+                        })}>
+                          {artist.name}
+                        </button>) : (artist.name)}
+                      {index < clickableAlbumArtists.length - 1 && artistSeparator}
+                    </span>)) : albumInfo.artists,
+            },
+            { label: t("translation.trackInfo.releaseDate"), value: <span className="font-mono tabular-nums">{albumInfo.release_date}</span> },
+            {
+                label: t("translation.artistInfo.tracks"),
+                value: showStreamingProgress
+                    ? <span className="font-mono tabular-nums">{`${fetchedTrackCount.toLocaleString()} / ${totalTrackCount.toLocaleString()}`}</span>
+                    : <span className="font-mono tabular-nums">{Math.max(totalTrackCount, fetchedTrackCount).toLocaleString()}</span>,
+            },
+        ]}
+        actions={<>
+          <Button size="sm" variant={allTracksQueued ? "outline" : "default"} onClick={onQueueAll}>
+            {allTracksQueued ? (<CircleCheck className="size-3.5"/>) : (<ListPlus className="size-3.5"/>)}
+            {t(allTracksQueued ? "translation.queue.alreadyInQueue" : "translation.queue.addToQueue")}
+          </Button>
+          {selectedTracks.length > 0 && onQueueSelected && (<Button size="sm" variant="outline" onClick={onQueueSelected}>{selectedTracksQueued ? (<CircleCheck className="size-3.5"/>) : (<ListPlus className="size-3.5"/>)}
+            {selectedTracksQueued ? t("translation.queue.alreadyInQueue") : t("translation.queue.addSelectedQueueValue1", { value1: selectedTracks.length.toLocaleString() })}</Button>)}
+          {onDownloadAllLyrics && (<Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="icon-sm" disabled={isBulkDownloadingLyrics} onClick={onDownloadAllLyrics}>
+                  {isBulkDownloadingLyrics ? <Spinner /> : <FileText className="size-3.5"/>}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent><p>{t("translation.common.downloadAllLyrics")}</p></TooltipContent>
+            </Tooltip>)}
+          {onDownloadAllCovers && (<Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="icon-sm" disabled={isBulkDownloadingCovers} onClick={onDownloadAllCovers}>
+                  {isBulkDownloadingCovers ? <Spinner /> : <ImageDown className="size-3.5"/>}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent><p>{t("translation.common.downloadAllSeparateCovers")}</p></TooltipContent>
+            </Tooltip>)}
+          {albumInfo.images && (<Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="icon-sm" disabled={downloadingAlbumCover} onClick={() => void handleDownloadAlbumCover()}>
+                  {downloadingAlbumCover ? <Spinner /> : <ImageDown className="size-3.5"/>}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent><p>{t("translation.albumInfo.downloadSeparateAlbumCover")}</p></TooltipContent>
+            </Tooltip>)}
+          {downloadedTracks.size > 0 && (<Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="icon-sm" onClick={onOpenFolder}>
+                  <FolderOpen className="size-3.5"/>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent><p>{t("translation.common.openFolder")}</p></TooltipContent>
+            </Tooltip>)}
+          {onBack ? (<Button variant="ghost" size="sm" className="h-8 px-2 text-xs text-muted-foreground" onClick={onBack}>
+              {t("translation.common.back")}
+            </Button>) : null}
+        </>}
+      />
     </div>);
 }

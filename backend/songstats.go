@@ -124,5 +124,10 @@ func assignSongstatsLink(rawLink string, links *resolvedTrackLinks) {
 			links.DeezerURL = normalizeDeezerTrackURL(link)
 			fmt.Println("Deezer URL found via Songstats")
 		}
+	case strings.Contains(link, "qobuz.com"):
+		if links.QobuzURL == "" {
+			links.QobuzURL = link
+			fmt.Println("Qobuz URL found via Songstats")
+		}
 	}
 }

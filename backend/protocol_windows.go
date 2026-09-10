@@ -14,7 +14,9 @@ func RegisterAuralisProtocol() error {
 	if err := registerURLProtocol("auralis", "Auralis Protocol"); err != nil {
 		return err
 	}
-	// Zarz's browser challenge still returns grants on spotiflac://.
+	// Zarz's browser challenge page is server-rendered with SpotiFLAC branding;
+	// grants are picked up by polling, but keep the legacy spotiflac:// handler
+	// registered so old copied fallback links still open the app.
 	if err := registerURLProtocol("spotiflac", "Auralis Protocol"); err != nil {
 		fmt.Printf("Could not register spotiflac:// grant handler: %v\n", err)
 	}

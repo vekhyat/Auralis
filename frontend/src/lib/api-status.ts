@@ -17,6 +17,9 @@ export const API_SOURCES: ApiSource[] = [
     { id: "tidal", type: "tidal", name: "Tidal", url: "" },
     { id: "qobuz", type: "qobuz", name: "Qobuz", url: "" },
     { id: "amazon", type: "amazon", name: "Amazon Music", url: "" },
+    { id: "deezer", type: "deezer", name: "Deezer", url: "" },
+    { id: "apple", type: "apple", name: "Apple Music", url: "" },
+    { id: "jiosaavn", type: "jiosaavn", name: "JioSaavn", url: "" },
 ];
 export const SPOTIFLAC_NEXT_SOURCES: SpotiFLACNextSource[] = [
     { id: "tidal", name: "Tidal", statusPrefix: "tidal_" },

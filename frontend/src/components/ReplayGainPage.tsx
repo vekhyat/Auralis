@@ -2,7 +2,7 @@ import { t, translateMessage } from "@/i18n";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Activity, AlertCircle, AlertTriangle, CircleCheckBig, ChevronDown, CircleHelp, FileMusic, FolderOpen, Gauge, Save, StopCircle, Trash2, Upload, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { AudioWaveformIcon } from "@/components/ui/audio-waveform";
+import { AudioWaveform } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -399,18 +399,18 @@ export function ReplayGainPage() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <div className="space-y-1.5">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("translation.replayGain.integratedLoudness")}</p>
-              <div className="flex items-baseline gap-2"><span className="font-mono text-4xl font-bold text-primary">{result.integrated_loudness.toFixed(2)}</span><span className="text-sm font-medium text-muted-foreground">{LOUDNESS_UNIT}</span></div>
+              <div className="flex items-baseline gap-2"><span className="font-mono text-2xl font-semibold text-primary">{result.integrated_loudness.toFixed(2)}</span><span className="text-sm font-medium text-muted-foreground">{LOUDNESS_UNIT}</span></div>
             </div>
             <div className="space-y-1.5">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("translation.replayGain.recommendedGain")}</p>
               <div className="flex items-center gap-2">
-                <div className="flex items-baseline gap-2"><span className="font-mono text-4xl font-bold">{formatSigned(trackGain)}</span><span className="text-sm font-medium text-muted-foreground">{GAIN_UNIT}</span></div>
+                <div className="flex items-baseline gap-2"><span className="font-mono text-2xl font-semibold">{formatSigned(trackGain)}</span><span className="text-sm font-medium text-muted-foreground">{GAIN_UNIT}</span></div>
                 {clippingRisk && (<Tooltip delayDuration={150}><TooltipTrigger asChild><Badge tabIndex={0} variant="outline" className="cursor-help border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"><AlertTriangle className="h-3 w-3"/>{t("translation.replayGain.clippingRisk")}</Badge></TooltipTrigger><TooltipContent side="top" className="max-w-72"><p>{t("translation.replayGain.clippingHint")}</p></TooltipContent></Tooltip>)}
               </div>
             </div>
             <div className="space-y-1.5">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("translation.replayGain.truePeak")}</p>
-              <div className="flex items-baseline gap-2"><span className="font-mono text-4xl font-bold">{result.true_peak.toFixed(2)}</span><span className="text-sm font-medium text-muted-foreground">{TRUE_PEAK_UNIT}</span></div>
+              <div className="flex items-baseline gap-2"><span className="font-mono text-2xl font-semibold">{result.true_peak.toFixed(2)}</span><span className="text-sm font-medium text-muted-foreground">{TRUE_PEAK_UNIT}</span></div>
             </div>
           </div>
         </CardContent>
@@ -450,7 +450,7 @@ export function ReplayGainPage() {
       </div>
     </div>) : activeItem?.state === "error" ? (<div className="flex min-h-full items-center justify-center">
       <div className="w-full max-w-md space-y-4 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-center text-sm text-destructive"><p>{translateMessage(activeItem.error || t("translation.replayGain.analysisFailed"))}</p>{!analyzing && <Button onClick={analyzePending}>{t("translation.queue.retry")}</Button>}</div>
-    </div>) : (<div className="flex min-h-full flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground"><AudioWaveformIcon className="text-primary" size={36}/><span>{t("translation.replayGain.resultsAppearHere")}</span></div>);
+    </div>) : (<div className="flex min-h-full flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground"><AudioWaveform className="size-9 text-primary"/><span>{t("translation.replayGain.resultsAppearHere")}</span></div>);
     return (<div className="flex h-[calc(100dvh-5.5rem)] min-h-0 flex-col gap-6 md:h-[calc(100dvh-6.5rem)]">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">{t("translation.replayGain.title")}</h1>

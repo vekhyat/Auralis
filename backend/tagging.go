@@ -52,6 +52,29 @@ func TagFile(filePath string, metadata Metadata, coverPath string) error {
 	return nil
 }
 
+// TagFileMerge overlays metadata onto existing tags without dropping ReplayGain,
+// MusicBrainz IDs, or other fields that are not in Metadata.
+func TagFileMerge(filePath string, metadata Metadata, coverPath string) error {
+	filePath = norm.NFC.String(filePath)
+	if coverPath != "" && fileExists(coverPath) {
+		if err := writeTagImage(filePath, coverPath); err != nil {
+			fmt.Printf("Warning: failed to write cover art: %v\n", err)
+		}
+	}
+
+	tags := buildTagMap(filePath, metadata)
+	if len(tags) == 0 {
+		return applyContainerSpecificTags(filePath, metadata, tags)
+	}
+	if err := taglib.WriteTags(filePath, tags, 0); err != nil {
+		return fmt.Errorf("failed to merge tags: %w", err)
+	}
+	if err := applyContainerSpecificTags(filePath, metadata, tags); err != nil {
+		fmt.Printf("Warning: failed to apply container-specific tags: %v\n", err)
+	}
+	return nil
+}
+
 func ApplyMetadataTagSelection(filePath string, selection MetadataTagSelection) error {
 	filePath = norm.NFC.String(filePath)
 	tags, err := taglib.ReadTags(filePath)

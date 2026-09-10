@@ -207,6 +207,8 @@
       "albumName": "Album name",
       "artistZ": "Artist (A-Z)",
       "artistZ2": "Artist (Z-A)",
+      "more": "More",
+      "back": "Back",
       "audioConverter": "Audio Converter",
       "audioQualityAnalyzer": "Audio Quality Analyzer",
       "bpmKeyAnalyzer": "BPM & Key Analyzer",
@@ -413,6 +415,25 @@
     "header": {
       "reload": "Reload Auralis",
       "tagline": "Paste a Spotify link or search. Fetch lossless audio from Tidal, Qobuz, and Amazon Music."
+    },
+    "omnibar": {
+      "placeholder": "Paste a link, or search tracks, albums, artists, playlists"
+    },
+    "catalog": {
+      "emptyHint": "Paste a streaming link above, or type to search. Results open as a catalog; select an entry to inspect it.",
+      "recentFetches": "Recent fetches",
+      "recentSearches": "Recent searches",
+      "remove": "Remove",
+      "resultsFor": "Results",
+      "selectToInspect": "Select an entry to inspect it here.",
+      "fetchLossless": "Fetch lossless",
+      "owner": "Owner",
+      "followers": "Followers",
+      "listeners": "Listeners",
+      "rank": "Rank",
+      "genres": "Genres",
+      "verified": "Verified",
+      "discography": "Discography"
     },
     "history": {
       "clearDownloadHistory": "Clear Download History?",
@@ -631,6 +652,7 @@
     "sidebar": {
       "reportBugsRequestFeatures": "Report Bugs or Request Features",
       "home": "Home",
+      "library": "Library",
       "important": "Important",
       "tools": "Tools",
       "cancel": "Cancel",
@@ -1250,7 +1272,9 @@
       "mb": "MB",
       "aiff": "AIFF",
       "amazonMusic": "Amazon Music",
+      "appleMusic": "Apple Music",
       "deezer": "Deezer",
+      "jiosaavn": "JioSaavn",
       "isrc": "ISRC",
       "lrclib": "LRCLIB",
       "mp3": "MP3",

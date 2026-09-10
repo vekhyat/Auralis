@@ -969,6 +969,16 @@ func ConvertAudio(req ConvertAudioRequest) ([]ConvertAudioResult, error) {
 			outputFile := filepath.Join(outputDir, baseName+outputExt)
 			outputFile = norm.NFC.String(outputFile)
 
+			if _, existsErr := os.Stat(outputFile); existsErr == nil {
+				result.Error = "output file already exists"
+				result.Success = false
+				result.OutputFile = outputFile
+				mu.Lock()
+				results[idx] = result
+				mu.Unlock()
+				return
+			}
+
 			if inputExt == outputExt {
 				result.Error = "Input and output formats are the same"
 				result.Success = false
