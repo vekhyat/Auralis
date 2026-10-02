@@ -33,6 +33,7 @@ import { ToolsPage, type ToolGroup } from "@/components/ToolsPage";
 import { SettingsPage } from "@/components/SettingsPage";
 import { DebugLoggerPage } from "@/components/DebugLoggerPage";
 import { HistoryPage } from "@/components/HistoryPage";
+import { DevicesPage } from "@/components/DevicesPage";
 import { QueuePage } from "@/components/QueuePage";
 import type { HistoryItem } from "@/components/FetchHistory";
 import type { PageType } from "@/pages";
@@ -174,6 +175,31 @@ function App() {
         setSpotifyUrl(metadata.navigationUrl);
         setSmartSearchInput(metadata.navigationUrl);
     }, [metadata.navigationUrl]);
+    useEffect(() => {
+        let first = true;
+        const seen = new Set<string>();
+        EventsOn("ipod:devices", (devices: Array<{ id?: string; name?: string }> | null) => {
+            const list = Array.isArray(devices) ? devices : [];
+            if (first) {
+                first = false;
+                for (const device of list) {
+                    if (device.id) seen.add(device.id);
+                }
+                return;
+            }
+            for (const device of list) {
+                if (!device.id || seen.has(device.id)) continue;
+                toast.success(i18n.t("translation.devices.connected", { name: device.name || "" }));
+            }
+            seen.clear();
+            for (const device of list) {
+                if (device.id) seen.add(device.id);
+            }
+        });
+        return () => {
+            EventsOff("ipod:devices");
+        };
+    }, []);
     const [isFFmpegInstalled, setIsFFmpegInstalled] = useState<boolean | null>(null);
     const [isInstallingFFmpeg, setIsInstallingFFmpeg] = useState(false);
     const [ffmpegInstallProgress, setFfmpegInstallProgress] = useState(0);
@@ -659,6 +685,8 @@ function App() {
                 return <SettingsPage onUnsavedChangesChange={setHasUnsavedSettings} onResetRequest={setResetSettingsFn}/>;
             case "debug":
                 return <DebugLoggerPage />;
+            case "devices":
+                return <DevicesPage />;
             case "history":
                 return <HistoryPage onHistorySelect={(item) => {
                         setSmartSearchInput(item.url);

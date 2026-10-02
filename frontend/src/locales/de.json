@@ -1216,6 +1216,51 @@
     "metadata": {
       "fetched_other": "{{formattedCount}} Titel abgerufen",
       "fetched_one": "{{formattedCount}} Spur abgerufen"
+    },
+    "devices": {
+      "destination": "Geräte",
+      "title": "Geräte",
+      "intro": "Schließe einen iPod an. Auralis kopiert die Musik und schreibt die Datenbank des Players. iTunes ist nicht nötig.",
+      "empty": "Kein iPod verbunden",
+      "emptyHint": "Stecke den iPod per USB an. Wenn Windows kein Laufwerk zeigt, schalte den Festplattenmodus am iPod ein und verbinde ihn erneut.",
+      "warnNoDrive": "Windows kann diesen iPod nicht lesen. Wenn er am Mac formatiert wurde, stelle ihn wieder her und wähle Windows (FAT32). Ohne Laufwerksbuchstaben den Festplattenmodus einschalten und neu verbinden.",
+      "warnUnsupported": "Dieses Modell nutzt eine Datenbank, die Auralis nicht sicher schreiben kann. Es wurde nichts geändert.",
+      "warnUnverified": "Dieses Modell steht nicht auf der bekannten Liste. Titel können trotzdem gesendet werden. Wirf den iPod aus und prüfe ihn, bevor du dich auf die Kopie verlässt.",
+      "warnDatabase": "Die Datenbank auf dem iPod ließ sich nicht lesen. Senden ist aus, damit sie nicht durch eine leere Bibliothek ersetzt wird. Doctor kann sie nach einem Backup neu aufbauen.",
+      "warnRockbox": "Rockbox ist installiert, die Original-Datenbank wird nicht geschrieben. Dateien werden unverändert kopiert, auch FLAC. Der Original-Player zeigt sie nicht an.",
+      "warnNoFirewire": "Dieser iPod braucht eine FireWire-ID, um die Datenbank zu signieren. Es wurde keine gefunden. Senden ist aus.",
+      "free": "{{free}} frei von {{total}}",
+      "tracks": "Titel",
+      "sendFiles": "Dateien senden",
+      "sendFolder": "Ordner senden",
+      "eject": "Auswerfen",
+      "remove": "Entfernen",
+      "alac": "Verlustfreies ALAC",
+      "aac": "Kleineres AAC",
+      "copyNote": "Passende MP3-, AAC-, ALAC-, WAV- und AIFF-Dateien werden unverändert kopiert. Alles andere wird umgewandelt.",
+      "sending": "Kopieren",
+      "writing": "Datenbank wird geschrieben",
+      "doctor": "Doctor",
+      "orphans": "Auf dem iPod, nicht in der Datenbank",
+      "missing": "In der Datenbank, Datei fehlt",
+      "addOrphans": "Verwaiste hinzufügen",
+      "dropMissing": "Fehlende entfernen",
+      "rebuild": "Datenbank neu aufbauen",
+      "connected": "{{name}} verbunden",
+      "sent": "{{count}} gesendet",
+      "skipped": "{{count}} übersprungen",
+      "ejectFailed": "Windows hat den iPod nicht ausgeworfen. Nutze Hardware sicher entfernen.",
+      "doctorOk": "Datenbank aktualisiert",
+      "covers": "Albumbilder auf dem iPod-Bildschirm werden noch nicht geschrieben. Titel, Interpreten und Alben kommen aus den Datei-Tags.",
+      "backup": "Die vorherige Datenbank bleibt als iTunesDB.auralis.bak erhalten.",
+      "modeStock": "Original-Firmware",
+      "modeRockbox": "Rockbox",
+      "modeUnreadable": "Nicht lesbar",
+      "modeUnsupported": "Nicht unterstützt",
+      "noTracks": "Auf diesem iPod sind noch keine Titel.",
+      "confirmRemove": "Die ausgewählten Titel vom iPod entfernen? Die Dateien werden gelöscht.",
+      "confirmRebuild": "Die Datenbank aus den Dateien auf dem iPod neu aufbauen? Die aktuelle Datenbank wird zuerst gesichert.",
+      "dualBoot": "Rockbox ist ebenfalls installiert. Dieselben Dateien stehen in Playlists/Auralis.m3u8."
     }
   },
   "literal": {
@@ -1338,6 +1383,7 @@
     "fileManager": {
       "titleArtist": "{title} - {artist}"
     },
+
     "platformIcons": {
       "songstats": "Songstats"
     }

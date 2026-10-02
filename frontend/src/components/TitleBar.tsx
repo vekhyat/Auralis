@@ -60,6 +60,7 @@ export function TitleBar({ canGoBack = false, canGoForward = false, navigationDi
         { page: "main", label: t("translation.sidebar.library"), active: currentPage === "main" },
         { page: "queue", label: t("translation.queue.queue"), active: currentPage === "queue", count: queueCount },
         { page: "history", label: t("translation.sidebar.history"), active: currentPage === "history" },
+        { page: "devices", label: t("translation.devices.destination"), active: currentPage === "devices" },
         { page: "tools", label: t("translation.sidebar.tools"), active: currentPage.startsWith("audio-") || ["tools", "tempo-key-analyzer", "replaygain", "file-manager", "lyrics-manager", "enrich"].includes(currentPage) },
         { page: "settings", label: t("translation.sidebar.settings"), active: currentPage === "settings" },
     ];

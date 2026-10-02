@@ -12,10 +12,11 @@ export type PageType =
     | "lyrics-manager"
     | "enrich"
     | "history"
-    | "queue";
+    | "queue"
+    | "devices";
 
 /** Destinations shown as words in the titlebar. */
-export type DestinationPage = Extract<PageType, "main" | "queue" | "history" | "tools" | "settings">;
+export type DestinationPage = Extract<PageType, "main" | "queue" | "history" | "devices" | "tools" | "settings">;
 
 export const TOOL_PAGES: PageType[] = [
     "tools",

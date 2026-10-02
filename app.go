@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/vekhyat/Auralis/backend"
+	"github.com/vekhyat/Auralis/backend/devices/ipod"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -29,6 +30,8 @@ type App struct {
 	replayGainAnalysisCancel     context.CancelFunc
 	replayGainAnalysisGeneration uint64
 	metadataStreamGeneration     uint64
+	ipods                        *ipod.Manager
+	ipodStop                     chan struct{}
 }
 
 type CurrentIPInfo struct {
@@ -348,9 +351,11 @@ func (a *App) startup(ctx context.Context) {
 	if err := backend.SanitizePersistedConfigSettings(); err != nil {
 		fmt.Printf("Failed to sanitize persisted config settings: %v\n", err)
 	}
+	a.startIPodWatch()
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	a.stopIPodWatch()
 	backend.CloseLibraryIndexDB()
 	backend.ClosePersistentQueueDB()
 	backend.CloseHistoryDB()

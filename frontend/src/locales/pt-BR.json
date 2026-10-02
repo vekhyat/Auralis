@@ -1216,6 +1216,51 @@
       "extractFailed_one": "Falha ao extrair o arquivo {{count}}.",
       "exists_other": "Os arquivos {{count}} .lrc já existem.",
       "extractFailed_other": "Falha na extração dos arquivos {{count}}."
+    },
+    "devices": {
+      "destination": "Dispositivos",
+      "title": "Dispositivos",
+      "intro": "Conecte um iPod. O Auralis copia a música e grava o banco do player. O iTunes não é necessário.",
+      "empty": "Nenhum iPod conectado",
+      "emptyHint": "Conecte o iPod por USB. Se o Windows não mostrar uma unidade, ative o modo disco no iPod e conecte de novo.",
+      "warnNoDrive": "O Windows não consegue ler este iPod. Se ele foi formatado num Mac, restaure e escolha Windows (FAT32). Se não houver letra de unidade, ative o modo disco e reconecte.",
+      "warnUnsupported": "Este modelo usa um banco que o Auralis não pode gravar com segurança. Nada foi alterado.",
+      "warnUnverified": "Este modelo não está na lista conhecida. As faixas ainda podem ser enviadas. Ejete o iPod e confira antes de depender da cópia.",
+      "warnDatabase": "O banco do iPod não pôde ser lido. O envio está desligado para não trocá-lo por uma biblioteca vazia. O Doctor pode reconstruí-lo depois de guardar uma cópia.",
+      "warnRockbox": "O Rockbox está instalado e o banco original não é gravado. Os arquivos são copiados como estão, inclusive FLAC. O player original não vai listá-los.",
+      "warnNoFirewire": "Este iPod precisa de um ID FireWire para assinar o banco, e nenhum foi encontrado. O envio está desligado.",
+      "free": "{{free}} livres de {{total}}",
+      "tracks": "Faixas",
+      "sendFiles": "Enviar arquivos",
+      "sendFolder": "Enviar pasta",
+      "eject": "Ejetar",
+      "remove": "Remover",
+      "alac": "ALAC sem perda",
+      "aac": "AAC menor",
+      "copyNote": "Arquivos MP3, AAC, ALAC, WAV e AIFF que já servem são copiados sem mudança. O resto é convertido.",
+      "sending": "Copiando",
+      "writing": "Gravando o banco",
+      "doctor": "Doctor",
+      "orphans": "No iPod, fora do banco",
+      "missing": "No banco, arquivo ausente",
+      "addOrphans": "Adicionar órfãos",
+      "dropMissing": "Tirar ausentes",
+      "rebuild": "Reconstruir o banco",
+      "connected": "{{name}} conectado",
+      "sent": "{{count}} enviados",
+      "skipped": "{{count}} ignorados",
+      "ejectFailed": "O Windows não ejetou o iPod. Use Remover hardware com segurança.",
+      "doctorOk": "Banco atualizado",
+      "covers": "A capa na tela do iPod ainda não é gravada. Faixas, artistas e álbuns vêm das tags do arquivo.",
+      "backup": "O banco anterior fica guardado como iTunesDB.auralis.bak.",
+      "modeStock": "Firmware original",
+      "modeRockbox": "Rockbox",
+      "modeUnreadable": "Não legível",
+      "modeUnsupported": "Não suportado",
+      "noTracks": "Ainda não há faixas neste iPod.",
+      "confirmRemove": "Remover as faixas selecionadas do iPod? Os arquivos são apagados.",
+      "confirmRebuild": "Reconstruir o banco a partir dos arquivos do iPod? O banco atual é copiado antes.",
+      "dualBoot": "O Rockbox também está instalado. Os mesmos arquivos ficam em Playlists/Auralis.m3u8."
     }
   },
   "literal": {
@@ -1338,6 +1383,7 @@
     "fileManager": {
       "titleArtist": "{title} - {artist}"
     },
+
     "platformIcons": {
       "songstats": "Songstats"
     }

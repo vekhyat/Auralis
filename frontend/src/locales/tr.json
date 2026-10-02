@@ -1216,6 +1216,51 @@
       "skipped_one": "{{count}} dosyası zaten sıraya alınmış.",
       "exported_one": "Dışa aktarılan {{count}} spektrogram PNG dosyası{{failures}}",
       "batchFailed": "Toplu Analiz Başarısız"
+    },
+    "devices": {
+      "destination": "Aygıtlar",
+      "title": "Aygıtlar",
+      "intro": "Bir iPod bağlayın. Auralis müziği kopyalar ve çaların veritabanını yazar. iTunes gerekmez.",
+      "empty": "Bağlı iPod yok",
+      "emptyHint": "iPod'u USB ile takın. Windows bir sürücü göstermezse iPod'da disk modunu açıp yeniden bağlayın.",
+      "warnNoDrive": "Windows bu iPod'u okuyamıyor. Mac'te biçimlendirildiyse geri yükleyin ve Windows (FAT32) seçin. Sürücü harfi yoksa disk modunu açıp yeniden bağlayın.",
+      "warnUnsupported": "Bu model, Auralis'in güvenle yazamadığı bir veritabanı kullanıyor. Hiçbir şey değiştirilmedi.",
+      "warnUnverified": "Bu model bilinen listede yok. Parçalar yine gönderilebilir. Kopyaya güvenmeden önce iPod'u çıkarın ve kontrol edin.",
+      "warnDatabase": "iPod'daki veritabanı okunamadı. Boş bir kitaplıkla değiştirilmesin diye gönderme kapalı. Doctor, yedekten sonra onu yeniden kurabilir.",
+      "warnRockbox": "Rockbox yüklü ve stok veritabanı yazılmıyor. Dosyalar olduğu gibi kopyalanır, FLAC dahil. Özgün çalar bunları listelemez.",
+      "warnNoFirewire": "Bu iPod veritabanını imzalamak için bir FireWire kimliği ister ve bulunamadı. Gönderme kapalı.",
+      "free": "{{total}} içinde {{free}} boş",
+      "tracks": "Parçalar",
+      "sendFiles": "Dosya gönder",
+      "sendFolder": "Klasör gönder",
+      "eject": "Çıkar",
+      "remove": "Kaldır",
+      "alac": "Kayıpsız ALAC",
+      "aac": "Daha küçük AAC",
+      "copyNote": "Uyan MP3, AAC, ALAC, WAV ve AIFF dosyaları değiştirilmeden kopyalanır. Geri kalanı dönüştürülür.",
+      "sending": "Kopyalanıyor",
+      "writing": "Veritabanı yazılıyor",
+      "doctor": "Doctor",
+      "orphans": "iPod'da var, veritabanında yok",
+      "missing": "Veritabanında var, dosya yok",
+      "addOrphans": "Sahipsizleri ekle",
+      "dropMissing": "Eksikleri çıkar",
+      "rebuild": "Veritabanını yeniden kur",
+      "connected": "{{name}} bağlandı",
+      "sent": "{{count}} gönderildi",
+      "skipped": "{{count}} atlandı",
+      "ejectFailed": "Windows iPod'u çıkarmadı. Donanımı Güvenle Kaldır'ı kullanın.",
+      "doctorOk": "Veritabanı güncellendi",
+      "covers": "iPod ekranındaki albüm kapağı henüz yazılmıyor. Parça, sanatçı ve albümler dosya etiketlerinden gelir.",
+      "backup": "Önceki veritabanı iTunesDB.auralis.bak olarak durur.",
+      "modeStock": "Özgün yazılım",
+      "modeRockbox": "Rockbox",
+      "modeUnreadable": "Okunamıyor",
+      "modeUnsupported": "Desteklenmiyor",
+      "noTracks": "Bu iPod'da henüz parça yok.",
+      "confirmRemove": "Seçilen parçalar iPod'dan kaldırılsın mı? Dosyalar silinir.",
+      "confirmRebuild": "Veritabanı iPod'daki dosyalardan yeniden kurulsun mu? Geçerli veritabanı önce yedeklenir.",
+      "dualBoot": "Rockbox da yüklü. Aynı dosyalar Playlists/Auralis.m3u8 içinde listelenir."
     }
   },
   "literal": {
@@ -1338,6 +1383,7 @@
     "fileManager": {
       "titleArtist": "{title} - {artist}"
     },
+
     "platformIcons": {
       "songstats": "Songstats"
     }

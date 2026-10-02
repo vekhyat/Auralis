@@ -1216,6 +1216,51 @@
       "extracted_one": "Đã trích xuất tệp {{count}}{{skipped}}{{failed}}",
       "extracted_other": "Các tệp {{count}} được trích xuất{{skipped}}{{failed}}",
       "exists_one": "Tệp {{count}} .lrc đã tồn tại."
+    },
+    "devices": {
+      "destination": "Thiết bị",
+      "title": "Thiết bị",
+      "intro": "Cắm iPod. Auralis chép nhạc và ghi cơ sở dữ liệu của máy nghe. Không cần iTunes.",
+      "empty": "Chưa có iPod nào được nối",
+      "emptyHint": "Cắm iPod qua USB. Nếu Windows không hiện ổ đĩa, bật chế độ đĩa trên iPod rồi cắm lại.",
+      "warnNoDrive": "Windows không đọc được iPod này. Nếu máy được định dạng trên Mac, hãy khôi phục và chọn Windows (FAT32). Nếu không có ký tự ổ đĩa, bật chế độ đĩa rồi cắm lại.",
+      "warnUnsupported": "Mẫu này dùng cơ sở dữ liệu mà Auralis không ghi an toàn được. Không có gì bị đổi.",
+      "warnUnverified": "Mẫu này không có trong danh sách đã biết. Vẫn gửi bài hát được. Hãy rút iPod và kiểm tra trước khi tin vào bản sao.",
+      "warnDatabase": "Không đọc được cơ sở dữ liệu trên iPod. Gửi bị tắt để không thay nó bằng thư viện trống. Doctor có thể dựng lại sau khi giữ bản sao lưu.",
+      "warnRockbox": "Đã cài Rockbox và cơ sở dữ liệu gốc không được ghi. Tệp được chép nguyên trạng, kể cả FLAC. Máy nghe gốc sẽ không liệt kê chúng.",
+      "warnNoFirewire": "iPod này cần mã FireWire để ký cơ sở dữ liệu và không tìm thấy. Gửi bị tắt.",
+      "free": "{{free}} trống trong {{total}}",
+      "tracks": "Bài hát",
+      "sendFiles": "Gửi tệp",
+      "sendFolder": "Gửi thư mục",
+      "eject": "Đẩy ra",
+      "remove": "Gỡ",
+      "alac": "ALAC không mất dữ liệu",
+      "aac": "AAC nhỏ hơn",
+      "copyNote": "Tệp MP3, AAC, ALAC, WAV và AIFF đã phù hợp được chép nguyên. Phần còn lại được chuyển đổi.",
+      "sending": "Đang chép",
+      "writing": "Đang ghi cơ sở dữ liệu",
+      "doctor": "Doctor",
+      "orphans": "Có trên iPod, không có trong cơ sở dữ liệu",
+      "missing": "Có trong cơ sở dữ liệu, thiếu tệp",
+      "addOrphans": "Thêm bản không có mục",
+      "dropMissing": "Bỏ mục thiếu tệp",
+      "rebuild": "Dựng lại cơ sở dữ liệu",
+      "connected": "Đã nối {{name}}",
+      "sent": "Đã gửi {{count}}",
+      "skipped": "Đã bỏ qua {{count}}",
+      "ejectFailed": "Windows không đẩy được iPod. Hãy dùng Ngắt kết nối phần cứng an toàn.",
+      "doctorOk": "Đã cập nhật cơ sở dữ liệu",
+      "covers": "Ảnh bìa trên màn hình iPod chưa được ghi. Bài hát, nghệ sĩ và album vẫn lấy từ thẻ của tệp.",
+      "backup": "Cơ sở dữ liệu trước đó được giữ dưới tên iTunesDB.auralis.bak.",
+      "modeStock": "Phần mềm gốc",
+      "modeRockbox": "Rockbox",
+      "modeUnreadable": "Không đọc được",
+      "modeUnsupported": "Không hỗ trợ",
+      "noTracks": "iPod này chưa có bài hát.",
+      "confirmRemove": "Gỡ các bài đã chọn khỏi iPod? Tệp sẽ bị xóa.",
+      "confirmRebuild": "Dựng lại cơ sở dữ liệu từ các tệp trên iPod? Cơ sở dữ liệu hiện tại được sao lưu trước.",
+      "dualBoot": "Rockbox cũng được cài. Cùng các tệp đó được liệt kê trong Playlists/Auralis.m3u8."
     }
   },
   "literal": {
@@ -1338,6 +1383,7 @@
     "fileManager": {
       "titleArtist": "{title} - {artist}"
     },
+
     "platformIcons": {
       "songstats": "Songstats"
     }

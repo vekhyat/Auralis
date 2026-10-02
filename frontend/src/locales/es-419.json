@@ -1216,6 +1216,51 @@
       "skipped_other": "Se omitieron los archivos {{count}} (formato no compatible o ya agregados)",
       "allFailed_one": "No se pudo convertir ningún archivo {{count}}",
       "allFailed_other": "Todos los archivos {{count}} no pudieron convertirse"
+    },
+    "devices": {
+      "destination": "Dispositivos",
+      "title": "Dispositivos",
+      "intro": "Conecta un iPod. Auralis copia la música y escribe la base del reproductor. No hace falta iTunes.",
+      "empty": "No hay un iPod conectado",
+      "emptyHint": "Conecta el iPod por USB. Si Windows no muestra una unidad, activa el modo disco en el iPod y vuelve a conectarlo.",
+      "warnNoDrive": "Windows no puede leer este iPod. Si se formateó en una Mac, restáuralo y elige Windows (FAT32). Si no hay letra de unidad, activa el modo disco y reconéctalo.",
+      "warnUnsupported": "Este modelo usa una base que Auralis no puede escribir con seguridad. No se cambió nada.",
+      "warnUnverified": "Este modelo no está en la lista conocida. Aun así se pueden enviar canciones. Expulsa el iPod y revísalo antes de confiar en la copia.",
+      "warnDatabase": "No se pudo leer la base del iPod. El envío está desactivado para no reemplazarla por una biblioteca vacía. Doctor puede reconstruirla después de guardar una copia.",
+      "warnRockbox": "Rockbox está instalado y no se escribe la base original. Los archivos se copian tal cual, incluido FLAC. El reproductor original no los va a listar.",
+      "warnNoFirewire": "Este iPod necesita un ID FireWire para firmar su base y no se encontró ninguno. El envío está desactivado.",
+      "free": "{{free}} libres de {{total}}",
+      "tracks": "Pistas",
+      "sendFiles": "Enviar archivos",
+      "sendFolder": "Enviar carpeta",
+      "eject": "Expulsar",
+      "remove": "Quitar",
+      "alac": "ALAC sin pérdida",
+      "aac": "AAC más chico",
+      "copyNote": "Los MP3, AAC, ALAC, WAV y AIFF que ya sirven se copian sin cambios. El resto se convierte.",
+      "sending": "Copiando",
+      "writing": "Escribiendo la base",
+      "doctor": "Doctor",
+      "orphans": "En el iPod, fuera de la base",
+      "missing": "En la base, archivo ausente",
+      "addOrphans": "Agregar huérfanos",
+      "dropMissing": "Quitar ausentes",
+      "rebuild": "Reconstruir la base",
+      "connected": "{{name}} conectado",
+      "sent": "Se enviaron {{count}}",
+      "skipped": "Se omitieron {{count}}",
+      "ejectFailed": "Windows no expulsó el iPod. Usa Quitar hardware de forma segura.",
+      "doctorOk": "Base actualizada",
+      "covers": "Todavía no se escribe la carátula en la pantalla del iPod. Canciones, artistas y álbumes salen de las etiquetas del archivo.",
+      "backup": "La base anterior se conserva como iTunesDB.auralis.bak.",
+      "modeStock": "Firmware original",
+      "modeRockbox": "Rockbox",
+      "modeUnreadable": "No se puede leer",
+      "modeUnsupported": "No compatible",
+      "noTracks": "Todavía no hay pistas en este iPod.",
+      "confirmRemove": "¿Quitar del iPod las canciones elegidas? Los archivos se borran.",
+      "confirmRebuild": "¿Reconstruir la base con los archivos del iPod? Primero se guarda una copia de la base actual.",
+      "dualBoot": "Rockbox también está instalado. Los mismos archivos quedan en Playlists/Auralis.m3u8."
     }
   },
   "literal": {
@@ -1338,6 +1383,7 @@
     "fileManager": {
       "titleArtist": "{title} - {artist}"
     },
+
     "platformIcons": {
       "songstats": "Songstats"
     }
