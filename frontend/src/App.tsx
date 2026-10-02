@@ -7,7 +7,7 @@ import { X } from "lucide-react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { getSettings, getSettingsWithDefaults, loadSettings, saveSettings, applyThemeMode } from "@/lib/settings";
 import { openExternal } from "@/lib/utils";
-import { OpenFolder, CheckFFmpegInstalled, DownloadFFmpeg, GetRecentFetches, SaveRecentFetches } from "../wailsjs/go/main/App";
+import { OpenFolder, CheckFFmpegInstalled, DownloadFFmpeg, GetRecentFetches, SaveRecentFetches, ListIPods } from "../wailsjs/go/main/App";
 import { EventsOn, EventsOff, Quit } from "../wailsjs/runtime/runtime";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { TitleBar } from "@/components/TitleBar";
@@ -140,6 +140,7 @@ function parseStoredHistory(value: string | null): HistoryItem[] {
 function App() {
     const { t } = useTranslation();
     const [currentPage, setCurrentPage] = useState<PageType>("main");
+    const [ipodConnected, setIpodConnected] = useState(false);
     const [toolNavigation, setToolNavigation] = useState<{
         history: PageType[];
         index: number;
@@ -177,14 +178,20 @@ function App() {
     }, [metadata.navigationUrl]);
     useEffect(() => {
         let first = true;
+        let sawEvent = false;
         const seen = new Set<string>();
+        const remember = (list: Array<{ id?: string }>) => {
+            for (const device of list) {
+                if (device.id) seen.add(device.id);
+            }
+        };
         EventsOn("ipod:devices", (devices: Array<{ id?: string; name?: string }> | null) => {
+            sawEvent = true;
             const list = Array.isArray(devices) ? devices : [];
+            setIpodConnected(list.length > 0);
             if (first) {
                 first = false;
-                for (const device of list) {
-                    if (device.id) seen.add(device.id);
-                }
+                remember(list);
                 return;
             }
             for (const device of list) {
@@ -192,14 +199,24 @@ function App() {
                 toast.success(i18n.t("translation.devices.connected", { name: device.name || "" }));
             }
             seen.clear();
-            for (const device of list) {
-                if (device.id) seen.add(device.id);
-            }
+            remember(list);
         });
+        void ListIPods().then((devices) => {
+            if (sawEvent) return;
+            const list = Array.isArray(devices) ? devices : [];
+            setIpodConnected(list.length > 0);
+            remember(list);
+            first = false;
+        }).catch(() => {});
         return () => {
             EventsOff("ipod:devices");
         };
     }, []);
+    useEffect(() => {
+        if (!ipodConnected && currentPage === "devices") {
+            setCurrentPage("main");
+        }
+    }, [ipodConnected, currentPage]);
     const [isFFmpegInstalled, setIsFFmpegInstalled] = useState<boolean | null>(null);
     const [isInstallingFFmpeg, setIsInstallingFFmpeg] = useState(false);
     const [ffmpegInstallProgress, setFfmpegInstallProgress] = useState(0);
@@ -774,6 +791,7 @@ function App() {
               onForward={handleTitleBarForward}
               currentPage={currentPage}
               onPageChange={handlePageChange}
+              showDevices={ipodConnected}
               queueCount={queue.items.filter((item) => item.status === "pending" || item.status === "running").length}
               omnibar={{
                   value: smartSearchInput,
