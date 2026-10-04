@@ -21,6 +21,8 @@ import (
 
 	"github.com/vekhyat/Auralis/backend"
 	"github.com/vekhyat/Auralis/backend/devices/ipod"
+	"github.com/vekhyat/Auralis/backend/devices"
+	"github.com/vekhyat/Auralis/backend/syncengine"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -34,6 +36,12 @@ type App struct {
 	metadataStreamGeneration     uint64
 	ipods                        *ipod.Manager
 	ipodStop                     chan struct{}
+	syncManager                  *devices.Manager
+	syncMu                       sync.Mutex
+	activeSyncCancel             context.CancelFunc
+	activeSyncTargetID           string
+	activeSyncPlan               *syncengine.Plan
+	activeSyncPlanTargetID       string
 }
 
 type CurrentIPInfo struct {
@@ -359,10 +367,12 @@ func (a *App) startup(ctx context.Context) {
 		fmt.Printf("Failed to migrate persisted config settings: %v\n", err)
 	}
 	a.startIPodWatch()
+	a.startSyncWatch()
 }
 
 func (a *App) shutdown(ctx context.Context) {
 	a.stopIPodWatch()
+	a.stopSyncWatch()
 	backend.StopAcceptingDownloadsAndDrain()
 	backend.CloseLibraryIndexDB()
 	if err := backend.ClosePersistentQueueDB(); err != nil {
