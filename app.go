@@ -21,6 +21,7 @@ import (
 
 	"github.com/vekhyat/Auralis/backend"
 	"github.com/vekhyat/Auralis/backend/devices/ipod"
+	"github.com/vekhyat/Auralis/backend/taste"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -34,6 +35,8 @@ type App struct {
 	metadataStreamGeneration     uint64
 	ipods                        *ipod.Manager
 	ipodStop                     chan struct{}
+	tasteMu                      sync.Mutex
+	taste                        *taste.Service
 }
 
 type CurrentIPInfo struct {
@@ -362,6 +365,7 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	a.closeTaste()
 	a.stopIPodWatch()
 	backend.StopAcceptingDownloadsAndDrain()
 	backend.CloseLibraryIndexDB()

@@ -2,6 +2,7 @@ package taste
 
 import (
 	"archive/zip"
+	"context"
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
@@ -17,47 +18,56 @@ import (
 	"time"
 )
 
-// ImportProgress is reported while an export is parsed.
+// ImportProgress reports ingestion progress to the frontend or caller.
 type ImportProgress struct {
-	Phase   string // "scan" | "parse" | "done"
-	Message string
-	Count   int
+	Phase   string `json:"phase"`
+	Message string `json:"message"`
+	Count   int    `json:"count"`
 }
 
-// SpotifyExport imports the user's "Download your data" export. It accepts a
-// folder, a single JSON file, or a .zip of the export. Two formats are
-// supported: the extended history (Streaming_History_Audio_*.json with `ts`
-// and `ms_played`) and the older StreamingHistory*.json (`endTime`,
-// `msPlayed`).
+// SpotifyExport handles the user's downloaded JSON dumps from Spotify.
+// It accepts either the newer extended streaming history format
+// (Streaming_History_Audio_*.json) or the older format (StreamingHistory*.json).
+// The path may be either an extracted folder or a .zip archive.
 type SpotifyExport struct {
-	// Progress, when set, receives parsing updates.
-	Progress func(ImportProgress)
+	OnProgress func(ImportProgress)
+	Progress   func(ImportProgress)
 }
+
+func (s *SpotifyExport) Name() string { return "spotify_export" }
 
 func (s *SpotifyExport) report(p ImportProgress) {
+	if s.OnProgress != nil {
+		s.OnProgress(p)
+	}
 	if s.Progress != nil {
 		s.Progress(p)
 	}
 }
 
-// ImportPath imports everything found at path (file, folder or .zip) and
-// returns the deduped set of events (one entry per raw play).
+// ImportPath parses the given file or directory synchronously with background context.
 func (s *SpotifyExport) ImportPath(path string) ([]TasteEvent, error) {
+	return s.Import(context.Background(), path)
+}
+
+// Import parses the given file or directory and returns all taste events found.
+func (s *SpotifyExport) Import(ctx context.Context, path string) ([]TasteEvent, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("stat export path: %w", err)
 	}
 	if info.IsDir() {
 		return s.importDir(path)
 	}
 	if strings.EqualFold(filepath.Ext(path), ".zip") {
-		tmp, err := os.MkdirTemp("", "auralis-export-")
+		tmp, err := os.MkdirTemp("", "auralis-spotify-export-*")
 		if err != nil {
 			return nil, err
 		}
 		defer os.RemoveAll(tmp)
+		s.report(ImportProgress{Phase: "unzip", Message: filepath.Base(path), Count: 0})
 		if err := unzipDir(path, tmp); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("unzip export: %w", err)
 		}
 		return s.importDir(tmp)
 	}
@@ -141,21 +151,27 @@ func eventID(parts ...string) string {
 
 func parseExtended(row map[string]interface{}) (TasteEvent, error) {
 	ts, _ := row["ts"].(string)
-	t, err := time.Parse(time.RFC3339, ts)
+	t, err := time.Parse(time.RFC3339Nano, ts)
 	if err != nil {
-		return TasteEvent{}, err
+		t, err = time.Parse(time.RFC3339, ts)
+		if err != nil {
+			return TasteEvent{}, err
+		}
 	}
 	ms, _ := row["ms_played"].(float64)
 	artist, _ := row["master_metadata_album_artist_name"].(string)
 	album, _ := row["master_metadata_album_album_name"].(string)
 	title, _ := row["master_metadata_track_name"].(string)
 	uri, _ := row["spotify_track_uri"].(string)
+	if strings.TrimSpace(artist) == "" || strings.TrimSpace(title) == "" {
+		return TasteEvent{}, errors.New("missing artist or title")
+	}
 	ev := TasteEvent{
 		Kind:      KindPlay,
 		SpotifyID: spotifyTrackIDFromURI(uri),
-		Artist:    artist,
-		Album:     album,
-		Title:     title,
+		Artist:    strings.TrimSpace(artist),
+		Album:     strings.TrimSpace(album),
+		Title:     strings.TrimSpace(title),
 		Timestamp: t,
 		MsPlayed:  int(ms),
 		Source:    "spotify_export",
@@ -169,17 +185,20 @@ func parseLegacy(row map[string]interface{}) (TasteEvent, error) {
 	if endTime == "" {
 		return TasteEvent{}, errors.New("missing endTime")
 	}
-	t, err := time.ParseInLocation("2006-01-02 15:04", endTime, time.Local)
+	t, err := time.Parse("2006-01-02 15:04", endTime)
 	if err != nil {
 		return TasteEvent{}, err
 	}
 	ms, _ := row["msPlayed"].(float64)
 	artist, _ := row["artistName"].(string)
 	title, _ := row["trackName"].(string)
+	if strings.TrimSpace(artist) == "" || strings.TrimSpace(title) == "" {
+		return TasteEvent{}, errors.New("missing artist or title")
+	}
 	ev := TasteEvent{
 		Kind:      KindPlay,
-		Artist:    artist,
-		Title:     title,
+		Artist:    strings.TrimSpace(artist),
+		Title:     strings.TrimSpace(title),
 		Timestamp: t,
 		MsPlayed:  int(ms),
 		Source:    "spotify_export",
@@ -203,19 +222,21 @@ func unzipDir(src, dest string) error {
 			os.MkdirAll(target, 0o755)
 			continue
 		}
-		os.MkdirAll(filepath.Dir(target), 0o755)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		dst, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		if err != nil {
+			return err
+		}
 		rc, err := f.Open()
 		if err != nil {
+			dst.Close()
 			return err
 		}
-		w, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-		if err != nil {
-			rc.Close()
-			return err
-		}
-		_, err = io.Copy(w, rc)
-		w.Close()
+		_, err = io.Copy(dst, rc)
 		rc.Close()
+		dst.Close()
 		if err != nil {
 			return err
 		}

@@ -128,24 +128,18 @@ func (s *SpotifyAPISource) AuthorizeURL(redirectURI, state, challenge string) (s
 	return s.accountsBase() + "/authorize?" + v.Encode(), nil
 }
 
-// Connect runs the one-shot loopback OAuth flow: it listens on
-// http://127.0.0.1:<random port>/callback, opens the browser, validates the
-// state, and exchanges the code (PKCE) for tokens. Refresh tokens are stored
-// encrypted; access tokens stay in memory.
+// Connect performs OAuth Authorization Code + PKCE over a local loopback listener.
+// It opens the system browser and blocks until the redirect completes or ctx/timeout fires.
 func (s *SpotifyAPISource) Connect(ctx context.Context) error {
-	id, err := s.clientID()
-	if err != nil {
-		return err
-	}
-	_ = id
 	verifier, err := pkceVerifier()
 	if err != nil {
-		return err
+		return fmt.Errorf("pkce verifier: %w", err)
 	}
 	state, err := randomState()
 	if err != nil {
-		return err
+		return fmt.Errorf("oauth state: %w", err)
 	}
+
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return fmt.Errorf("spotify connect: %w", err)
@@ -157,16 +151,28 @@ func (s *SpotifyAPISource) Connect(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		if e := q.Get("error"); e != "" {
-			callbackCh <- callbackResult{err: fmt.Errorf("spotify authorize error: %s", e)}
-			fmt.Fprintln(w, "Auralis: authorization failed. You can close this tab.")
+		if errStr := q.Get("error"); errStr != "" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprintf(w, "<html><body style=\"font-family:sans-serif;padding:32px;\"><h2>Auralis Spotify Connection Failed</h2><p>%s</p></body></html>", errStr)
+			select {
+			case callbackCh <- callbackResult{err: fmt.Errorf("spotify authorization denied: %s", errStr)}:
+			default:
+			}
 			return
 		}
-		callbackCh <- callbackResult{code: q.Get("code"), state: q.Get("state")}
-		fmt.Fprintln(w, "Auralis: connected. You can close this tab.")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintln(w, "<html><body style=\"font-family:sans-serif;padding:32px;text-align:center;\"><h2>Auralis</h2><p>Connected to Spotify! You can close this tab and return to the app.</p></body></html>")
+		select {
+		case callbackCh <- callbackResult{code: q.Get("code"), state: q.Get("state")}:
+		default:
+		}
 	})
+
 	server := &http.Server{Handler: mux}
-	go server.Serve(listener)
+	go func() {
+		_ = server.Serve(listener)
+	}()
 	defer server.Close()
 
 	authURL, err := s.AuthorizeURL(redirectURI, state, pkceChallenge(verifier))
@@ -246,14 +252,24 @@ func (s *SpotifyAPISource) exchangeCode(ctx context.Context, code, verifier, red
 			return err
 		}
 	}
+	expiresIn := out.ExpiresIn
+	if expiresIn <= 0 {
+		expiresIn = 3600
+	}
 	s.mu.Lock()
-	s.token = &tokenState{AccessToken: out.AccessToken, ExpiresAt: time.Now().Add(time.Duration(out.ExpiresIn) * time.Second)}
+	s.token = &tokenState{AccessToken: out.AccessToken, ExpiresAt: time.Now().Add(time.Duration(expiresIn) * time.Second)}
 	s.mu.Unlock()
 	return nil
 }
 
 // refresh rotates the refresh token if Spotify returns a new one.
 func (s *SpotifyAPISource) refresh(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.refreshLocked(ctx)
+}
+
+func (s *SpotifyAPISource) refreshLocked(ctx context.Context) error {
 	id, err := s.clientID()
 	if err != nil {
 		return err
@@ -294,24 +310,23 @@ func (s *SpotifyAPISource) refresh(ctx context.Context) error {
 			return err
 		}
 	}
-	s.mu.Lock()
-	s.token = &tokenState{AccessToken: out.AccessToken, ExpiresAt: time.Now().Add(time.Duration(out.ExpiresIn) * time.Second)}
-	s.mu.Unlock()
+	expiresIn := out.ExpiresIn
+	if expiresIn <= 0 {
+		expiresIn = 3600
+	}
+	s.token = &tokenState{AccessToken: out.AccessToken, ExpiresAt: time.Now().Add(time.Duration(expiresIn) * time.Second)}
 	return nil
 }
 
 func (s *SpotifyAPISource) accessToken(ctx context.Context) (string, error) {
 	s.mu.Lock()
-	t := s.token
-	s.mu.Unlock()
-	if t != nil && time.Now().Before(t.ExpiresAt.Add(-30*time.Second)) {
-		return t.AccessToken, nil
+	defer s.mu.Unlock()
+	if s.token != nil && time.Now().Before(s.token.ExpiresAt.Add(-30*time.Second)) {
+		return s.token.AccessToken, nil
 	}
-	if err := s.refresh(ctx); err != nil {
+	if err := s.refreshLocked(ctx); err != nil {
 		return "", err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return s.token.AccessToken, nil
 }
 
@@ -360,16 +375,16 @@ func (s *SpotifyAPISource) doWithRetry(newReq func() (*http.Request, error)) (*h
 	if lastErr != nil {
 		return nil, lastErr
 	}
-	return nil, errors.New("spotify api: retries exhausted")
+	return nil, errors.New("spotify api: request failed after retries")
 }
 
-func (s *SpotifyAPISource) getJSON(ctx context.Context, url string, out interface{}) error {
+func (s *SpotifyAPISource) getJSON(ctx context.Context, u string, out interface{}) error {
 	token, err := s.accessToken(ctx)
 	if err != nil {
 		return err
 	}
 	resp, err := s.doWithRetry(func() (*http.Request, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -417,14 +432,15 @@ func (s *SpotifyAPISource) Pull(ctx context.Context, since time.Time) ([]TasteEv
 		}
 		for _, raw := range artists {
 			var a struct {
-				ID     string `json:"id"`
-				Name   string `json:"name"`
+				ID     string   `json:"id"`
+				Name   string   `json:"name"`
+				Genres []string `json:"genres"`
 				Images []struct {
 					URL string `json:"url"`
 				} `json:"images"`
 			}
 			if json.Unmarshal(raw, &a) == nil && a.ID != "" {
-				e := TasteEvent{Kind: KindTopArtist, Artist: a.Name, ArtistID: a.ID, Timestamp: time.Now(), Source: "spotify_api"}
+				e := TasteEvent{Kind: KindTopArtist, Artist: a.Name, ArtistID: a.ID, Genres: a.Genres, Timestamp: time.Now(), Source: "spotify_api"}
 				if len(a.Images) > 0 {
 					e.Image = a.Images[0].URL
 				}
@@ -543,8 +559,9 @@ func (s *SpotifyAPISource) Pull(ctx context.Context, since time.Time) ([]TasteEv
 		var payload struct {
 			Artists struct {
 				Items []struct {
-					ID     string `json:"id"`
-					Name   string `json:"name"`
+					ID     string   `json:"id"`
+					Name   string   `json:"name"`
+					Genres []string `json:"genres"`
 					Images []struct {
 						URL string `json:"url"`
 					} `json:"images"`
@@ -559,7 +576,7 @@ func (s *SpotifyAPISource) Pull(ctx context.Context, since time.Time) ([]TasteEv
 			return events, err
 		}
 		for _, a := range payload.Artists.Items {
-			e := TasteEvent{Kind: KindFollow, Artist: a.Name, ArtistID: a.ID, Timestamp: time.Now(), Source: "spotify_api"}
+			e := TasteEvent{Kind: KindFollow, Artist: a.Name, ArtistID: a.ID, Genres: a.Genres, Timestamp: time.Now(), Source: "spotify_api"}
 			if len(a.Images) > 0 {
 				e.Image = a.Images[0].URL
 			}
