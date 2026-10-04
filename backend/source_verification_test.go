@@ -21,6 +21,7 @@ import (
 )
 
 func TestCommunityVerificationActionSeparatesBrowserAndConfiguration(t *testing.T) {
+	t.Cleanup(resetSourceVerificationForTest)
 	t.Setenv(appDataDirEnv, t.TempDir())
 	rows := []CommunitySource{
 		{ID: "rest-local", Name: "REST", Service: "qobuz", Protocol: "qobuz-rest", BaseURL: "http://127.0.0.1:9", Enabled: true, CredentialEnv: "AURALIS_TEST_REST_KEY", CredentialType: "api_key"},
