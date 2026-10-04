@@ -240,9 +240,9 @@ func doCommunityRequest(client *http.Client, service string, reqFn func() (*http
 			return nil, err
 		}
 
-		resp, err := client.Do(req)
+		resp, err := client.Do(WithDownloadContext(req))
 		if err != nil {
-			return nil, err
+			return nil, WrapDownloadCancelled(err)
 		}
 
 		if resp.StatusCode == http.StatusServiceUnavailable {

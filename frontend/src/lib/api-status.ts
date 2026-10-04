@@ -1,4 +1,5 @@
 import { CHECK_TIMEOUT_MS, withTimeout } from "@/lib/async-timeout";
+import { LogStatusConsole, FetchSpotiFLACStatusPayload } from "../../wailsjs/go/main/App";
 export type ApiCheckStatus = "checking" | "online" | "offline" | "idle";
 export interface ApiSource {
     id: string;
@@ -13,6 +14,7 @@ interface SpotiFLACNextSource {
     statusPrefix?: string;
 }
 type SpotiFLACNextStatusResponse = Partial<Record<string, string>>;
+type SpotiFLACStatusPayloadKind = "next" | "current";
 export const API_SOURCES: ApiSource[] = [
     { id: "tidal", type: "tidal", name: "Tidal", url: "" },
     { id: "qobuz", type: "qobuz", name: "Qobuz", url: "" },
@@ -27,11 +29,8 @@ export const SPOTIFLAC_NEXT_SOURCES: SpotiFLACNextSource[] = [
     { id: "amazon", name: "Amazon Music", statusPrefix: "amazon_" },
     { id: "deezer", name: "Deezer", statusPrefix: "deezer_" },
 ];
-type SpotiFLACStatusPayloadKind = "next" | "current";
 const SPOTIFLAC_STATUS_MAX_ATTEMPTS = 3;
 const SPOTIFLAC_STATUS_RETRY_DELAY_MS = 1200;
-const LogStatusConsole = (level: string, message: string): Promise<void> => (window as any)["go"]["main"]["App"]["LogStatusConsole"](level, message);
-const FetchSpotiFLACStatusPayload = (kind: SpotiFLACStatusPayloadKind): Promise<SpotiFLACNextStatusResponse> => (window as any)["go"]["main"]["App"]["FetchSpotiFLACStatusPayload"](kind);
 type ApiStatusState = {
     checkingSources: Record<string, boolean>;
     statuses: Record<string, ApiCheckStatus>;

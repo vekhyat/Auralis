@@ -39,12 +39,7 @@ function getProviderEntries(availability: TrackAvailability): ProviderEntry[] {
         },
     ];
 }
-export function hasAvailabilityLinks(availability?: TrackAvailability): boolean {
-    if (!availability) {
-        return false;
-    }
-    return getProviderEntries(availability).some((entry) => entry.found);
-}
+
 /**
  * Availability as words: provider names that are links when found, a quiet
  * "not found" when not. Brand marks stay small and uncolored.

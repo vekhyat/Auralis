@@ -1,14 +1,15 @@
 import { t } from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { XCircle, FileCheck, FileText, Globe, ImageDown, Play, Pause, ListPlus, CircleCheck } from "lucide-react";
+import { XCircle, FileCheck, FileText, Globe, ImageDown, Play, Pause, Download, CircleCheck } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger, } from "@/components/ui/tooltip";
 import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious, } from "@/components/ui/pagination";
 import type { TrackMetadata, TrackAvailability } from "@/types/api";
 import { usePreview } from "@/hooks/usePreview";
 import { useQueueFeedback } from "@/hooks/useQueueFeedback";
-import { AvailabilityLinks, hasAvailabilityLinks } from "./AvailabilityLinks";
+import { AvailabilityLinks } from "./AvailabilityLinks";
+import { hasAvailabilityLinks } from "@/lib/availability-links";
 import { buildClickableArtists, getClickableArtistKey } from "@/lib/artist-links";
 import { useState } from "react";
 interface TrackListProps {
@@ -317,10 +318,10 @@ export function TrackList({ tracks, searchQuery, sortBy, selectedTracks, downloa
                   {track.spotify_id && onQueueTrack && (<Tooltip>
                     <TooltipTrigger asChild>
                       <Button onClick={() => onQueueTrack(track, startIndex + index + 1)} size="icon" variant={trackQueued ? "outline" : "default"}>
-                        {trackQueued ? (<CircleCheck className="h-4 w-4 text-primary"/>) : (<ListPlus className="h-4 w-4"/>)}
+                        {trackQueued ? (<CircleCheck className="h-4 w-4 text-primary"/>) : (<Download className="h-4 w-4"/>)}
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent><p>{t(trackQueued ? "translation.queue.alreadyInQueue" : "translation.queue.addToQueue")}</p></TooltipContent>
+                    <TooltipContent><p>{t(trackQueued ? "translation.downloads.requested" : "translation.downloads.download")}</p></TooltipContent>
                   </Tooltip>)}
                   {track.spotify_id && (<Tooltip>
                     <TooltipTrigger asChild>

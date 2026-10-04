@@ -8,7 +8,7 @@ func TestJioSaavnPickBestPrefersCloseTitleArtist(t *testing.T) {
 		{"id": "wanted", "title": "On Time", "primaryArtists": "Huntrix", "singers": "EJAE"},
 	}
 
-	got, score := jioSaavnPickBest(items, "On Time Huntrix EJAE")
+	got, score := jioSaavnPickBest(items, jioSaavnWant{Title: "On Time", Artist: "Huntrix, EJAE"})
 	if score <= 0 {
 		t.Fatalf("score = %d, want a close match", score)
 	}

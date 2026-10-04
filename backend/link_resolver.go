@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 type resolvedTrackLinks struct {
@@ -80,20 +81,30 @@ func orderedLinkResolvers() []string {
 		return []string{linkResolverProviderSongstats}
 	}
 
+	resources := []string{"resource-songstats", "resource-songlink"}
 	if preferred == linkResolverProviderDeezerSongLink {
-		return []string{
-			linkResolverProviderDeezerSongLink,
-			linkResolverProviderSongstats,
+		resources[0], resources[1] = resources[1], resources[0]
+	}
+	ordered := RankedSourceIDs(resources, "resource")
+	providers := make([]string, 0, len(ordered))
+	for _, id := range ordered {
+		if id == "resource-songstats" {
+			providers = append(providers, linkResolverProviderSongstats)
+		} else {
+			providers = append(providers, linkResolverProviderDeezerSongLink)
 		}
 	}
-
-	return []string{
-		linkResolverProviderSongstats,
-		linkResolverProviderDeezerSongLink,
-	}
+	return providers
 }
 
-func (s *SongLinkClient) resolveLinksViaSongstats(links *resolvedTrackLinks) (bool, error) {
+func (s *SongLinkClient) resolveLinksViaSongstats(links *resolvedTrackLinks) (matched bool, resultErr error) {
+	started := time.Now()
+	defer func() {
+		if resultErr == nil && !matched {
+			resultErr = fmt.Errorf("resolver returned no matching links")
+		}
+		recordSourceOutcome("resource-songstats", "", "resource", time.Since(started), matched && resultErr == nil, resultErr)
+	}()
 	if links == nil || links.ISRC == "" {
 		return false, fmt.Errorf("ISRC is required for Songstats resolver")
 	}
@@ -108,7 +119,14 @@ func (s *SongLinkClient) resolveLinksViaSongstats(links *resolvedTrackLinks) (bo
 	return *links != before, nil
 }
 
-func (s *SongLinkClient) resolveLinksViaDeezerSongLink(links *resolvedTrackLinks, spotifyTrackID string, region string) (bool, error) {
+func (s *SongLinkClient) resolveLinksViaDeezerSongLink(links *resolvedTrackLinks, spotifyTrackID string, region string) (matched bool, resultErr error) {
+	started := time.Now()
+	defer func() {
+		if resultErr == nil && !matched {
+			resultErr = fmt.Errorf("resolver returned no matching links")
+		}
+		recordSourceOutcome("resource-songlink", "", "resource", time.Since(started), matched && resultErr == nil, resultErr)
+	}()
 	if links == nil {
 		return false, fmt.Errorf("links is required for song.link resolver")
 	}

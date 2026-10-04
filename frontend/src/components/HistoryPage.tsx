@@ -1,5 +1,5 @@
 import { t } from "@/i18n";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef , useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Trash2, ExternalLink, Search, ArrowUpDown, History, Play, Pause, Database, CloudUpload, Music2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -84,20 +84,24 @@ interface HistoryPageProps {
 export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
     const [activeTab, setActiveTab] = useState("downloads");
     const [downloadHistory, setDownloadHistory] = useState<DownloadHistoryItem[]>([]);
-    const [filteredDownloadHistory, setFilteredDownloadHistory] = useState<DownloadHistoryItem[]>([]);
+
     const [showClearDownloadConfirm, setShowClearDownloadConfirm] = useState(false);
-    const [downloadSearchQuery, setDownloadSearchQuery] = useState("");
-    const [downloadSortBy, setDownloadSortBy] = useState("default");
+    const [downloadSearchQuery, updateDownloadSearchQuery] = useState("");
+    const [downloadSortBy, updateDownloadSortBy] = useState("default");
     const [downloadCurrentPage, setDownloadCurrentPage] = useState(1);
     const [playingPreviewId, setPlayingPreviewId] = useState<string | null>(null);
     const playbackRef = useRef<PreviewPlayback | null>(null);
     const previewRequestRef = useRef(0);
     const [fetchHistory, setFetchHistory] = useState<FetchHistoryItem[]>([]);
-    const [filteredFetchHistory, setFilteredFetchHistory] = useState<FetchHistoryItem[]>([]);
-    const [activeFetchTab, setActiveFetchTab] = useState("track");
+
+    const [activeFetchTab, updateActiveFetchTab] = useState("track");
     const [showClearFetchConfirm, setShowClearFetchConfirm] = useState(false);
-    const [fetchSearchQuery, setFetchSearchQuery] = useState("");
+    const [fetchSearchQuery, updateFetchSearchQuery] = useState("");
     const [fetchCurrentPage, setFetchCurrentPage] = useState(1);
+    const setDownloadSearchQuery = useCallback((value: string) => { updateDownloadSearchQuery(value); setDownloadCurrentPage(1); }, []);
+    const setDownloadSortBy = useCallback((value: string) => { updateDownloadSortBy(value); setDownloadCurrentPage(1); }, []);
+    const setFetchSearchQuery = useCallback((value: string) => { updateFetchSearchQuery(value); setFetchCurrentPage(1); }, []);
+    const setActiveFetchTab = useCallback((value: string) => { updateActiveFetchTab(value); setFetchCurrentPage(1); }, []);
     const ITEMS_PER_PAGE = 50;
     const getTrackLink = (spotifyId: string) => {
         if (spotifyId?.startsWith("tidal_"))
@@ -169,7 +173,7 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
             playbackRef.current = null;
         };
     }, []);
-    useEffect(() => {
+    const filteredDownloadHistory = useMemo(() => {
         let result = [...downloadHistory];
         if (downloadSearchQuery) {
             const query = downloadSearchQuery.toLowerCase();
@@ -199,12 +203,9 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
                 default: return 0;
             }
         });
-        setFilteredDownloadHistory(result);
+        return result;
     }, [downloadHistory, downloadSearchQuery, downloadSortBy]);
-    useEffect(() => {
-        setDownloadCurrentPage(1);
-    }, [downloadSearchQuery, downloadSortBy]);
-    useEffect(() => {
+    const filteredFetchHistory = useMemo(() => {
         let result = [...fetchHistory];
         if (activeFetchTab !== "all") {
             result = result.filter(item => item.type.toLowerCase() === activeFetchTab.toLowerCase());
@@ -215,11 +216,8 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
                 item.info.toLowerCase().includes(query));
         }
         result.sort((a, b) => b.timestamp - a.timestamp);
-        setFilteredFetchHistory(result);
+        return result;
     }, [fetchHistory, fetchSearchQuery, activeFetchTab]);
-    useEffect(() => {
-        setFetchCurrentPage(1);
-    }, [fetchSearchQuery, activeFetchTab]);
     const fetchTypeTotals = {
         track: fetchHistory.filter((item) => item.type.toLowerCase() === "track").length,
         album: fetchHistory.filter((item) => item.type.toLowerCase() === "album").length,

@@ -111,7 +111,7 @@ func tagExtraDownload(filePath string, p ExtraDownloadParams) error {
 	upc := ""
 	genre := ""
 	if p.SpotifyURL != "" {
-		if identifiers, err := GetSpotifyTrackIdentifiersDirect(p.SpotifyURL); err == nil || identifiers.ISRC != "" || identifiers.UPC != "" {
+		if identifiers, err := GetSpotifyTrackIdentifiersWithContext(ActiveDownloadContext(), p.SpotifyURL); err == nil || identifiers.ISRC != "" || identifiers.UPC != "" {
 			if isrc == "" {
 				isrc = strings.TrimSpace(identifiers.ISRC)
 			}

@@ -1,0 +1,30 @@
+[
+  {
+    "gateway": "spotbye",
+    "provider": "shared",
+    "http_status": 200,
+    "challenge_returned": true,
+    "session_returned": false
+  },
+  {
+    "gateway": "zarz",
+    "provider": "tidal",
+    "http_status": 200,
+    "challenge_returned": true,
+    "session_returned": false
+  },
+  {
+    "gateway": "zarz",
+    "provider": "qobuz",
+    "http_status": 200,
+    "challenge_returned": true,
+    "session_returned": false
+  },
+  {
+    "gateway": "zarz",
+    "provider": "amazon",
+    "http_status": 200,
+    "challenge_returned": true,
+    "session_returned": false
+  }
+]

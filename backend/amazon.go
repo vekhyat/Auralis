@@ -2,14 +2,10 @@ package backend
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,7 +16,6 @@ import (
 
 type AmazonDownloader struct {
 	client    *http.Client
-	regions   []string
 	SourceURL string
 }
 
@@ -33,36 +28,21 @@ const (
 
 func NewAmazonDownloader() *AmazonDownloader {
 	return &AmazonDownloader{
-		client:  NewSignedHTTPClient(amazonAPITimeout),
-		regions: []string{"us", "eu"},
+		client: NewSignedHTTPClient(amazonAPITimeout),
 	}
 }
 
 func amazonStreamHTTPClient() *http.Client {
-	return &http.Client{Timeout: amazonStreamTimeout}
+	return newMediaHTTPClient()
 }
 
 func isTransientAmazonStreamError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
-		return true
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "timeout") ||
-		strings.Contains(msg, "deadline exceeded") ||
-		strings.Contains(msg, "connection reset") ||
-		strings.Contains(msg, "tls handshake timeout")
+	return retryableDownloadError(err)
 }
 
 func (a *AmazonDownloader) GetAmazonURLFromSpotify(spotifyTrackID string) (string, error) {
 	fmt.Println("Getting Amazon URL...")
-	client := NewSongLinkClient()
+	client := NewSongLinkClientWithContext(ActiveDownloadContext())
 	urls, err := client.GetAllURLsFromSpotify(spotifyTrackID, "")
 	if err != nil {
 		return "", fmt.Errorf("failed to get Amazon URL: %w", err)
@@ -102,7 +82,7 @@ func copyAmazonStream(dst io.Writer, resp *http.Response) (int64, error) {
 	if resp.StatusCode != http.StatusOK {
 		return 0, fmt.Errorf("Amazon stream returned status %d", resp.StatusCode)
 	}
-	return io.Copy(dst, resp.Body)
+	return copyDownloadBody(dst, resp.Body)
 }
 
 func (a *AmazonDownloader) fetchAmazonCommunityResponse(payload []byte) (amazonCommunityResponse, error) {
@@ -127,7 +107,7 @@ func (a *AmazonDownloader) fetchAmazonCommunityResponse(payload []byte) (amazonC
 		return amazonCommunityResponse{}, fmt.Errorf("Amazon API returned status %d", resp.StatusCode)
 	}
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := readBoundedBody(resp.Body, maxProviderJSONBytes)
 	if err != nil {
 		return amazonCommunityResponse{}, err
 	}
@@ -140,6 +120,10 @@ func (a *AmazonDownloader) fetchAmazonCommunityResponse(payload []byte) (amazonC
 }
 
 func (a *AmazonDownloader) downloadFromCommunity(amazonURL, outputDir, quality string) (string, error) {
+	return a.downloadFromGateway(amazonURL, outputDir, quality, "")
+}
+
+func (a *AmazonDownloader) downloadFromGateway(amazonURL, outputDir, quality, source string) (string, error) {
 
 	asinRegex := regexp.MustCompile(`(B[0-9A-Z]{9})`)
 	asin := asinRegex.FindString(amazonURL)
@@ -157,8 +141,16 @@ func (a *AmazonDownloader) downloadFromCommunity(amazonURL, outputDir, quality s
 	}
 
 	fmt.Printf("Fetching from Amazon API (ASIN: %s)...\n", asin)
-	apiResp, err := a.fetchAmazonCommunityResponse(payload)
+	var apiResp amazonCommunityResponse
+	if source == "zarz" {
+		apiResp, err = a.getAmazonZarzStream(asin, quality)
+	} else {
+		apiResp, err = a.fetchAmazonCommunityResponse(payload)
+	}
 	if err != nil {
+		if source != "" {
+			return "", err
+		}
 		if IsDownloadCancelledError(err) {
 			return "", err
 		}
@@ -212,6 +204,7 @@ func (a *AmazonDownloader) downloadFromCommunity(amazonURL, outputDir, quality s
 		if err != nil {
 			return "", err
 		}
+		dlReq = WithDownloadContext(dlReq)
 		if captcha := strings.TrimSpace(apiResp.Captcha); captcha != "" {
 			dlReq.Header.Set("x-captcha-token", captcha)
 		}
@@ -322,55 +315,35 @@ func amazonRemuxWithFFmpeg(inputPath, outputPath, targetExt string) error {
 }
 
 func (a *AmazonDownloader) DownloadFromService(amazonURL, outputDir, quality string) (string, error) {
-	path, err := a.downloadFromCommunity(amazonURL, outputDir, quality)
-	if err == nil {
-		return path, nil
+	attempts := []sourceDownloadAttempt{
+		{"antra-amazon", func() (string, error) { return a.downloadFromAntraMirror(amazonURL, outputDir, quality) }},
 	}
-	if IsDownloadCancelledError(err) {
-		return "", err
+	asin := regexpAmazonASIN.FindString(strings.ToUpper(amazonURL))
+	if asin != "" {
+		attempts = append(attempts, communitySourceAttempts("amazon", quality, filepath.Join(outputDir, asin+".flac"), SourceTrack{ID: asin, ServiceURL: amazonURL})...)
 	}
-	fmt.Printf("Amazon community/Zarz failed, trying Antra mirror: %v\n", err)
-	antraPath, antraErr := a.downloadFromAntraMirror(amazonURL, outputDir, quality)
-	if antraErr != nil {
-		return "", err
-	}
-	return antraPath, nil
+	attempts = append(attempts, []sourceDownloadAttempt{
+		{"community-amazon", func() (string, error) { return a.downloadFromGateway(amazonURL, outputDir, quality, "community") }},
+		{"zarz-amazon", func() (string, error) { return a.downloadFromGateway(amazonURL, outputDir, quality, "zarz") }},
+	}...)
+	return runDownloadSources("amazon", quality, 0, attempts)
 }
 
 func (a *AmazonDownloader) downloadFromAntraMirror(amazonURL, outputDir, quality string) (string, error) {
-	asinRegex := regexp.MustCompile(`(B[0-9A-Z]{9})`)
-	asin := asinRegex.FindString(amazonURL)
-	if asin == "" && strings.Contains(amazonURL, "spotify.com") {
-		parts := strings.Split(amazonURL, "/track/")
-		if len(parts) > 1 {
-			spotifyID := strings.Split(parts[1], "?")[0]
-			resolved, err := antraResolveSpotify("amazon", spotifyID)
-			if err != nil {
-				return "", err
-			}
-			asin = resolved
-		}
+	info, err := antraAmazonStreamInfo(amazonURL, quality)
+	if err != nil {
+		return "", err
+	}
+	asin := info.TrackID
+	if asin == "" {
+		asin = regexpAmazonASIN.FindString(strings.ToUpper(amazonURL))
 	}
 	if asin == "" {
-		return "", fmt.Errorf("failed to extract Amazon ASIN")
+		asin = "amazon-track"
 	}
 	dest := filepath.Join(outputDir, asin+".flac")
-	query := url.Values{}
-	if amazonCommunityNormalizeQuality(quality) == "atmos" {
-		query.Set("format", "atmos")
-	}
-	path, err := antraStreamToFile("amazon", asin, dest, query)
-	if err == nil {
-		return path, nil
-	}
-	info, infoErr := antraGetTrackInfo("amazon", asin)
-	if infoErr != nil {
-		return "", err
-	}
-	if info.StreamURL == "" {
-		return "", err
-	}
-	return antraDownloadURLToFile(info.StreamURL, dest)
+	atmos := amazonCommunityNormalizeQuality(quality) == "atmos"
+	return antraMaterializeAmazon(info, dest, atmos)
 }
 
 func (a *AmazonDownloader) DownloadByURL(amazonURL, outputDir, quality, filenameFormat, playlistName, playlistOwner string, includeTrackNumber bool, position int, spotifyTrackName, spotifyArtistName, spotifyAlbumName, spotifyAlbumArtist, spotifyReleaseDate, spotifyCoverURL string, spotifyTrackNumber, spotifyDiscNumber, spotifyTotalTracks int, embedMaxQualityCover bool, spotifyTotalDiscs int, spotifyCopyright, spotifyPublisher, spotifyComposer, metadataSeparator, isrcOverride, spotifyURL string, allowFallback bool, allowAtmosFallback bool, atmosFallbackQuality string, useFirstArtistOnly bool, useSingleGenre bool, embedGenre bool) (string, error) {
@@ -416,7 +389,7 @@ func (a *AmazonDownloader) DownloadByURL(amazonURL, outputDir, quality, filename
 			if len(parts) > 0 {
 				sID := strings.Split(parts[len(parts)-1], "?")[0]
 				if sID != "" {
-					client := NewSongLinkClient()
+					client := NewSongLinkClientWithContext(ActiveDownloadContext())
 					if val, err := client.GetISRC(sID); err == nil {
 						isrc = val
 					}
@@ -474,7 +447,7 @@ func (a *AmazonDownloader) DownloadByURL(amazonURL, outputDir, quality, filename
 
 	upc := ""
 	if spotifyURL != "" {
-		if identifiers, err := GetSpotifyTrackIdentifiersDirect(spotifyURL); err == nil || identifiers.ISRC != "" || identifiers.UPC != "" {
+		if identifiers, err := GetSpotifyTrackIdentifiersWithContext(ActiveDownloadContext(), spotifyURL); err == nil || identifiers.ISRC != "" || identifiers.UPC != "" {
 			if strings.TrimSpace(isrc) == "" && strings.TrimSpace(identifiers.ISRC) != "" {
 				isrc = strings.TrimSpace(identifiers.ISRC)
 			}

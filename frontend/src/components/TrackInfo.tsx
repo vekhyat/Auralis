@@ -1,12 +1,13 @@
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import { Download, FolderOpen, CircleCheckBig, XCircle, FileText, FileCheck, ImageDown, Play, Pause, ListPlus, CircleCheck } from "lucide-react";
+import { Download, FolderOpen, CircleCheckBig, XCircle, FileText, FileCheck, ImageDown, Play, Pause, CircleCheck } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger, } from "@/components/ui/tooltip";
 import type { TrackMetadata, TrackAvailability } from "@/types/api";
 import { usePreview } from "@/hooks/usePreview";
 import { useQueueFeedback } from "@/hooks/useQueueFeedback";
-import { AvailabilityLinks, hasAvailabilityLinks } from "./AvailabilityLinks";
+import { AvailabilityLinks } from "./AvailabilityLinks";
+import { hasAvailabilityLinks } from "@/lib/availability-links";
 import { buildClickableArtists, getClickableArtistKey } from "@/lib/artist-links";
 
 interface TrackInfoProps {
@@ -63,7 +64,7 @@ function statusWord(isSkipped: boolean, isDownloaded: boolean, isFailed: boolean
  * One fetched track at rest: the inspector is the page. Modest cover,
  * definition-list metadata, actions as a text/button row.
  */
-export function TrackInfo({ track, isDownloading, downloadingTrack, isDownloaded, isFailed, isSkipped, downloadingLyricsTrack, downloadedLyrics, failedLyrics, skippedLyrics, checkingAvailability, availability, downloadingCover, downloadedCover, failedCover, skippedCover, onDownload, onQueueTrack, onDownloadLyrics, onCheckAvailability, onDownloadCover, onOpenFolder, onAlbumClick, onArtistClick, onPublisherClick, onBack, }: TrackInfoProps) {
+export function TrackInfo({ track, downloadingTrack, isDownloaded, isFailed, isSkipped, downloadingLyricsTrack, downloadedLyrics, failedLyrics, skippedLyrics, checkingAvailability, availability, downloadingCover, downloadedCover, failedCover, skippedCover, onQueueTrack, onDownloadLyrics, onCheckAvailability, onDownloadCover, onOpenFolder, onAlbumClick, onArtistClick, onPublisherClick, onBack, }: TrackInfoProps) {
     const { t } = useTranslation();
     const { playPreview, loadingPreview, playingTrack } = usePreview();
     const { isQueued } = useQueueFeedback();
@@ -80,13 +81,13 @@ export function TrackInfo({ track, isDownloading, downloadingTrack, isDownloaded
     const minutes = Math.floor(track.duration_ms / 60000);
     const seconds = Math.floor((track.duration_ms % 60000) / 1000);
     const durationLabel = `${minutes}:${seconds.toString().padStart(2, "0")}`;
-    return (<section className="mx-auto w-full max-w-3xl">
-      <div className="flex items-start gap-6">
-        {track.images ? (<img src={track.images} alt={track.name} className="h-[120px] w-[120px] shrink-0 rounded-[2px] object-cover"/>) : null}
+    return (<section className="track-detail mx-auto w-full max-w-5xl">
+      <div className="flex items-start gap-8">
+        {track.images ? (<img src={track.images} alt={track.name} className="h-[240px] w-[240px] shrink-0 rounded-xl object-cover"/>) : null}
         <div className="min-w-0 flex-1 space-y-1">
-          <p className="text-[11px] font-semibold tracking-widest uppercase text-muted-foreground">{t("translation.artistInfo.track")}</p>
+          
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <h2 className="text-lg leading-snug font-semibold break-words">{track.name}</h2>
+            <h2 className="text-3xl leading-tight font-semibold tracking-tight break-words">{track.name}</h2>
             {status ? (<span className={`font-mono text-[11px] uppercase tracking-wider ${status.tone}`}>{status.word}</span>) : null}
           </div>
           <p className="text-sm text-muted-foreground">
@@ -147,16 +148,10 @@ export function TrackInfo({ track, isDownloading, downloadingTrack, isDownloaded
       </dl>
 
       {track.spotify_id ? (<div className="mt-5 flex flex-wrap items-center gap-2">
-        <Button size="sm" onClick={() => onDownload(track.spotify_id || "", track.name, track.artists, track.album_name, track.spotify_id, undefined, track.duration_ms, track.track_number, track.album_artist, track.release_date, track.images, track.track_number, track.disc_number, track.total_tracks, track.total_discs, track.copyright, track.publisher)} disabled={isDownloading || downloadingTrack === track.spotify_id}>
-          {downloadingTrack === track.spotify_id ? (<Spinner />) : (<>
-            <Download className="size-3.5"/>
-            {t("translation.trackInfo.download")}
-          </>)}
+        <Button onClick={() => onQueueTrack?.(track)} disabled={trackQueued || !onQueueTrack}>
+          {downloadingTrack === track.spotify_id ? <Spinner /> : trackQueued ? <CircleCheck className="size-4" /> : <Download className="size-4" />}
+          {t(trackQueued ? "translation.downloads.requested" : "translation.trackInfo.download")}
         </Button>
-        {onQueueTrack && (<Button variant="outline" size="sm" onClick={() => onQueueTrack(track)}>
-          {trackQueued ? (<CircleCheck className="size-3.5"/>) : (<ListPlus className="size-3.5"/>)}
-          {t(trackQueued ? "translation.queue.alreadyInQueue" : "translation.queue.addToQueue")}
-        </Button>)}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="outline" size="icon-sm" disabled={loadingPreview === track.spotify_id} onClick={() => playPreview(track.spotify_id!, track.name)}>

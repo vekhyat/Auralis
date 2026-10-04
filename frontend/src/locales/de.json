@@ -35,6 +35,7 @@
       "downloadNow": "Jetzt herunterladen",
       "downloadPathNotSet": "Download-Pfad nicht festgelegt",
       "fetchFailed": "Abruf fehlgeschlagen",
+      "pageLoadFailed": "Diese Seite konnte nicht geladen werden.",
       "finalizingSetup": "Setup wird abgeschlossen",
       "newVersion": "Eine neue Version",
       "noChangelogProvidedRelease": "Kein Changelog für diese Version angegeben.",
@@ -207,6 +208,8 @@
       "albumName": "Albumname",
       "artistZ": "Interpret (A-Z)",
       "artistZ2": "Interpret (Z-A)",
+      "more": "Mehr",
+      "back": "Zurück",
       "audioConverter": "Audio-Konverter",
       "audioQualityAnalyzer": "Audio-Qualitätsanalyse",
       "bpmKeyAnalyzer": "BPM- & Tonart-Analyse",
@@ -413,6 +416,25 @@
     "header": {
       "reload": "Laden Sie Auralis neu",
       "tagline": "Holen Sie sich Spotify-Titel in echtem FLAC von Tidal, Qobuz und Amazon Music – kein Konto erforderlich."
+    },
+    "omnibar": {
+      "placeholder": "Link einfügen oder nach Titeln, Alben, Interpreten und Playlists suchen"
+    },
+    "catalog": {
+      "emptyHint": "Fügen Sie oben einen Streaming-Link ein oder tippen Sie, um zu suchen. Die Ergebnisse öffnen sich als Katalog; wählen Sie einen Eintrag aus, um ihn anzusehen.",
+      "recentFetches": "Letzte Abrufe",
+      "recentSearches": "Letzte Suchen",
+      "remove": "Entfernen",
+      "resultsFor": "Ergebnisse",
+      "selectToInspect": "Wählen Sie einen Eintrag aus, um ihn hier anzusehen.",
+      "fetchLossless": "Verlustfrei abrufen",
+      "owner": "Inhaber",
+      "followers": "Follower",
+      "listeners": "Zuhörer",
+      "rank": "Rang",
+      "genres": "Genres",
+      "verified": "Verifiziert",
+      "discography": "Diskografie"
     },
     "history": {
       "clearDownloadHistory": "Download-Verlauf löschen?",
@@ -631,6 +653,7 @@
     "sidebar": {
       "reportBugsRequestFeatures": "Fehler melden oder Funktionen anfordern",
       "home": "Startseite",
+      "library": "Bibliothek",
       "important": "Wichtig",
       "tools": "Werkzeuge",
       "history": "Verlauf",
@@ -797,7 +820,15 @@
       "minimize": "Minimieren",
       "network": "Netzwerk",
       "website": "Website",
+      "primaryNavigation": "Hauptnavigation",
       "blockedBySpotify": "(Von Spotify blockiert)"
+    },
+    "apiStatus": {
+      "online": "Online",
+      "offline": "Offline",
+      "checking": "Wird geprüft",
+      "idle": "Inaktiv",
+      "extendedSources": "Weitere Quellen"
     },
     "trackInfo": {
       "recordLabel": "Plattenlabel",
@@ -1216,6 +1247,70 @@
     "metadata": {
       "fetched_other": "{{formattedCount}} Titel abgerufen",
       "fetched_one": "{{formattedCount}} Spur abgerufen"
+    },
+    "downloads": {
+      "title": "Downloads",
+      "download": "Download",
+      "downloadSelected": "Download selected ({{value1}})",
+      "requested": "In downloads",
+      "added": "{{name}} added to downloads",
+      "addedPaused": "{{name}} added · downloads are paused",
+      "trackCount": "{{count}} tracks",
+      "ready": "Ready when you are",
+      "autoHint": "Downloads start automatically. Keep exploring while we take care of the files.",
+      "downloading": "Downloading",
+      "waitingResume": "Waiting for you to resume",
+      "cancelCurrent": "Cancel current download",
+      "pausedHint": "Downloads are paused. New requests will wait until you resume.",
+      "empty": "Your next download starts here",
+      "emptyHint": "Find a track, album, or playlist in your library and choose Download.",
+      "findMusic": "Find music",
+      "libraryTitle": "Your music, ready to keep.",
+      "libraryHint": "Find a favorite. Explore the artwork and track list. Download it in one click.",
+      "emptyLibrary": "Start with something you love",
+      "emptyLibraryHint": "Paste a Spotify link or search for an artist, album, or track above. Your recently explored music will appear here."
+    },
+    "communitySources": {
+      "title": "Community download sources",
+      "description": "Enable fallback sources, connect your own server, and check whether each API responds. Only a successful full-track test confirms a working download.",
+      "checkAll": "Check all APIs",
+      "save": "Save source changes",
+      "saving": "Saving",
+      "saveBeforeCheck": "Save your source changes before checking or testing downloads.",
+      "loading": "Loading community sources",
+      "unchecked": "Unchecked",
+      "verified": "Download verified",
+      "responding": "API responding",
+      "verification": "Verification required",
+      "cancelled": "Cancelled",
+      "unavailable": "Unavailable",
+      "disabled": "Disabled",
+      "useSource": "Use this source for downloads",
+      "serverUrl": "Server URL",
+      "credentialEnv": "Credential environment variable",
+      "credentialType": "Credential type",
+      "noCredential": "None",
+      "sessionCookie": "Session cookie",
+      "credentialHelp": "Enter the name of an environment variable containing your authorized API key or session cookie. Leave it empty when the server needs no credential.",
+      "checking": "Checking",
+      "checkApi": "Check API",
+      "testDownload": "Test sample download",
+      "musicService": "Server music provider"
+    },
+    "sourceVerification": {
+      "title": "Source verification",
+      "manualHelp": "Complete the site's verification or sign-in below, then check the connection. Your session stays on this computer.",
+      "automaticHelp": "Complete the verification below. Auralis will continue automatically when the source accepts it.",
+      "cancel": "Cancel verification",
+      "browserLabel": "Source verification page",
+      "opening": "Opening the source in Auralis…",
+      "checking": "Checking connection…",
+      "confirm": "Check connection",
+      "connections": "Source connections",
+      "connectionsHelp": "Check the original download sources, catalogs, lyrics, and link resolvers here. Verification stays inside Auralis. API access does not prove a full-track download.",
+      "downloadSources": "Original download sources",
+      "resources": "Catalog, metadata, and lyrics resources",
+      "verify": "Verify in app"
     }
   },
   "literal": {
@@ -1250,6 +1345,8 @@
       "mb": "MB",
       "aiff": "AIFF",
       "amazonMusic": "Amazon Music",
+      "appleMusic": "Apple Music",
+      "jiosaavn": "JioSaavn",
       "deezer": "Deezer",
       "isrc": "ISRC",
       "lrclib": "LRCLIB",

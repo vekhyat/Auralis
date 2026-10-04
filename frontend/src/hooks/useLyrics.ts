@@ -6,7 +6,7 @@ import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { joinPath, sanitizePath, getFirstArtist } from "@/lib/utils";
 import { logger } from "@/lib/logger";
 import type { TrackMetadata } from "@/types/api";
-const GetTrackISRC = (spotifyId: string): Promise<string> => (window as any)["go"]["main"]["App"]["GetTrackISRC"](spotifyId);
+import { GetTrackISRC } from "../../wailsjs/go/main/App";
 async function resolveTemplateISRC(settings: {
     folderTemplate?: string;
     filenameTemplate?: string;

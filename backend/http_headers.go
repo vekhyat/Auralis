@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,6 +35,18 @@ func NewSignedHTTPClient(timeout time.Duration) *http.Client {
 		Timeout:       timeout,
 		CheckRedirect: SameHostCheckRedirect,
 	}
+}
+
+// WithDownloadContext ties a resolve or transfer request to the active
+// download so Stop interrupts it instead of leaving the queue on "preparing".
+func WithDownloadContext(req *http.Request) *http.Request {
+	if req == nil {
+		return nil
+	}
+	if existing := req.Context(); existing != nil && existing != context.Background() {
+		return req
+	}
+	return req.WithContext(ActiveDownloadContext())
 }
 
 func NewRequestWithDefaultHeaders(method string, rawURL string, body io.Reader) (*http.Request, error) {

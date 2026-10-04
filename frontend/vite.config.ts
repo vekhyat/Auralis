@@ -3,7 +3,7 @@ import fs from "fs";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
-const wailsJsonPath = path.resolve(__dirname, "../wails.json");
+const wailsJsonPath = path.resolve(import.meta.dirname, "../wails.json");
 const wailsJson = JSON.parse(fs.readFileSync(wailsJsonPath, "utf-8"));
 const appVersion = wailsJson.info.productVersion;
 export default defineConfig({
@@ -13,7 +13,7 @@ export default defineConfig({
     },
     resolve: {
         alias: {
-            "@": path.resolve(__dirname, "./src"),
+            "@": path.resolve(import.meta.dirname, "./src"),
         },
     },
     define: {

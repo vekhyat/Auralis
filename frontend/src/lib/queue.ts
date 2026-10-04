@@ -1,5 +1,7 @@
 import type { TrackMetadata } from "@/types/api";
 import { ApplyPersistentDownloadQueueChanges, LoadPersistentDownloadQueue, ReplacePersistentDownloadQueue } from "../../wailsjs/go/main/App";
+import { isProtectedQueueStatus, nextAutomaticQueueItem, nextManualQueueItem, queueItemStatusAfterAttempt, retainProtectedQueueItems } from "./queue-guards";
+import { createQueuePersistenceController, decidePersistentQueueLoad, isStoredQueueItem, queueLoadWritesStore, type QueuePersistenceState } from "./queue-persistence";
 export type QueueItemType = "track" | "album" | "playlist" | "artist";
 export type QueueItemStatus = "pending" | "running" | "paused" | "done" | "partial" | "skipped" | "failed";
 export type QueueTrackStatus = "done" | "failed" | "skipped";
@@ -62,12 +64,14 @@ export interface QueueTrackStatusSets {
 }
 const LEGACY_STORAGE_KEY = "auralis_download_queue";
 const listeners = new Set<(items: QueueItem[]) => void>();
+const autoStartListeners = new Set<() => void>();
 let cache: QueueItem[] = [];
 let persistedCache: QueueItem[] = [];
 let initializationPromise: Promise<void> | null = null;
-let persistenceWorker: Promise<void> | null = null;
 let needsFullReplace = false;
 let legacyMigrationPending = false;
+let preserveCorruptStore = false;
+let hasUnpersistedEdits = false;
 function parseQueue(raw: string | null, source: string, rejectInvalidItems = false): QueueItem[] | null {
     if (raw === null || raw.trim() === "")
         return null;
@@ -75,7 +79,7 @@ function parseQueue(raw: string | null, source: string, rejectInvalidItems = fal
         const parsed = JSON.parse(raw);
         if (!Array.isArray(parsed))
             return null;
-        const items = parsed.filter((item): item is QueueItem => Boolean(item && typeof item.id === "string" && Array.isArray(item.tracks)));
+        const items = parsed.filter((item): item is QueueItem => isStoredQueueItem(item));
         if (items.length !== parsed.length) {
             console.error(`Download queue from ${source} contains invalid items.`);
             if (rejectInvalidItems) {
@@ -89,13 +93,15 @@ function parseQueue(raw: string | null, source: string, rejectInvalidItems = fal
         return null;
     }
 }
-function readLegacyQueue(): QueueItem[] {
+function readLegacyQueue(): QueueItem[] | null {
     try {
-        return parseQueue(localStorage.getItem(LEGACY_STORAGE_KEY), "legacy storage") || [];
+        const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+        if (raw === null || raw.trim() === "") return [];
+        return parseQueue(raw, "legacy storage", true);
     }
     catch (err) {
         console.error("Failed to read the legacy download queue:", err);
-        return [];
+        return null;
     }
 }
 function removeLegacyQueue(): void {
@@ -141,54 +147,90 @@ async function persistChanges(previous: QueueItem[], next: QueueItem[]): Promise
     }
     await ApplyPersistentDownloadQueueChanges(JSON.stringify(upserts), removedIDs, orderJSON);
 }
+const queuePersistence = createQueuePersistenceController({
+    isDirty: () => !preserveCorruptStore && (needsFullReplace || persistedCache !== cache),
+    persist: async () => {
+        const attemptedCache = cache;
+        if (needsFullReplace) {
+            await replacePersistentQueue(attemptedCache);
+        }
+        else {
+            await persistChanges(persistedCache, attemptedCache);
+        }
+        persistedCache = attemptedCache;
+    },
+    onFailure: (err) => {
+        needsFullReplace = true;
+        console.error("Failed to persist download queue to the database:", err);
+    },
+});
 function schedulePersistence(): void {
-    if (persistenceWorker) {
+    if (preserveCorruptStore) {
+        queuePersistence.failClosed();
         return;
     }
-    let attemptedCache: QueueItem[] | null = null;
-    persistenceWorker = (async () => {
-        while (needsFullReplace || persistedCache !== cache) {
-            attemptedCache = cache;
-            try {
-                if (needsFullReplace) {
-                    await replacePersistentQueue(attemptedCache);
-                }
-                else {
-                    await persistChanges(persistedCache, attemptedCache);
-                }
-                persistedCache = attemptedCache;
-            }
-            catch (err) {
-                needsFullReplace = true;
-                console.error("Failed to persist download queue to the database:", err);
-                break;
-            }
-        }
-    })().finally(() => {
-        persistenceWorker = null;
-        if (persistedCache !== cache && (!needsFullReplace || cache !== attemptedCache)) {
-            schedulePersistence();
-        }
-    });
+    queuePersistence.note();
 }
+export function getQueuePersistenceState(): QueuePersistenceState {
+    return queuePersistence.getState();
+}
+export function subscribeQueuePersistence(listener: (state: QueuePersistenceState) => void): () => void {
+    return queuePersistence.subscribe(listener);
+}
+export function retryQueuePersistence(): void {
+    if (preserveCorruptStore) {
+        queuePersistence.failClosed();
+        return;
+    }
+    queuePersistence.retry();
+}
+export async function flushQueuePersistence(): Promise<boolean> {
+    if (preserveCorruptStore) return !hasUnpersistedEdits;
+    if (!needsFullReplace && persistedCache === cache) return true;
+    if (queuePersistence.getState().phase === "unsaved") queuePersistence.retry();
+    else schedulePersistence();
+    await queuePersistence.whenSettled();
+    const saved = !needsFullReplace && persistedCache === cache;
+    if (saved) hasUnpersistedEdits = false;
+    return saved;
+}
+export type { QueuePersistenceState };
 export function initializeQueuePersistence(): Promise<void> {
     if (initializationPromise) {
         return initializationPromise;
     }
     initializationPromise = (async () => {
-        let databasePayload: string;
+        let loaded: { ok: true; payload: string } | { ok: false };
         try {
-            databasePayload = await LoadPersistentDownloadQueue();
+            loaded = { ok: true, payload: await LoadPersistentDownloadQueue() };
         }
         catch (err) {
             console.error("Failed to load download queue database:", err);
-            cache = restoreInterruptedItems(readLegacyQueue()).items;
-            legacyMigrationPending = true;
-            needsFullReplace = true;
+            loaded = { ok: false };
+        }
+        const loadDecision = decidePersistentQueueLoad(loaded);
+        if (!queueLoadWritesStore(loadDecision)) {
+            if (loadDecision === "preserve-store") {
+                console.error("Download queue database could not be read; leaving the stored queue untouched.");
+            }
+            else {
+                console.error("Download queue database payload is corrupt; leaving the stored queue untouched.");
+            }
+            preserveCorruptStore = true;
+            cache = [];
+            queuePersistence.failClosed();
             return;
         }
-        if (databasePayload.trim() === "") {
+        const databasePayload = loaded.ok ? loaded.payload : "";
+        const loadPlan = loadDecision;
+        if (loadPlan === "migrate-legacy") {
             const legacyQueue = readLegacyQueue();
+            if (legacyQueue === null) {
+                preserveCorruptStore = true;
+                cache = [];
+                queuePersistence.failClosed();
+                return;
+            }
             const restored = restoreInterruptedItems(legacyQueue);
             cache = restored.items;
             legacyMigrationPending = true;
@@ -199,13 +241,16 @@ export function initializeQueuePersistence(): Promise<void> {
             catch (err) {
                 needsFullReplace = true;
                 console.error("Failed to migrate download queue to the database:", err);
+                schedulePersistence();
             }
             return;
         }
         const persisted = parseQueue(databasePayload, "database", true);
         if (!persisted) {
             console.error("Download queue database payload is corrupt; leaving the stored queue untouched.");
+            preserveCorruptStore = true;
             cache = [];
+            queuePersistence.failClosed();
             return;
         }
         const restored = restoreInterruptedItems(persisted);
@@ -228,6 +273,7 @@ export function initializeQueuePersistence(): Promise<void> {
             catch (err) {
                 needsFullReplace = true;
                 console.error("Failed to persist the restored download queue:", err);
+                schedulePersistence();
             }
         }
         else {
@@ -241,6 +287,7 @@ function read(): QueueItem[] {
     return cache;
 }
 function write(items: QueueItem[]): void {
+    hasUnpersistedEdits = true;
     cache = items;
     schedulePersistence();
     for (const listener of listeners) {
@@ -255,6 +302,17 @@ export function subscribeQueue(listener: (items: QueueItem[]) => void): () => vo
     return () => {
         listeners.delete(listener);
     };
+}
+export function subscribeQueueAutoStart(listener: () => void): () => void {
+    autoStartListeners.add(listener);
+    return () => {
+        autoStartListeners.delete(listener);
+    };
+}
+function notifyQueueAdded(): void {
+    for (const listener of autoStartListeners) {
+        listener();
+    }
 }
 function getTrackKey(track: TrackMetadata): string {
     return `track:${track.spotify_id || track.external_urls || `${track.name}-${track.artists}-${track.album_name}`}`;
@@ -363,17 +421,7 @@ export function summarizeQueueTrackResults(tracks: TrackMetadata[], trackResults
     return { trackResults, successCount, skippedCount, failedCount, ...flags };
 }
 export function getQueueItemStatus(result: QueueExecutionResult, hasRemaining: boolean): QueueItemStatus {
-    if (result.paused && hasRemaining)
-        return "paused";
-    if (result.cancelled && hasRemaining)
-        return "pending";
-    if (result.failedCount > 0 && result.successCount + result.skippedCount > 0)
-        return "partial";
-    if (result.failedCount > 0)
-        return "failed";
-    if (result.skippedCount > 0 && result.successCount === 0)
-        return "skipped";
-    return "done";
+    return queueItemStatusAfterAttempt(result, hasRemaining);
 }
 export function finishDirectQueueItem(id: string, result: QueueExecutionResult): void {
     const item = read().find((candidate) => candidate.id === id);
@@ -416,6 +464,9 @@ export function addTracksToQueue(tracks: TrackMetadata[], options: AddTracksOpti
         }
     });
     write(items);
+    if (added > 0) {
+        notifyQueueAdded();
+    }
     return { added, skipped: queueable.length - added };
 }
 export function addCollectionToQueue(input: AddCollectionInput): AddResult {
@@ -442,6 +493,7 @@ export function addCollectionToQueue(input: AddCollectionInput): AddResult {
     const result = mergeByKey(read(), item);
     if (result.added) {
         write(result.items);
+        notifyQueueAdded();
         return { added: 1, skipped: 0 };
     }
     return { added: 0, skipped: 1 };
@@ -473,7 +525,8 @@ export function updateQueueTrackResult(itemId: string, trackId: string, status: 
 }
 export function removeQueueItem(id: string): void {
     const items = read();
-    if (!items.some((item) => item.id === id))
+    const target = items.find((item) => item.id === id);
+    if (!target || isProtectedQueueStatus(target.status))
         return;
     write(items.filter((item) => item.id !== id));
 }
@@ -483,6 +536,8 @@ export function removeTrackFromQueueItem(itemId: string, trackIndex: number): vo
     if (index === -1)
         return;
     const item = items[index];
+    if (isProtectedQueueStatus(item.status))
+        return;
     if (trackIndex < 0 || trackIndex >= item.tracks.length)
         return;
     const remaining = item.tracks.filter((_, position) => position !== trackIndex);
@@ -501,18 +556,18 @@ export function removeTrackFromQueueItem(itemId: string, trackIndex: number): vo
 }
 export function retryQueueItem(id: string): void {
     const item = read().find((candidate) => candidate.id === id);
-    if (!item)
+    if (!item || item.status === "running")
         return;
     const preservedResults = Object.fromEntries(Object.entries(item.trackResults || {}).filter(([, status]) => status === "done" || status === "skipped"));
     const preservedPaths = Object.fromEntries(Object.entries(item.trackFilePaths || {}).filter(([trackId]) => Boolean(preservedResults[trackId])));
     updateQueueItem(id, { status: "pending", error: "", trackResults: preservedResults, trackFilePaths: preservedPaths });
+    notifyQueueAdded();
 }
 export function clearQueue(type?: QueueItemType): void {
     const items = read();
-    const next = type ? items.filter((item) => item.type !== type) : [];
-    if (next.length === items.length && items.length > 0 && type) {
+    const next = retainProtectedQueueItems(items, type);
+    if (next.length === items.length)
         return;
-    }
     write(next);
 }
 export function clearFinishedQueueItems(type?: QueueItemType): void {
@@ -527,7 +582,10 @@ export function clearFinishedQueueItems(type?: QueueItemType): void {
     write(next);
 }
 export function getNextRunnableQueueItem(type?: QueueItemType): QueueItem | undefined {
-    return read().find((item) => (item.status === "paused" || item.status === "pending") && (!type || item.type === type));
+    return nextManualQueueItem(read(), type);
+}
+export function getNextPendingQueueItem(): QueueItem | undefined {
+    return nextAutomaticQueueItem(read());
 }
 export function countRunnableQueueItems(type?: QueueItemType): number {
     return read().filter((item) => (item.status === "paused" || item.status === "pending") && (!type || item.type === type)).length;

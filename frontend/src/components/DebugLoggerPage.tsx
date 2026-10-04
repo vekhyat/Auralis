@@ -6,11 +6,11 @@ import { logger, type LogEntry } from "@/lib/logger";
 import { ExportFailedDownloads } from "../../wailsjs/go/main/App";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 const levelColors: Record<string, string> = {
-    info: "text-blue-500",
-    success: "text-green-500",
-    warning: "text-yellow-500",
-    error: "text-red-500",
-    debug: "text-gray-500",
+    info: "text-foreground",
+    success: "text-foreground font-medium",
+    warning: "text-foreground font-medium",
+    error: "text-destructive",
+    debug: "text-muted-foreground",
 };
 function formatTime(date: Date): string {
     return date.toLocaleTimeString("en-US", {
@@ -21,14 +21,13 @@ function formatTime(date: Date): string {
     });
 }
 export function DebugLoggerPage() {
-    const [logs, setLogs] = useState<LogEntry[]>([]);
+    const [logs, setLogs] = useState<LogEntry[]>(() => logger.getLogs());
     const [copied, setCopied] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
     useEffect(() => {
         const unsubscribe = logger.subscribe(() => {
             setLogs(logger.getLogs());
         });
-        setLogs(logger.getLogs());
         return () => {
             unsubscribe();
         };

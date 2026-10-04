@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	id3v2 "github.com/bogem/id3v2/v2"
 	"github.com/go-flac/flacvorbis"
@@ -58,6 +60,9 @@ func ListDirectory(dirPath string) ([]FileInfo, error) {
 
 	var result []FileInfo
 	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), ".auralis-incoming-") {
+			continue
+		}
 		info, err := entry.Info()
 		if err != nil {
 			continue
@@ -92,6 +97,9 @@ func ListAudioFiles(dirPath string) ([]FileInfo, error) {
 		}
 
 		if info.IsDir() {
+			if strings.HasPrefix(info.Name(), ".auralis-incoming-") {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 
@@ -264,7 +272,9 @@ func readMetadataWithFFprobe(filePath string) (*AudioMetadata, error) {
 		return nil, fmt.Errorf("invalid ffprobe executable: %w", err)
 	}
 
-	cmd := exec.Command(ffprobePath,
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, ffprobePath,
 		"-v", "quiet",
 		"-print_format", "json",
 		"-show_format",

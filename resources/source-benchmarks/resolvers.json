@@ -1,0 +1,29 @@
+[
+  {
+    "id": "resource-songstats",
+    "role": "resolver",
+    "state": "available",
+    "median_ms": 612.9717,
+    "attempts": 3,
+    "successes": 3,
+    "checked_at": "2026-10-02T19:05:53.9209104Z"
+  },
+  {
+    "id": "resource-songlink",
+    "role": "resolver",
+    "state": "available",
+    "median_ms": 1285.2952,
+    "attempts": 3,
+    "successes": 3,
+    "checked_at": "2026-10-02T19:05:56.455212Z"
+  },
+  {
+    "id": "resource-spotify",
+    "role": "resolver",
+    "state": "available",
+    "median_ms": 301.6291,
+    "attempts": 3,
+    "successes": 3,
+    "checked_at": "2026-10-02T19:06:01.718689Z"
+  }
+]

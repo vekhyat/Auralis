@@ -52,8 +52,6 @@ var (
 
 	downloadQueue       []DownloadItem
 	downloadQueueLock   sync.RWMutex
-	currentItemID       string
-	currentItemLock     sync.RWMutex
 	totalDownloaded     float64
 	totalDownloadedLock sync.RWMutex
 	sessionStartTime    int64
@@ -225,7 +223,6 @@ type ProgressWriter struct {
 	startTime   int64
 	lastTime    int64
 	lastBytes   int64
-	itemID      string
 }
 
 func NewProgressWriter(writer io.Writer) *ProgressWriter {
@@ -237,14 +234,7 @@ func NewProgressWriter(writer io.Writer) *ProgressWriter {
 		startTime:   now,
 		lastTime:    now,
 		lastBytes:   0,
-		itemID:      "",
 	}
-}
-
-func NewProgressWriterWithID(writer io.Writer, itemID string) *ProgressWriter {
-	pw := NewProgressWriter(writer)
-	pw.itemID = itemID
-	return pw
 }
 
 func getCurrentTimeMillis() int64 {
@@ -259,10 +249,11 @@ func (pw *ProgressWriter) Write(p []byte) (int, error) {
 	n, err := pw.writer.Write(p)
 	pw.total += int64(n)
 
-	if pw.total-pw.lastPrinted >= 256*1024 {
+	nowMillis := getCurrentTimeMillis()
+	if pw.total-pw.lastPrinted >= 32*1024 || (pw.total > pw.lastPrinted && nowMillis-pw.lastTime >= 200) {
 		mbDownloaded := float64(pw.total) / (1024 * 1024)
 
-		now := getCurrentTimeMillis()
+		now := nowMillis
 		timeDiff := float64(now-pw.lastTime) / 1000.0
 		bytesDiff := float64(pw.total - pw.lastBytes)
 
@@ -277,10 +268,6 @@ func (pw *ProgressWriter) Write(p []byte) (int, error) {
 
 		SetDownloadProgress(mbDownloaded)
 
-		if pw.itemID != "" {
-			UpdateItemProgress(pw.itemID, mbDownloaded, speedMBps)
-		}
-
 		pw.lastPrinted = pw.total
 		pw.lastTime = now
 		pw.lastBytes = pw.total
@@ -291,6 +278,32 @@ func (pw *ProgressWriter) Write(p []byte) (int, error) {
 
 func (pw *ProgressWriter) GetTotal() int64 {
 	return pw.total
+}
+
+// rewind drops the last n bytes so a stalled attempt can be fetched again
+// without appending a second copy onto the file.
+func (pw *ProgressWriter) rewind(n int64) {
+	if pw == nil || n <= 0 {
+		return
+	}
+	if n > pw.total {
+		n = pw.total
+	}
+	target := pw.total - n
+	if seeker, ok := pw.writer.(io.Seeker); ok {
+		if _, err := seeker.Seek(target, io.SeekStart); err == nil {
+			if trunc, ok := pw.writer.(interface{ Truncate(int64) error }); ok {
+				_ = trunc.Truncate(target)
+			}
+		}
+	}
+	pw.total = target
+	if pw.lastPrinted > pw.total {
+		pw.lastPrinted = pw.total
+	}
+	if pw.lastBytes > pw.total {
+		pw.lastBytes = pw.total
+	}
 }
 
 func AddToQueue(id, trackName, artistName, albumName, spotifyID string) {
@@ -332,29 +345,6 @@ func StartDownloadItem(id string) {
 			break
 		}
 	}
-
-	currentItemLock.Lock()
-	currentItemID = id
-	currentItemLock.Unlock()
-}
-
-func UpdateItemProgress(id string, progress, speed float64) {
-	downloadQueueLock.Lock()
-	defer downloadQueueLock.Unlock()
-
-	for i := range downloadQueue {
-		if downloadQueue[i].ID == id {
-			downloadQueue[i].Progress = progress
-			downloadQueue[i].Speed = speed
-			break
-		}
-	}
-}
-
-func GetCurrentItemID() string {
-	currentItemLock.RLock()
-	defer currentItemLock.RUnlock()
-	return currentItemID
 }
 
 func CompleteDownloadItem(id, filePath string, finalSize float64) {
@@ -484,10 +474,6 @@ func ClearAllDownloads() {
 	sessionStartTime = 0
 	sessionStartLock.Unlock()
 
-	currentItemLock.Lock()
-	currentItemID = ""
-	currentItemLock.Unlock()
-
 	SetDownloadProgress(0)
 	SetDownloadSpeed(0)
 }
@@ -515,10 +501,6 @@ func CancelQueuedAndDownloadingItems() {
 		}
 	}
 	downloadQueueLock.Unlock()
-
-	currentItemLock.Lock()
-	currentItemID = ""
-	currentItemLock.Unlock()
 
 	SetDownloadProgress(0)
 	SetDownloadSpeed(0)

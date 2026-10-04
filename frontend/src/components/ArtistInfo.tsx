@@ -1,7 +1,7 @@
 import { translateMessage } from "@/i18n";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import { FolderOpen, ImageDown, FileText, CheckCheck, ListPlus, CircleCheck } from "lucide-react";
+import { FolderOpen, ImageDown, FileText, CheckCheck, Download, CircleCheck } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SearchAndSort } from "./SearchAndSort";
@@ -179,7 +179,7 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
         if (added > 0)
             toast.success(t("translation.queue.addedValue1Queue", { value1: `${added} ${t("translation.common.albums")}` }));
         else
-            toast.info(t("translation.queue.alreadyInQueue"));
+            toast.info(t("translation.downloads.requested"));
     };
     const filteredAlbumGroups = useMemo(() => {
         const albumTypeMap = new Map(albumList.map(a => [a.id, a.album_type]));
@@ -383,7 +383,7 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
                         failCount++;
                     }
                 }
-                catch (error) {
+                catch {
                     failCount++;
                 }
             }
@@ -415,7 +415,7 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
         { key: "tracks", label: t("translation.artistInfo.allTracks") },
         ...(hasGallery ? [{ key: "gallery" as const, label: t("translation.artistInfo.gallery") }] : []),
     ];
-    return (<div className="flex items-start gap-6">
+    return (<div className="collection-layout flex flex-col gap-7">
       <div className="min-w-0 flex-1 space-y-4">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border pb-2">
           {viewTabs.map((tab) => (<button
@@ -439,10 +439,10 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
                       {allDiscographySelected ? t("translation.migrated.ArtistInfo.deselectAll") : t("translation.migrated.ArtistInfo.selectAll")}
                   </Button>)}
                   <Button size="sm" variant={allTracksQueued ? "outline" : "default"} onClick={onQueueAll}>
-                      {allTracksQueued ? (<CircleCheck className="size-3.5"/>) : (<ListPlus className="size-3.5"/>)}
-                      {t(allTracksQueued ? "translation.queue.alreadyInQueue" : "translation.queue.addToQueue")}
+                      {allTracksQueued ? (<CircleCheck className="size-3.5"/>) : (<Download className="size-3.5"/>)}
+                      {t(allTracksQueued ? "translation.downloads.requested" : "translation.downloads.download")}
                   </Button>
-                  {selectedTracks.length > 0 && onQueueSelected && (<Button size="sm" variant="outline" onClick={queueSelectedAlbums}>{selectedTracksQueued ? (<CircleCheck className="size-3.5"/>) : (<ListPlus className="size-3.5"/>)}{selectedTracksQueued ? t("translation.queue.alreadyInQueue") : t("translation.queue.addSelectedQueueValue1", { value1: selectedTracks.length.toLocaleString() })}</Button>)}
+                  {selectedTracks.length > 0 && onQueueSelected && (<Button size="sm" variant="outline" onClick={queueSelectedAlbums}>{selectedTracksQueued ? (<CircleCheck className="size-3.5"/>) : (<Download className="size-3.5"/>)}{selectedTracksQueued ? t("translation.downloads.requested") : t("translation.downloads.downloadSelected", { value1: selectedTracks.length.toLocaleString() })}</Button>)}
               </div>
             </div>
             {albumFilters.length > 1 && (<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -579,12 +579,12 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
                     </DialogContent>
                 </Dialog>
                 <Button size="sm" variant={allTracksQueued ? "outline" : "default"} onClick={onQueueAll}>
-                  {allTracksQueued ? (<CircleCheck className="size-3.5"/>) : (<ListPlus className="size-3.5"/>)}
-                  {t(allTracksQueued ? "translation.queue.alreadyInQueue" : "translation.queue.addToQueue")}
+                  {allTracksQueued ? (<CircleCheck className="size-3.5"/>) : (<Download className="size-3.5"/>)}
+                  {t(allTracksQueued ? "translation.downloads.requested" : "translation.downloads.download")}
                 </Button>
                 {selectedTracks.length > 0 && onQueueSelected && (<Button size="sm" variant="outline" onClick={onQueueSelected}>
-                    {selectedTracksQueued ? (<CircleCheck className="size-3.5"/>) : (<ListPlus className="size-3.5"/>)}
-                    {selectedTracksQueued ? t("translation.queue.alreadyInQueue") : t("translation.queue.addSelectedQueueValue1", { value1: selectedTracks.length.toLocaleString() })}
+                    {selectedTracksQueued ? (<CircleCheck className="size-3.5"/>) : (<Download className="size-3.5"/>)}
+                    {selectedTracksQueued ? t("translation.downloads.requested") : t("translation.downloads.downloadSelected", { value1: selectedTracks.length.toLocaleString() })}
                   </Button>)}
                 {onDownloadAllLyrics && (<Tooltip>
                     <TooltipTrigger asChild>

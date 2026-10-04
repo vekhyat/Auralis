@@ -1,0 +1,287 @@
+[
+  {
+    "id": "candidate-api.monochrome.tf",
+    "role": "candidate-playback",
+    "state": "failed",
+    "median_ms": 1.1848,
+    "attempts": 3,
+    "successes": 0,
+    "checked_at": "2026-10-02T18:59:46.1293005Z"
+  },
+  {
+    "id": "candidate-arran.monochrome.tf",
+    "role": "candidate-playback",
+    "state": "failed",
+    "median_ms": 1.0354,
+    "attempts": 3,
+    "successes": 0,
+    "checked_at": "2026-10-02T18:59:46.1060907Z"
+  },
+  {
+    "id": "candidate-eu-central.monochrome.tf",
+    "role": "candidate-playback",
+    "state": "failed",
+    "median_ms": 1.5536,
+    "attempts": 3,
+    "successes": 0,
+    "checked_at": "2026-10-02T19:00:10.1963001Z"
+  },
+  {
+    "id": "candidate-hifi.p1nkhamster.xyz",
+    "role": "candidate-playback",
+    "state": "failed",
+    "median_ms": 88.1512,
+    "attempts": 3,
+    "successes": 0,
+    "checked_at": "2026-10-02T19:00:03.673407Z"
+  },
+  {
+    "id": "candidate-hund.qqdl.site",
+    "role": "candidate-playback",
+    "state": "failed",
+    "median_ms": 12000.4405,
+    "attempts": 3,
+    "successes": 0,
+    "checked_at": "2026-10-02T18:59:45.2200337Z"
+  },
+  {
+    "id": "candidate-katze.qqdl.site",
+    "role": "candidate-playback",
+    "state": "failed",
+    "median_ms": 759.433,
+    "attempts": 3,
+    "successes": 0,
+    "checked_at": "2026-10-02T18:59:50.3749475Z"
+  },
+  {
+    "id": "candidate-maus.qqdl.site",
+    "role": "candidate-playback",
+    "state": "failed",
+    "median_ms": 794.7171,
+    "attempts": 3,
+    "successes": 0,
+    "checked_at": "2026-10-02T18:59:47.3977859Z"
+  },
+  {
+    "id": "candidate-monochrome-api.samidy.com",
+    "role": "candidate-playback",
+    "state": "authentication_required",
+    "http_status": 403,
+    "median_ms": 888.773,
+    "attempts": 1,
+    "successes": 0,
+    "checked_at": "2026-10-02T18:59:46.150781Z"
+  },
+  {
+    "id": "candidate-qobuz-squid",
+    "role": "candidate-playback",
+    "state": "failed",
+    "median_ms": 71.7121,
+    "attempts": 3,
+    "successes": 0,
+    "checked_at": "2026-10-02T19:00:03.8656868Z"
+  },
+  {
+    "id": "candidate-tidal.kinoplus.online",
+    "role": "candidate-playback",
+    "state": "failed",
+    "median_ms": 0.9995,
+    "attempts": 3,
+    "successes": 0,
+    "checked_at": "2026-10-02T19:00:02.9266848Z"
+  },
+  {
+    "id": "candidate-triton.squid.wtf",
+    "role": "candidate-playback",
+    "state": "failed",
+    "median_ms": 78.1386,
+    "attempts": 3,
+    "successes": 0,
+    "checked_at": "2026-10-02T18:59:47.039554Z"
+  },
+  {
+    "id": "candidate-us-west.monochrome.tf",
+    "role": "candidate-playback",
+    "state": "failed",
+    "median_ms": 1.5727,
+    "attempts": 3,
+    "successes": 0,
+    "checked_at": "2026-10-02T18:59:44.4316976Z"
+  },
+  {
+    "id": "candidate-vogel.qqdl.site",
+    "role": "candidate-playback",
+    "state": "failed",
+    "median_ms": 12000.442,
+    "attempts": 3,
+    "successes": 0,
+    "checked_at": "2026-10-02T18:59:50.278759Z"
+  },
+  {
+    "id": "candidate-wolf.qqdl.site",
+    "role": "candidate-playback",
+    "state": "failed",
+    "median_ms": 780.7663,
+    "attempts": 3,
+    "successes": 0,
+    "checked_at": "2026-10-02T18:59:47.3775001Z"
+  },
+  {
+    "id": "community-amazon",
+    "role": "download-url",
+    "state": "authentication_required",
+    "http_status": 428,
+    "median_ms": 446.5972,
+    "attempts": 1,
+    "successes": 0,
+    "checked_at": "2026-10-02T19:00:10.2180165Z"
+  },
+  {
+    "id": "community-qobuz",
+    "role": "download-url",
+    "state": "authentication_required",
+    "http_status": 428,
+    "median_ms": 396.5472,
+    "attempts": 1,
+    "successes": 0,
+    "checked_at": "2026-10-02T19:00:04.1811306Z"
+  },
+  {
+    "id": "community-tidal",
+    "role": "download-url",
+    "state": "authentication_required",
+    "http_status": 428,
+    "median_ms": 429.2451,
+    "attempts": 1,
+    "successes": 0,
+    "checked_at": "2026-10-02T19:00:02.4974397Z"
+  },
+  {
+    "id": "dab-xyz",
+    "role": "candidate-playback",
+    "state": "authentication_required",
+    "http_status": 403,
+    "median_ms": 261.9816,
+    "attempts": 1,
+    "successes": 0,
+    "checked_at": "2026-10-02T18:59:52.9646576Z"
+  },
+  {
+    "id": "dab-yeet",
+    "role": "candidate-playback",
+    "state": "failed",
+    "median_ms": 12000.3329,
+    "attempts": 3,
+    "successes": 0,
+    "checked_at": "2026-10-02T19:00:05.0768106Z"
+  },
+  {
+    "id": "jiosaavn-community",
+    "role": "download-url",
+    "state": "failed",
+    "median_ms": 1.5616,
+    "attempts": 3,
+    "successes": 0,
+    "checked_at": "2026-10-02T19:00:10.1515352Z"
+  },
+  {
+    "id": "lucida",
+    "role": "candidate",
+    "state": "authentication_required",
+    "http_status": 403,
+    "median_ms": 499.1328,
+    "attempts": 1,
+    "successes": 0,
+    "checked_at": "2026-10-02T19:00:04.5776778Z"
+  },
+  {
+    "id": "resource-deezer",
+    "role": "catalog",
+    "state": "available",
+    "http_status": 200,
+    "median_ms": 3474.1276,
+    "attempts": 3,
+    "successes": 2,
+    "checked_at": "2026-10-02T18:59:44.4316976Z"
+  },
+  {
+    "id": "resource-lrclib",
+    "role": "lyrics",
+    "state": "available",
+    "http_status": 200,
+    "median_ms": 275.2264,
+    "attempts": 3,
+    "successes": 3,
+    "checked_at": "2026-10-02T18:59:44.4316976Z"
+  },
+  {
+    "id": "resource-musicbrainz",
+    "role": "metadata",
+    "state": "available",
+    "http_status": 200,
+    "median_ms": 582.4978,
+    "attempts": 3,
+    "successes": 2,
+    "checked_at": "2026-10-02T18:59:44.4652696Z"
+  },
+  {
+    "id": "resource-qobuz",
+    "role": "catalog",
+    "state": "authentication_required",
+    "http_status": 401,
+    "median_ms": 12000.2558,
+    "attempts": 2,
+    "successes": 0,
+    "checked_at": "2026-10-02T18:59:53.2266392Z"
+  },
+  {
+    "id": "resource-tidal",
+    "role": "catalog",
+    "state": "available",
+    "http_status": 200,
+    "median_ms": 79.2127,
+    "attempts": 3,
+    "successes": 3,
+    "checked_at": "2026-10-02T19:00:00.2465561Z"
+  },
+  {
+    "id": "samidy-catalog",
+    "role": "catalog",
+    "state": "available",
+    "http_status": 200,
+    "median_ms": 218.791,
+    "attempts": 3,
+    "successes": 3,
+    "checked_at": "2026-10-02T19:00:01.3828794Z"
+  },
+  {
+    "id": "zarz-amazon",
+    "role": "verification",
+    "state": "authentication_required",
+    "http_status": 200,
+    "median_ms": 788.3361,
+    "attempts": 1,
+    "successes": 0,
+    "checked_at": "2026-10-02T18:59:44.4316976Z"
+  },
+  {
+    "id": "zarz-qobuz",
+    "role": "verification",
+    "state": "authentication_required",
+    "http_status": 200,
+    "median_ms": 1239.4895,
+    "attempts": 1,
+    "successes": 0,
+    "checked_at": "2026-10-02T19:00:08.9120457Z"
+  },
+  {
+    "id": "zarz-tidal",
+    "role": "verification",
+    "state": "authentication_required",
+    "http_status": 200,
+    "median_ms": 296.6426,
+    "attempts": 1,
+    "successes": 0,
+    "checked_at": "2026-10-02T19:00:10.6646137Z"
+  }
+]

@@ -365,7 +365,7 @@ export function useAudioAnalysis() {
                 });
                 const pcmBase64 = decoded.pcm_base64 || "";
                 if (!pcmBase64) {
-                    throw new Error("FFmpeg analysis decode returned no PCM data");
+                    throw new Error("FFmpeg analysis decode returned no PCM data", { cause: err });
                 }
                 const pcmBuffer = await base64ToArrayBuffer(pcmBase64, () => token.cancelled);
                 if (token.cancelled) {

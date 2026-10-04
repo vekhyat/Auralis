@@ -1,0 +1,88 @@
+{
+  "checked_at_utc": "2026-10-02T18:57:12Z",
+  "requested_artist": "The Beatles",
+  "requested_title": "Come Together",
+  "results": [
+    {
+      "service": "tidal",
+      "route": "antra",
+      "stage": "passed",
+      "track_id": "55130631",
+      "title": "Come Together",
+      "artist": "The Beatles",
+      "bytes": 28673631,
+      "duration_seconds": 259.946667,
+      "codec": "flac",
+      "sample_rate": "44100",
+      "elapsed_seconds": 38.3038883,
+      "identity_evidence": "provider search title and artist"
+    },
+    {
+      "service": "qobuz",
+      "route": "antra",
+      "stage": "passed",
+      "track_id": "30369895",
+      "title": "Come Together",
+      "artist": "The Beatles",
+      "bytes": 26294630,
+      "duration_seconds": 259.946667,
+      "codec": "flac",
+      "sample_rate": "44100",
+      "elapsed_seconds": 6.8019214,
+      "identity_evidence": "provider search title and artist"
+    },
+    {
+      "service": "amazon",
+      "route": "antra",
+      "stage": "download",
+      "track_id": "B07FSSGBJV",
+      "title": "Come Together",
+      "artist": "The Beatles",
+      "error": "protected stream was not readable audio: mp4ff decryption failed: decryptSegment: encrypted MP4 fragment had no senc box",
+      "elapsed_seconds": 14.3328675,
+      "identity_evidence": "provider resolved the externally verified fixture Spotify URL"
+    },
+    {
+      "service": "deezer",
+      "route": "antra",
+      "stage": "passed",
+      "track_id": "116348128",
+      "title": "Come Together (Remastered 2009)",
+      "artist": "The Beatles",
+      "bytes": 26215927,
+      "duration_seconds": 259.666667,
+      "codec": "flac",
+      "sample_rate": "44100",
+      "elapsed_seconds": 7.042669,
+      "identity_evidence": "provider search title and artist"
+    },
+    {
+      "service": "apple",
+      "route": "antra",
+      "stage": "passed",
+      "track_id": "6818177515",
+      "title": "Come Together (Remastered 2009)",
+      "artist": "The Beatles",
+      "bytes": 26477433,
+      "duration_seconds": 259.666667,
+      "codec": "alac",
+      "sample_rate": "44100",
+      "elapsed_seconds": 21.7241501,
+      "identity_evidence": "provider search title and artist"
+    },
+    {
+      "service": "jiosaavn",
+      "route": "official/community",
+      "stage": "passed",
+      "track_id": "buPhYncP",
+      "title": "Come Together (Remastered 2009)",
+      "artist": "The Beatles",
+      "bytes": 10584254,
+      "duration_seconds": 259.946009,
+      "codec": "aac",
+      "sample_rate": "44100",
+      "elapsed_seconds": 1.4746301,
+      "identity_evidence": "official selected-track details"
+    }
+  ]
+}

@@ -35,8 +35,8 @@ export function CatalogRow({ cover, coverAlt = "", coverFallback, title, subtitl
         onClick={onClick}
         onDoubleClick={onDoubleClick}
         onKeyDown={(event) => {
-            if (!onClick) return;
-            if (event.key === "Enter") {
+            if (!onClick || event.target !== event.currentTarget) return;
+            if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
                 onClick();
             }
@@ -58,6 +58,6 @@ export function CatalogRow({ cover, coverAlt = "", coverFallback, title, subtitl
             {subtitle ? (<div className="truncate text-xs leading-snug text-muted-foreground">{subtitle}</div>) : null}
         </div>
         {meta ? (<div className="shrink-0 text-right text-xs whitespace-nowrap text-muted-foreground">{meta}</div>) : null}
-        {trailing ? (<div className="ml-1 flex shrink-0 items-center gap-0.5" onClick={(event) => event.stopPropagation()}>{trailing}</div>) : null}
+        {trailing ? (<div className="ml-1 flex shrink-0 items-center gap-0.5" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>{trailing}</div>) : null}
     </div>);
 }

@@ -2,6 +2,7 @@ package backend
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -101,6 +102,10 @@ func mergeResolvedTrackLinks(dst, src *resolvedTrackLinks) {
 }
 
 func lookupZarzResolveLinks(spotifyTrackID string) (*resolvedTrackLinks, error) {
+	return lookupZarzResolveLinksWithContext(context.Background(), spotifyTrackID)
+}
+
+func lookupZarzResolveLinksWithContext(ctx context.Context, spotifyTrackID string) (*resolvedTrackLinks, error) {
 	trackID, err := extractSpotifyTrackID(spotifyTrackID)
 	if err != nil {
 		return nil, err
@@ -113,7 +118,7 @@ func lookupZarzResolveLinks(spotifyTrackID string) (*resolvedTrackLinks, error) 
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequest(http.MethodPost, zarzResolveURL, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, zarzResolveURL, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +146,7 @@ func (s *SongLinkClient) resolveLinksViaZarz(links *resolvedTrackLinks, spotifyT
 		return false, fmt.Errorf("links is required for zarz resolve")
 	}
 	before := *links
-	resolved, err := lookupZarzResolveLinks(spotifyTrackID)
+	resolved, err := lookupZarzResolveLinksWithContext(s.operationContext(), spotifyTrackID)
 	if err != nil {
 		return false, err
 	}

@@ -182,16 +182,6 @@ export interface DownloadResponse {
     original_file?: string;
     converted_file?: string;
 }
-export interface HealthResponse {
-    status: string;
-    time: string;
-}
-export interface CurrentIPInfo {
-    ip: string;
-    country: string;
-    country_code?: string;
-    source?: string;
-}
 export interface TimeSlice {
     time: number;
     magnitudes: number[] | Float32Array;

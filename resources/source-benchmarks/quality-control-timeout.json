@@ -1,0 +1,10 @@
+[
+  {
+    "id": "antra-qobuz",
+    "service": "qobuz",
+    "quality": "24",
+    "passed": false,
+    "elapsed_seconds": 90.0086444,
+    "error": "download failed"
+  }
+]

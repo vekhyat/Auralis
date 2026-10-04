@@ -1,11 +1,11 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useEffectEvent } from "react";
 import { t, translateMessage } from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { ToggleGroup, ToggleGroupItem, } from "@/components/ui/toggle-group";
 import { Upload, X, CircleCheckBig, AlertCircle, Trash2, FileMusic, WandSparkles, } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
-import { ConvertAudio, SelectAudioFiles, SelectFolder, ListAudioFilesInDir, } from "../../wailsjs/go/main/App";
+import { ConvertAudio, SelectAudioFiles, SelectFolder, ListAudioFilesInDir, GetFileSizes, } from "../../wailsjs/go/main/App";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { OnFileDrop, OnFileDropOff } from "../../wailsjs/runtime/runtime";
 interface AudioFile {
@@ -52,7 +52,7 @@ export function AudioConverterPage() {
         }
         return [];
     });
-    const [outputFormat, setOutputFormat] = useState<"mp3" | "m4a" | "wav" | "aiff" | "opus">(() => {
+    const [requestedOutputFormat, setOutputFormat] = useState<"mp3" | "m4a" | "wav" | "aiff" | "opus">(() => {
         try {
             const saved = sessionStorage.getItem(STORAGE_KEY);
             if (saved) {
@@ -62,8 +62,7 @@ export function AudioConverterPage() {
                 }
             }
         }
-        catch (err) {
-        }
+        catch { return "mp3"; }
         return "mp3";
     });
     const [bitrate, setBitrate] = useState(() => {
@@ -76,11 +75,10 @@ export function AudioConverterPage() {
                 }
             }
         }
-        catch (err) {
-        }
+        catch { return "320k"; }
         return "320k";
     });
-    const [m4aCodec, setM4aCodec] = useState<"aac" | "alac">(() => {
+    const [requestedM4aCodec, setM4aCodec] = useState<"aac" | "alac">(() => {
         try {
             const saved = sessionStorage.getItem(STORAGE_KEY);
             if (saved) {
@@ -90,10 +88,13 @@ export function AudioConverterPage() {
                 }
             }
         }
-        catch (err) {
-        }
+        catch { return "aac"; }
         return "aac";
     });
+    const allMP3 = files.length > 0 && files.every((file) => file.format === "mp3");
+    const hasFlac = files.some((file) => file.format === "flac");
+    const outputFormat = allMP3 && requestedOutputFormat === "mp3" ? "m4a" : requestedOutputFormat;
+    const m4aCodec = files.length > 0 && !hasFlac ? "aac" : requestedM4aCodec;
     const [converting, setConverting] = useState(false);
     const [isDragging, setIsDragging] = useState(false);
     const saveState = useCallback((stateToSave: {
@@ -112,18 +113,6 @@ export function AudioConverterPage() {
     useEffect(() => {
         saveState({ files, outputFormat, bitrate, m4aCodec });
     }, [files, outputFormat, bitrate, m4aCodec, saveState]);
-    useEffect(() => {
-        if (files.length === 0)
-            return;
-        const allMP3 = files.every((f) => f.format === "mp3");
-        if (allMP3 && outputFormat === "mp3") {
-            setOutputFormat("m4a");
-        }
-        const hasFlac = files.some((f) => f.format === "flac");
-        if (!hasFlac && m4aCodec === "alac") {
-            setM4aCodec("aac");
-        }
-    }, [files, outputFormat, m4aCodec]);
     const isFormatDisabled = files.length > 0 && files.every((f) => f.format === "mp3");
     const hasFlacFiles = files.some((f) => f.format === "flac");
     const handleSelectFiles = async () => {
@@ -160,7 +149,7 @@ export function AudioConverterPage() {
             });
         }
     };
-    const addFiles = useCallback(async (paths: string[]) => {
+    const addFiles = async (paths: string[]) => {
         const validExtensions = [".mp3", ".flac"];
         const m4aFiles = paths.filter((path) => {
             const ext = path.toLowerCase().slice(path.lastIndexOf("."));
@@ -171,7 +160,6 @@ export function AudioConverterPage() {
                 description: t("translation.audioConverter.onlyFlacMp3FilesSupported"),
             });
         }
-        const GetFileSizes = (files: string[]): Promise<Record<string, number>> => (window as any)["go"]["main"]["App"]["GetFileSizes"](files);
         const validPaths = paths.filter((path) => {
             const ext = path.toLowerCase().slice(path.lastIndexOf("."));
             return validExtensions.includes(ext);
@@ -207,13 +195,13 @@ export function AudioConverterPage() {
             }
             return prev;
         });
-    }, []);
-    const handleFileDrop = useCallback(async (_x: number, _y: number, paths: string[]) => {
+    };
+    const handleFileDrop = useEffectEvent(async (_x: number, _y: number, paths: string[]) => {
         setIsDragging(false);
         if (paths.length === 0)
             return;
         addFiles(paths);
-    }, [addFiles]);
+    });
     useEffect(() => {
         OnFileDrop((x, y, paths) => {
             handleFileDrop(x, y, paths);
@@ -221,7 +209,7 @@ export function AudioConverterPage() {
         return () => {
             OnFileDropOff();
         };
-    }, [handleFileDrop]);
+    }, []);
     const removeFile = (path: string) => {
         setFiles((prev) => prev.filter((f) => f.path !== path));
     };

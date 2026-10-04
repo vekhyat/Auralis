@@ -1,4 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { CommunitySourcesSettings, type CommunitySourcesHandle } from "@/components/CommunitySourcesSettings";
+import { SourceConnectionsSettings } from "@/components/SourceConnectionsSettings";
 import { useTranslation } from "react-i18next";
 import { flushSync } from "react-dom";
 import { Button } from "@/components/ui/button";
@@ -7,15 +9,14 @@ import { InputWithContext } from "@/components/ui/input-with-context";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger, } from "@/components/ui/tooltip";
-import { FolderOpen, Save, RotateCcw, CircleHelp, ArrowRight, Trash2, ExternalLink, PlugZap, DatabaseBackup, Search, FolderLock } from "lucide-react";
+import { FolderOpen, Save, RotateCcw, CircleHelp, ArrowRight, Trash2, ExternalLink, DatabaseBackup, Search, FolderLock } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { getSettings, getSettingsWithDefaults, loadSettings, saveSettings, resetToDefaultSettings, applyThemeMode, TEMPLATE_VARIABLES, DEFAULT_SETTINGS, sanitizeAutoOrder, type Settings as SettingsType, type MetadataTagToggles, type ExistingFileCheckMode, } from "@/lib/settings";
 import { FormatEditor } from "@/components/FormatEditor";
-import { BackupSettings, RestoreSettings, SelectFolder, OpenConfigFolder, CheckCustomTidalAPI, CheckCustomQobuzAPI } from "../../wailsjs/go/main/App";
+import { BackupSettings, RestoreSettings, SelectFolder, OpenConfigFolder } from "../../wailsjs/go/main/App";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { openExternal } from "@/lib/utils";
-import { ApiStatusTab } from "./ApiStatusTab";
 import { AmazonIcon, AppleIcon, DeezerIcon, JioSaavnIcon, QobuzIcon, SonglinkIcon, SongstatsIcon, TidalIcon } from "./PlatformIcons";
 import i18n, { APP_LANGUAGES, type AppLanguage } from "@/i18n";
 import chatGPTIcon from "@/assets/icons/chatgpt.svg";
@@ -24,7 +25,6 @@ interface SettingsPageProps {
     onUnsavedChangesChange?: (hasUnsavedChanges: boolean) => void;
     onResetRequest?: (resetFn: () => void) => void;
 }
-type CustomTidalApiStatus = "idle" | "checking" | "online" | "offline";
 const AUTO_CONVERT_BITRATES: SettingsType["autoConvertBitrate"][] = ["320k", "256k", "192k", "128k"];
 const LYRICS_TRANSLATION_LANGUAGES = [
     { code: "en", labelKey: "translation.sources.english", flag: "gb" },
@@ -85,6 +85,8 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
     const { t } = useTranslation();
     const [savedSettings, setSavedSettings] = useState<SettingsType>(getSettings());
     const [tempSettings, setTempSettings] = useState<SettingsType>(savedSettings);
+    const communitySourcesRef = useRef<CommunitySourcesHandle>(null);
+    const [communitySourcesDirty, setCommunitySourcesDirty] = useState(false);
     const [showResetConfirm, setShowResetConfirm] = useState(false);
     const [showMetadataAdvanced, setShowMetadataAdvanced] = useState(false);
     const [showLyricsAdvanced, setShowLyricsAdvanced] = useState(false);
@@ -93,9 +95,7 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
     const [backupAction, setBackupAction] = useState<"backup" | "restore" | "open" | null>(null);
     const [showCustomTidalApiDialog, setShowCustomTidalApiDialog] = useState(false);
     const [showCustomQobuzApiDialog, setShowCustomQobuzApiDialog] = useState(false);
-    const [customTidalApiStatus, setCustomTidalApiStatus] = useState<CustomTidalApiStatus>("idle");
-    const [customQobuzApiStatus, setCustomQobuzApiStatus] = useState<CustomTidalApiStatus>("idle");
-    const hasUnsavedChanges = JSON.stringify(savedSettings) !== JSON.stringify(tempSettings);
+    const hasUnsavedChanges = communitySourcesDirty || JSON.stringify(savedSettings) !== JSON.stringify(tempSettings);
     const normalizedLyricsLanguageSearch = lyricsLanguageSearch.trim().toLocaleLowerCase();
     const filteredLyricsTranslationLanguages = normalizedLyricsLanguageSearch
         ? LYRICS_TRANSLATION_LANGUAGES.filter((language) => language.code.includes(normalizedLyricsLanguageSearch)
@@ -112,6 +112,7 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
         const freshSavedSettings = getSettings();
         flushSync(() => {
             setTempSettings(freshSavedSettings);
+            communitySourcesRef.current?.reset();
         });
     }, []);
     useEffect(() => {
@@ -152,6 +153,7 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
         loadDefaults();
     }, []);
     const handleSave = async () => {
+        if (await communitySourcesRef.current?.save() === false) return;
         await saveSettings(tempSettings);
         await i18n.changeLanguage(tempSettings.language);
         const persistedSettings = getSettings();
@@ -162,6 +164,7 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
     };
     const handleReset = async () => {
         const defaultSettings = await resetToDefaultSettings();
+        await communitySourcesRef.current?.resetToDefaults();
         setTempSettings(defaultSettings);
         setSavedSettings(defaultSettings);
         applyThemeMode(defaultSettings.themeMode);
@@ -272,52 +275,6 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
             customQobuzApi: nextSavedState.customQobuzApi,
         }));
     }, []);
-    const handleCheckCustomTidalApi = async () => {
-        const normalizedCustomTidalApi = (tempSettings.customTidalApi || "").trim().replace(/\/+$/g, "");
-        if (!normalizedCustomTidalApi.startsWith("https://")) {
-            toast.error(t("translation.migrated.SettingsPage.enterAValidHTTPSHiFiAPIURL"));
-            return;
-        }
-        setCustomTidalApiStatus("checking");
-        try {
-            const isOnline = await CheckCustomTidalAPI(normalizedCustomTidalApi);
-            setCustomTidalApiStatus(isOnline ? "online" : "offline");
-            if (isOnline) {
-                toast.success(t("translation.migrated.SettingsPage.hifiAPIInstanceIsOnline"));
-            }
-            else {
-                toast.error(t("translation.migrated.SettingsPage.hifiAPIInstanceIsOffline"));
-            }
-        }
-        catch (error) {
-            console.error("Failed to check custom Tidal API:", error);
-            setCustomTidalApiStatus("offline");
-            toast.error(t("translation.migrated.SettingsPage.failedToCheckHiFiAPIInstance", { value1: error }));
-        }
-    };
-    const handleCheckCustomQobuzApi = async () => {
-        const normalizedCustomQobuzApi = (tempSettings.customQobuzApi || "").trim().replace(/\/+$/g, "");
-        if (!normalizedCustomQobuzApi.startsWith("https://")) {
-            toast.error(t("translation.migrated.SettingsPage.enterAValidHTTPSQobuzDLInstance"));
-            return;
-        }
-        setCustomQobuzApiStatus("checking");
-        try {
-            const isOnline = await CheckCustomQobuzAPI(normalizedCustomQobuzApi);
-            setCustomQobuzApiStatus(isOnline ? "online" : "offline");
-            if (isOnline) {
-                toast.success(t("translation.migrated.SettingsPage.qobuzDLInstanceIsOnline"));
-            }
-            else {
-                toast.error(t("translation.migrated.SettingsPage.qobuzDLInstanceIsOffline"));
-            }
-        }
-        catch (error) {
-            console.error("Failed to check custom Qobuz API:", error);
-            setCustomQobuzApiStatus("offline");
-            toast.error(t("translation.migrated.SettingsPage.failedToCheckQobuzDLInstance", { value1: error }));
-        }
-    };
     return (<div className="mx-auto w-full max-w-5xl space-y-10 pb-10">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold tracking-tight">{t("translation.common.settings")}</h1>
@@ -779,6 +736,9 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
               </div>
         </section>
 
+        <CommunitySourcesSettings ref={communitySourcesRef} onDirtyChange={setCommunitySourcesDirty} />
+        <SourceConnectionsSettings />
+
         <section className="max-w-3xl space-y-4">
           <h2 className="border-b border-border pb-1.5 text-sm font-semibold tracking-tight">{t("translation.settings.naming")}</h2>
         {(() => {
@@ -971,11 +931,6 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
             </div>
           </div>
         </section>
-
-        <section className="space-y-4">
-          <h2 className="border-b border-border pb-1.5 text-sm font-semibold tracking-tight">{t("translation.queue.status")}</h2>
-          <ApiStatusTab />
-        </section>
       </div>
 
       <Dialog open={showCustomTidalApiDialog} onOpenChange={setShowCustomTidalApiDialog}>
@@ -996,31 +951,15 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
               <div className="flex gap-2">
                 <Input id="custom-tidal-api" type="url" value={tempSettings.customTidalApi || ""} onChange={(e) => {
             const nextValue = e.target.value.replace(/\/+$/g, "");
-            setCustomTidalApiStatus("idle");
             void persistCustomTidalApi(nextValue);
         }} placeholder="https://your-hifi-api.example"/>
-                <Button type="button" variant="outline" className="gap-2" onClick={() => void handleCheckCustomTidalApi()} disabled={!((tempSettings.customTidalApi || "").trim().startsWith("https://")) || customTidalApiStatus === "checking"}>
-                  {customTidalApiStatus === "checking" ? t("translation.migrated.SettingsPage.checking") : <><PlugZap className="h-4 w-4"/>{t("translation.common.check")}</>}
-                </Button>
                 {tempSettings.customTidalApi && (<Button type="button" variant="destructive" size="icon" onClick={() => {
-                setCustomTidalApiStatus("idle");
                 void persistCustomTidalApi("");
             }}>
                     <Trash2 className="h-4 w-4"/>
                   </Button>)}
               </div>
             </div>
-            {customTidalApiStatus !== "idle" && (<p className={`text-xs ${customTidalApiStatus === "online"
-                ? "text-green-600 dark:text-green-400"
-                : customTidalApiStatus === "offline"
-                    ? "text-destructive"
-                    : "text-muted-foreground"}`}>
-                {customTidalApiStatus === "online"
-                ? t("translation.migrated.SettingsPage.customHiFiAPIInstanceIsOnline")
-                : customTidalApiStatus === "offline"
-                    ? t("translation.migrated.SettingsPage.customHiFiAPIInstanceIsOfflineOr")
-                    : t("translation.migrated.SettingsPage.checkingCustomHiFiAPIInstance")}
-              </p>)}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCustomTidalApiDialog(false)}>
@@ -1048,31 +987,15 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
               <div className="flex gap-2">
                 <Input id="custom-qobuz-api" type="url" value={tempSettings.customQobuzApi || ""} onChange={(e) => {
             const nextValue = e.target.value.replace(/\/+$/g, "");
-            setCustomQobuzApiStatus("idle");
             void persistCustomQobuzApi(nextValue);
         }} placeholder="https://your-qobuz-dl.example"/>
-                <Button type="button" variant="outline" className="gap-2" onClick={() => void handleCheckCustomQobuzApi()} disabled={!((tempSettings.customQobuzApi || "").trim().startsWith("https://")) || customQobuzApiStatus === "checking"}>
-                  {customQobuzApiStatus === "checking" ? t("translation.migrated.SettingsPage.checking") : <><PlugZap className="h-4 w-4"/>{t("translation.common.check")}</>}
-                </Button>
                 {tempSettings.customQobuzApi && (<Button type="button" variant="destructive" size="icon" onClick={() => {
-                setCustomQobuzApiStatus("idle");
                 void persistCustomQobuzApi("");
             }}>
                     <Trash2 className="h-4 w-4"/>
                   </Button>)}
               </div>
             </div>
-            {customQobuzApiStatus !== "idle" && (<p className={`text-xs ${customQobuzApiStatus === "online"
-                ? "text-green-600 dark:text-green-400"
-                : customQobuzApiStatus === "offline"
-                    ? "text-destructive"
-                    : "text-muted-foreground"}`}>
-                {customQobuzApiStatus === "online"
-                ? t("translation.migrated.SettingsPage.customQobuzDLInstanceIsOnline")
-                : customQobuzApiStatus === "offline"
-                    ? t("translation.migrated.SettingsPage.customQobuzDLInstanceIsOfflineOr")
-                    : t("translation.migrated.SettingsPage.checkingCustomQobuzDLInstance")}
-              </p>)}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCustomQobuzApiDialog(false)}>

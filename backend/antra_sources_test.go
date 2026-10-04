@@ -137,21 +137,24 @@ func TestSanitizeAutoOrderKeepsExtraSources(t *testing.T) {
 
 func TestAntraQualityQuery(t *testing.T) {
 	tidalLossless := antraQualityQuery("tidal", "LOSSLESS")
-	if tidalLossless.Get("quality") != "16" {
-		t.Fatalf("tidal LOSSLESS: %q", tidalLossless.Get("quality"))
+	if tidalLossless.Get("prefer_16") != "1" || tidalLossless.Get("quality") != "" {
+		t.Fatalf("tidal LOSSLESS: %v", tidalLossless)
 	}
 	tidalHiRes := antraQualityQuery("tidal", "HI_RES_LOSSLESS")
-	if tidalHiRes.Get("quality") != "24" {
-		t.Fatalf("tidal HI_RES_LOSSLESS: %q", tidalHiRes.Get("quality"))
+	if tidalHiRes.Get("strict_24") != "1" {
+		t.Fatalf("tidal HI_RES_LOSSLESS: %v", tidalHiRes)
 	}
 	tidalAtmos := antraQualityQuery("tidal", "ATMOS")
-	if tidalAtmos.Get("quality") != "atmos" {
-		t.Fatalf("tidal ATMOS: %q", tidalAtmos.Get("quality"))
+	if tidalAtmos.Get("format") != "atmos" {
+		t.Fatalf("tidal ATMOS: %v", tidalAtmos)
 	}
 
 	qobuz := antraQualityQuery("qobuz", "27")
-	if qobuz.Get("quality") != "27" {
-		t.Fatalf("qobuz quality passthrough: %q", qobuz.Get("quality"))
+	if qobuz.Get("strict_24") != "1" || qobuz.Get("quality") != "" {
+		t.Fatalf("qobuz 24-bit: %v", qobuz)
+	}
+	if antraQualityQuery("qobuz", "6").Get("strict_24") != "" {
+		t.Fatal("qobuz 16-bit must not force strict_24")
 	}
 
 	amazon := antraQualityQuery("amazon", "atmos")

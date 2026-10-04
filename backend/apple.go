@@ -25,6 +25,10 @@ func extractAppleTrackID(rawURL string) string {
 }
 
 func downloadAppleTrack(p ExtraDownloadParams, destPath string) (string, string, error) {
+	return downloadExtraCommunitySources(p, destPath, "apple", downloadAppleTrackNative)
+}
+
+func downloadAppleTrackNative(p ExtraDownloadParams, destPath string) (string, string, error) {
 	trackID := extractAppleTrackID(p.ServiceURL)
 	sourceURL := p.ServiceURL
 	if trackID == "" && p.SpotifyID != "" {

@@ -1,0 +1,197 @@
+[
+  {
+    "id": "antra-tidal",
+    "service": "tidal",
+    "quality": "16",
+    "passed": true,
+    "elapsed_seconds": 11.7547264,
+    "codec": "flac",
+    "bit_depth": 16,
+    "sample_rate": 44100,
+    "duration_seconds": 259.946667
+  },
+  {
+    "id": "antra-tidal",
+    "service": "tidal",
+    "quality": "16",
+    "passed": true,
+    "elapsed_seconds": 21.6851592,
+    "codec": "flac",
+    "bit_depth": 16,
+    "sample_rate": 44100,
+    "duration_seconds": 259.946667
+  },
+  {
+    "id": "antra-tidal",
+    "service": "tidal",
+    "quality": "16",
+    "passed": true,
+    "elapsed_seconds": 28.1817766,
+    "codec": "flac",
+    "bit_depth": 16,
+    "sample_rate": 44100,
+    "duration_seconds": 259.946667
+  },
+  {
+    "id": "antra-qobuz",
+    "service": "qobuz",
+    "quality": "16",
+    "passed": true,
+    "elapsed_seconds": 9.1928269,
+    "codec": "flac",
+    "bit_depth": 16,
+    "sample_rate": 44100,
+    "duration_seconds": 259.946667
+  },
+  {
+    "id": "antra-qobuz",
+    "service": "qobuz",
+    "quality": "16",
+    "passed": true,
+    "elapsed_seconds": 5.8268236,
+    "codec": "flac",
+    "bit_depth": 16,
+    "sample_rate": 44100,
+    "duration_seconds": 259.946667
+  },
+  {
+    "id": "antra-qobuz",
+    "service": "qobuz",
+    "quality": "16",
+    "passed": true,
+    "elapsed_seconds": 5.0799093,
+    "codec": "flac",
+    "bit_depth": 16,
+    "sample_rate": 44100,
+    "duration_seconds": 259.946667
+  },
+  {
+    "id": "antra-deezer",
+    "service": "deezer",
+    "quality": "16",
+    "passed": true,
+    "elapsed_seconds": 8.3193869,
+    "codec": "flac",
+    "bit_depth": 16,
+    "sample_rate": 44100,
+    "duration_seconds": 259.666667
+  },
+  {
+    "id": "antra-deezer",
+    "service": "deezer",
+    "quality": "16",
+    "passed": true,
+    "elapsed_seconds": 9.3985225,
+    "codec": "flac",
+    "bit_depth": 16,
+    "sample_rate": 44100,
+    "duration_seconds": 259.666667
+  },
+  {
+    "id": "antra-deezer",
+    "service": "deezer",
+    "quality": "16",
+    "passed": true,
+    "elapsed_seconds": 6.7234701,
+    "codec": "flac",
+    "bit_depth": 16,
+    "sample_rate": 44100,
+    "duration_seconds": 259.666667
+  },
+  {
+    "id": "antra-apple",
+    "service": "apple",
+    "quality": "16",
+    "passed": true,
+    "elapsed_seconds": 11.9637427,
+    "codec": "alac",
+    "bit_depth": 16,
+    "sample_rate": 44100,
+    "duration_seconds": 259.666667
+  },
+  {
+    "id": "antra-apple",
+    "service": "apple",
+    "quality": "16",
+    "passed": true,
+    "elapsed_seconds": 17.4475673,
+    "codec": "alac",
+    "bit_depth": 16,
+    "sample_rate": 44100,
+    "duration_seconds": 259.666667
+  },
+  {
+    "id": "antra-apple",
+    "service": "apple",
+    "quality": "16",
+    "passed": true,
+    "elapsed_seconds": 15.0161637,
+    "codec": "alac",
+    "bit_depth": 16,
+    "sample_rate": 44100,
+    "duration_seconds": 259.666667
+  },
+  {
+    "id": "jiosaavn-official",
+    "service": "jiosaavn",
+    "quality": "lossy",
+    "passed": true,
+    "elapsed_seconds": 0.834575,
+    "codec": "aac",
+    "sample_rate": 44100,
+    "duration_seconds": 259.946009
+  },
+  {
+    "id": "jiosaavn-official",
+    "service": "jiosaavn",
+    "quality": "lossy",
+    "passed": true,
+    "elapsed_seconds": 0.7082247,
+    "codec": "aac",
+    "sample_rate": 44100,
+    "duration_seconds": 259.946009
+  },
+  {
+    "id": "jiosaavn-official",
+    "service": "jiosaavn",
+    "quality": "lossy",
+    "passed": true,
+    "elapsed_seconds": 0.7025625,
+    "codec": "aac",
+    "sample_rate": 44100,
+    "duration_seconds": 259.946009
+  },
+  {
+    "id": "antra-qobuz",
+    "service": "qobuz",
+    "quality": "24",
+    "passed": true,
+    "elapsed_seconds": 55.6445097,
+    "codec": "flac",
+    "bit_depth": 24,
+    "sample_rate": 96000,
+    "duration_seconds": 259.36
+  },
+  {
+    "id": "antra-qobuz",
+    "service": "qobuz",
+    "quality": "24",
+    "passed": true,
+    "elapsed_seconds": 76.9984297,
+    "codec": "flac",
+    "bit_depth": 24,
+    "sample_rate": 96000,
+    "duration_seconds": 259.36
+  },
+  {
+    "id": "antra-qobuz",
+    "service": "qobuz",
+    "quality": "24",
+    "passed": true,
+    "elapsed_seconds": 25.4034904,
+    "codec": "flac",
+    "bit_depth": 24,
+    "sample_rate": 96000,
+    "duration_seconds": 259.36
+  }
+]

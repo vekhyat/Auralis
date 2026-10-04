@@ -1,0 +1,382 @@
+[
+  {
+    "id": "antra-apple",
+    "service": "apple",
+    "quality": "16",
+    "state": "validated",
+    "attempts": 3,
+    "successes": 3,
+    "median_ms": 15016.1637,
+    "samples_ms": [
+      11963.742699999999,
+      17447.5673,
+      15016.1637
+    ],
+    "checked_at": "2026-10-02T19:12:57.542984Z"
+  },
+  {
+    "id": "antra-deezer",
+    "service": "deezer",
+    "quality": "16",
+    "state": "validated",
+    "attempts": 3,
+    "successes": 3,
+    "median_ms": 8319.3869,
+    "samples_ms": [
+      8319.3869,
+      9398.522500000001,
+      6723.4701000000005
+    ],
+    "checked_at": "2026-10-02T19:12:57.542984Z"
+  },
+  {
+    "id": "antra-qobuz",
+    "service": "qobuz",
+    "quality": "16",
+    "state": "validated",
+    "attempts": 3,
+    "successes": 3,
+    "median_ms": 5826.8236,
+    "samples_ms": [
+      9192.8269,
+      5826.8236,
+      5079.909299999999
+    ],
+    "checked_at": "2026-10-02T19:12:57.542984Z"
+  },
+  {
+    "id": "antra-qobuz",
+    "service": "qobuz",
+    "quality": "24",
+    "state": "validated",
+    "attempts": 3,
+    "successes": 3,
+    "median_ms": 55644.5097,
+    "samples_ms": [
+      55644.5097,
+      76998.42970000001,
+      25403.4904
+    ],
+    "checked_at": "2026-10-02T19:12:57.542984Z"
+  },
+  {
+    "id": "antra-tidal",
+    "service": "tidal",
+    "quality": "16",
+    "state": "validated",
+    "attempts": 3,
+    "successes": 3,
+    "median_ms": 21685.159200000002,
+    "samples_ms": [
+      11754.7264,
+      21685.159200000002,
+      28181.776599999997
+    ],
+    "checked_at": "2026-10-02T19:12:57.542984Z"
+  },
+  {
+    "id": "jiosaavn-official",
+    "service": "jiosaavn",
+    "quality": "lossy",
+    "state": "validated",
+    "attempts": 3,
+    "successes": 3,
+    "median_ms": 708.2247,
+    "samples_ms": [
+      834.5749999999999,
+      708.2247,
+      702.5625
+    ],
+    "checked_at": "2026-10-02T19:12:57.542984Z"
+  },
+  {
+    "id": "community-amazon",
+    "service": "amazon",
+    "quality": "16",
+    "state": "authentication_required",
+    "attempts": 1,
+    "successes": 0,
+    "median_ms": 446.5972,
+    "checked_at": "2026-10-02T19:00:10.2180165Z"
+  },
+  {
+    "id": "community-amazon",
+    "service": "amazon",
+    "quality": "24",
+    "state": "authentication_required",
+    "attempts": 1,
+    "successes": 0,
+    "median_ms": 446.5972,
+    "checked_at": "2026-10-02T19:00:10.2180165Z"
+  },
+  {
+    "id": "community-amazon",
+    "service": "amazon",
+    "quality": "atmos",
+    "state": "authentication_required",
+    "attempts": 1,
+    "successes": 0,
+    "median_ms": 446.5972,
+    "checked_at": "2026-10-02T19:00:10.2180165Z"
+  },
+  {
+    "id": "community-qobuz",
+    "service": "qobuz",
+    "quality": "16",
+    "state": "authentication_required",
+    "attempts": 1,
+    "successes": 0,
+    "median_ms": 396.5472,
+    "checked_at": "2026-10-02T19:00:04.1811306Z"
+  },
+  {
+    "id": "community-qobuz",
+    "service": "qobuz",
+    "quality": "24",
+    "state": "authentication_required",
+    "attempts": 1,
+    "successes": 0,
+    "median_ms": 396.5472,
+    "checked_at": "2026-10-02T19:00:04.1811306Z"
+  },
+  {
+    "id": "community-qobuz",
+    "service": "qobuz",
+    "quality": "atmos",
+    "state": "authentication_required",
+    "attempts": 1,
+    "successes": 0,
+    "median_ms": 396.5472,
+    "checked_at": "2026-10-02T19:00:04.1811306Z"
+  },
+  {
+    "id": "community-tidal",
+    "service": "tidal",
+    "quality": "16",
+    "state": "authentication_required",
+    "attempts": 1,
+    "successes": 0,
+    "median_ms": 429.2451,
+    "checked_at": "2026-10-02T19:00:02.4974397Z"
+  },
+  {
+    "id": "community-tidal",
+    "service": "tidal",
+    "quality": "24",
+    "state": "authentication_required",
+    "attempts": 1,
+    "successes": 0,
+    "median_ms": 429.2451,
+    "checked_at": "2026-10-02T19:00:02.4974397Z"
+  },
+  {
+    "id": "community-tidal",
+    "service": "tidal",
+    "quality": "atmos",
+    "state": "authentication_required",
+    "attempts": 1,
+    "successes": 0,
+    "median_ms": 429.2451,
+    "checked_at": "2026-10-02T19:00:02.4974397Z"
+  },
+  {
+    "id": "jiosaavn-community",
+    "service": "jiosaavn",
+    "quality": "lossy",
+    "state": "failed",
+    "attempts": 3,
+    "successes": 0,
+    "median_ms": 1.5616,
+    "checked_at": "2026-10-02T19:00:10.1515352Z"
+  },
+  {
+    "id": "resource-deezer",
+    "service": "",
+    "quality": "resource",
+    "state": "available",
+    "attempts": 3,
+    "successes": 2,
+    "median_ms": 3474.1276,
+    "checked_at": "2026-10-02T18:59:44.4316976Z"
+  },
+  {
+    "id": "resource-lrclib",
+    "service": "",
+    "quality": "resource",
+    "state": "available",
+    "attempts": 3,
+    "successes": 3,
+    "median_ms": 275.2264,
+    "checked_at": "2026-10-02T18:59:44.4316976Z"
+  },
+  {
+    "id": "resource-musicbrainz",
+    "service": "",
+    "quality": "resource",
+    "state": "available",
+    "attempts": 3,
+    "successes": 2,
+    "median_ms": 582.4978,
+    "checked_at": "2026-10-02T18:59:44.4652696Z"
+  },
+  {
+    "id": "resource-qobuz",
+    "service": "",
+    "quality": "resource",
+    "state": "authentication_required",
+    "attempts": 2,
+    "successes": 0,
+    "median_ms": 12000.2558,
+    "checked_at": "2026-10-02T18:59:53.2266392Z"
+  },
+  {
+    "id": "resource-tidal",
+    "service": "",
+    "quality": "resource",
+    "state": "available",
+    "attempts": 3,
+    "successes": 3,
+    "median_ms": 79.2127,
+    "checked_at": "2026-10-02T19:00:00.2465561Z"
+  },
+  {
+    "id": "samidy-catalog",
+    "service": "",
+    "quality": "resource",
+    "state": "available",
+    "attempts": 3,
+    "successes": 3,
+    "median_ms": 218.791,
+    "checked_at": "2026-10-02T19:00:01.3828794Z"
+  },
+  {
+    "id": "zarz-amazon",
+    "service": "amazon",
+    "quality": "16",
+    "state": "authentication_required",
+    "attempts": 1,
+    "successes": 0,
+    "median_ms": 788.3361,
+    "checked_at": "2026-10-02T18:59:44.4316976Z"
+  },
+  {
+    "id": "zarz-amazon",
+    "service": "amazon",
+    "quality": "24",
+    "state": "authentication_required",
+    "attempts": 1,
+    "successes": 0,
+    "median_ms": 788.3361,
+    "checked_at": "2026-10-02T18:59:44.4316976Z"
+  },
+  {
+    "id": "zarz-amazon",
+    "service": "amazon",
+    "quality": "atmos",
+    "state": "authentication_required",
+    "attempts": 1,
+    "successes": 0,
+    "median_ms": 788.3361,
+    "checked_at": "2026-10-02T18:59:44.4316976Z"
+  },
+  {
+    "id": "zarz-qobuz",
+    "service": "qobuz",
+    "quality": "16",
+    "state": "authentication_required",
+    "attempts": 1,
+    "successes": 0,
+    "median_ms": 1239.4895,
+    "checked_at": "2026-10-02T19:00:08.9120457Z"
+  },
+  {
+    "id": "zarz-qobuz",
+    "service": "qobuz",
+    "quality": "24",
+    "state": "authentication_required",
+    "attempts": 1,
+    "successes": 0,
+    "median_ms": 1239.4895,
+    "checked_at": "2026-10-02T19:00:08.9120457Z"
+  },
+  {
+    "id": "zarz-qobuz",
+    "service": "qobuz",
+    "quality": "atmos",
+    "state": "authentication_required",
+    "attempts": 1,
+    "successes": 0,
+    "median_ms": 1239.4895,
+    "checked_at": "2026-10-02T19:00:08.9120457Z"
+  },
+  {
+    "id": "zarz-tidal",
+    "service": "tidal",
+    "quality": "16",
+    "state": "authentication_required",
+    "attempts": 1,
+    "successes": 0,
+    "median_ms": 296.6426,
+    "checked_at": "2026-10-02T19:00:10.6646137Z"
+  },
+  {
+    "id": "zarz-tidal",
+    "service": "tidal",
+    "quality": "24",
+    "state": "authentication_required",
+    "attempts": 1,
+    "successes": 0,
+    "median_ms": 296.6426,
+    "checked_at": "2026-10-02T19:00:10.6646137Z"
+  },
+  {
+    "id": "zarz-tidal",
+    "service": "tidal",
+    "quality": "atmos",
+    "state": "authentication_required",
+    "attempts": 1,
+    "successes": 0,
+    "median_ms": 296.6426,
+    "checked_at": "2026-10-02T19:00:10.6646137Z"
+  },
+  {
+    "id": "resource-songstats",
+    "service": "",
+    "quality": "resource",
+    "state": "available",
+    "attempts": 3,
+    "successes": 3,
+    "median_ms": 612.9717,
+    "checked_at": "2026-10-02T19:05:53.9209104Z"
+  },
+  {
+    "id": "resource-songlink",
+    "service": "",
+    "quality": "resource",
+    "state": "available",
+    "attempts": 3,
+    "successes": 3,
+    "median_ms": 1285.2952,
+    "checked_at": "2026-10-02T19:05:56.455212Z"
+  },
+  {
+    "id": "resource-spotify",
+    "service": "",
+    "quality": "resource",
+    "state": "available",
+    "attempts": 3,
+    "successes": 3,
+    "median_ms": 301.6291,
+    "checked_at": "2026-10-02T19:06:01.718689Z"
+  },
+  {
+    "id": "antra-amazon",
+    "service": "amazon",
+    "quality": "16",
+    "state": "failed",
+    "attempts": 1,
+    "successes": 0,
+    "median_ms": 14332.8675,
+    "checked_at": "2026-10-02T18:57:12Z"
+  }
+]

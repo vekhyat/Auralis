@@ -32,8 +32,12 @@ func main() {
 	}
 
 	app := NewApp()
+	webviewProfile, err := backend.IsolatedWebviewProfilePath()
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	err := wails.Run(&options.App{
+	err = wails.Run(&options.App{
 		Title:     "Auralis",
 		Width:     1280,
 		Height:    800,
@@ -44,8 +48,9 @@ func main() {
 			Assets: assets,
 		},
 		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 255},
-		OnStartup:  app.startup,
-		OnShutdown: app.shutdown,
+		OnStartup:        app.startup,
+		OnShutdown:       app.shutdown,
+		OnBeforeClose:    app.beforeClose,
 		SingleInstanceLock: &options.SingleInstanceLock{
 			UniqueId: "auralis-desktop",
 			OnSecondInstanceLaunch: func(data options.SecondInstanceData) {
@@ -62,6 +67,7 @@ func main() {
 			app,
 		},
 		Windows: &windows.Options{
+			WebviewUserDataPath:               webviewProfile,
 			WebviewIsTransparent:              false,
 			WindowIsTranslucent:               false,
 			DisableWindowIcon:                 false,

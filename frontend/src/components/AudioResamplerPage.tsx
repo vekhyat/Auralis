@@ -1,11 +1,11 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useEffectEvent } from "react";
 import { t, translateMessage } from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Upload, X, CircleCheckBig, AlertCircle, Trash2, FileMusic } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
-import { SelectAudioFiles, SelectFolder, ListAudioFilesInDir, ResampleAudio } from "../../wailsjs/go/main/App";
+import { SelectAudioFiles, SelectFolder, ListAudioFilesInDir, ResampleAudio, GetFileSizes, GetFlacInfoBatch } from "../../wailsjs/go/main/App";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { OnFileDrop, OnFileDropOff } from "../../wailsjs/runtime/runtime";
 import { AudioLines } from "lucide-react";
@@ -73,8 +73,7 @@ export function AudioResamplerPage() {
                     return parsed.sampleRate;
             }
         }
-        catch (err) {
-        }
+        catch { return "44100"; }
         return "44100";
     });
     const [bitDepth, setBitDepth] = useState(() => {
@@ -86,8 +85,7 @@ export function AudioResamplerPage() {
                     return parsed.bitDepth;
             }
         }
-        catch (err) {
-        }
+        catch { return "16"; }
         return "16";
     });
     const [resampling, setResampling] = useState(false);
@@ -111,7 +109,6 @@ export function AudioResamplerPage() {
         if (paths.length === 0)
             return;
         try {
-            const GetFlacInfoBatch = (window as any)["go"]["main"]["App"]["GetFlacInfoBatch"];
             const infos: Array<{
                 path: string;
                 sample_rate: number;
@@ -167,7 +164,7 @@ export function AudioResamplerPage() {
             });
         }
     };
-    const addFiles = useCallback(async (paths: string[]) => {
+    const addFiles = async (paths: string[]) => {
         const validExtensions = [".flac"];
         const invalidFiles = paths.filter((path) => {
             const ext = path.toLowerCase().slice(path.lastIndexOf("."));
@@ -178,7 +175,6 @@ export function AudioResamplerPage() {
                 description: t("translation.audioResampler.onlyFlacFilesSupportedResampling"),
             });
         }
-        const GetFileSizes = (files: string[]): Promise<Record<string, number>> => (window as any)["go"]["main"]["App"]["GetFileSizes"](files);
         const validPaths = paths.filter((path) => {
             const ext = path.toLowerCase().slice(path.lastIndexOf("."));
             return validExtensions.includes(ext);
@@ -221,13 +217,13 @@ export function AudioResamplerPage() {
                 fetchAudioInfo(newlyAddedPaths);
             }
         }, 50);
-    }, [fetchAudioInfo]);
-    const handleFileDrop = useCallback(async (_x: number, _y: number, paths: string[]) => {
+    };
+    const handleFileDrop = useEffectEvent(async (_x: number, _y: number, paths: string[]) => {
         setIsDragging(false);
         if (paths.length === 0)
             return;
         addFiles(paths);
-    }, [addFiles]);
+    });
     useEffect(() => {
         OnFileDrop((x, y, paths) => {
             handleFileDrop(x, y, paths);
@@ -235,7 +231,7 @@ export function AudioResamplerPage() {
         return () => {
             OnFileDropOff();
         };
-    }, [handleFileDrop]);
+    }, []);
     const removeFile = (path: string) => {
         setFiles((prev) => prev.filter((f) => f.path !== path));
     };
@@ -264,7 +260,7 @@ export function AudioResamplerPage() {
                 bit_depth: bitDepth,
             });
             setFiles((prev) => prev.map((f) => {
-                const result = results.find((r: any) => r.input_file === f.path || r.input_file.toLowerCase() === f.path.toLowerCase());
+                const result = results.find((r) => r.input_file === f.path || r.input_file.toLowerCase() === f.path.toLowerCase());
                 if (result) {
                     return {
                         ...f,
@@ -275,8 +271,8 @@ export function AudioResamplerPage() {
                 }
                 return f;
             }));
-            const successCount = results.filter((r: any) => r.success).length;
-            const failCount = results.filter((r: any) => !r.success).length;
+            const successCount = results.filter((r) => r.success).length;
+            const failCount = results.filter((r) => !r.success).length;
             if (successCount > 0) {
                 toast.success(t("translation.audioResampler.resamplingComplete"), {
                     description: t("translation.resampler.success", { count: successCount, failures: failCount > 0 ? t("translation.common.failures", { count: failCount }) : "" }),

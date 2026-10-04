@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { FetchHistory, type HistoryItem } from "@/components/FetchHistory";
-import { CatalogRow } from "./CatalogRow";
+import { ArtworkCard } from "./ArtworkCard";
+import { Music2, ArrowUp } from "lucide-react";
 import { InspectorPane, InspectorLinkAction } from "./InspectorPane";
 import type { SmartSearchController, ResultTab } from "@/hooks/smart-search-core";
 import { cn } from "@/lib/utils";
@@ -41,7 +42,15 @@ export function CatalogPane({ controller, query, history, onHistorySelect, onHis
         return null;
     }
     return (<div className="flex min-h-full flex-col">
-      <p className="max-w-[70ch] text-sm text-muted-foreground">{t("translation.catalog.emptyHint")}</p>
+      <div className="library-intro mb-5 flex items-start justify-between gap-6">
+        <div><h1 className="text-3xl font-semibold tracking-tight">{t("translation.downloads.libraryTitle")}</h1>
+        <p className="mt-3 max-w-[60ch] text-sm leading-6 text-muted-foreground">{t("translation.downloads.libraryHint")}</p></div>
+        <ArrowUp className="mt-2 hidden size-5 text-muted-foreground sm:block" />
+      </div>
+      {history.length === 0 && <div className="my-8 flex min-h-52 items-center gap-6 rounded-xl border border-dashed bg-card p-8">
+        <Music2 className="size-12 shrink-0 text-primary" strokeWidth={1} />
+        <div><h2 className="text-lg font-semibold">{t("translation.downloads.emptyLibrary")}</h2><p className="mt-2 max-w-[52ch] text-sm leading-6 text-muted-foreground">{t("translation.downloads.emptyLibraryHint")}</p></div>
+      </div>}
 
       {controller.recentSearches.length > 0 ? (<div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="text-[11px] font-semibold tracking-widest uppercase text-muted-foreground">{t("translation.catalog.recentSearches")}</span>
@@ -87,7 +96,7 @@ function SearchResults({ controller, query }: {
           {t("translation.migrated.SearchBar.noResultsFoundFor")}“{query}”
         </div>);
     }
-    return (<div className="flex items-start gap-6">
+    return (<div className="search-layout flex items-start gap-8">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-border pb-2">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -138,14 +147,12 @@ function SearchResults({ controller, query }: {
         {controller.isSearching ? (<div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
           <Spinner />
           <span>{t("translation.searchBar.searching")}</span>
-        </div>) : (<div className="border-b border-border">
-          {resultsForTab.map((item) => (<CatalogRow
+        </div>) : (<div className="artwork-grid mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
+          {resultsForTab.map((item) => (<ArtworkCard
             key={item.id}
             cover={item.images || undefined}
-            coverFallback={item.type.slice(0, 2).toUpperCase()}
             title={item.name}
             subtitle={getResultSubtitle(item)}
-            explicit={item.is_explicit}
             meta={getResultMeta(item)}
             selected={selectedId === item.id}
             onClick={() => setSelectedId(item.id)}
@@ -173,7 +180,7 @@ function SearchResults({ controller, query }: {
           </Button>
           <InspectorLinkAction label={linkLabel(selected.external_urls)} url={selected.external_urls}/>
         </>}
-      />) : (<aside className="hidden w-80 shrink-0 border-l border-border pl-6 lg:block">
+      />) : (<aside className="hidden w-72 shrink-0 rounded-xl bg-secondary/50 p-6 lg:block">
         <p className="text-sm text-muted-foreground">{t("translation.catalog.selectToInspect")}</p>
       </aside>)}
     </div>);

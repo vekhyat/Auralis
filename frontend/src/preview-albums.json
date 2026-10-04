@@ -1,0 +1,42 @@
+[
+    {
+        "collectionName":  "Random Access Memories",
+        "artistName":  "Daft Punk",
+        "collectionId":  617154241,
+        "artworkUrl100":  "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/e8/43/5f/e8435ffa-b6b9-b171-40ab-4ff3959ab661/886443919266.jpg/100x100bb.jpg",
+        "releaseDate":  "2013-05-17T07:00:00Z",
+        "trackCount":  14
+    },
+    {
+        "collectionName":  "In Rainbows",
+        "artistName":  "Radiohead",
+        "collectionId":  1109714933,
+        "artworkUrl100":  "https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/dd/50/c7/dd50c790-99ac-d3d0-5ab8-e3891fb8fd52/634904032463.png/100x100bb.jpg",
+        "releaseDate":  "2007-10-10T07:00:00Z",
+        "trackCount":  10
+    },
+    {
+        "collectionName":  "Currents B-Sides \u0026 Remixes - EP",
+        "artistName":  "Tame Impala",
+        "collectionId":  1440875696,
+        "artworkUrl100":  "https://is1-ssl.mzstatic.com/image/thumb/Music124/v4/64/48/5c/64485cc9-968c-68cc-764e-9a7c71733def/00602567155454.rgb.jpg/100x100bb.jpg",
+        "releaseDate":  "2017-11-16T08:00:00Z",
+        "trackCount":  5
+    },
+    {
+        "collectionName":  "Moon River - Single",
+        "artistName":  "Frank Ocean",
+        "collectionId":  1349524897,
+        "artworkUrl100":  "https://is1-ssl.mzstatic.com/image/thumb/Music124/v4/42/62/50/426250f9-7e39-f907-687c-442caa436636/dj.nhptxziz.jpg/100x100bb.jpg",
+        "releaseDate":  "2018-02-14T08:00:00Z",
+        "trackCount":  1
+    },
+    {
+        "collectionName":  "Blue",
+        "artistName":  "Joni Mitchell",
+        "collectionId":  1492263092,
+        "artworkUrl100":  "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/00/a2/43/00a24363-cf69-bfd2-a26a-a042d57ab141/075992719926.jpg/100x100bb.jpg",
+        "releaseDate":  "1971-06-22T07:00:00Z",
+        "trackCount":  10
+    }
+]

@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,6 +23,7 @@ var (
 
 type SongLinkClient struct {
 	client *http.Client
+	ctx    context.Context
 }
 
 type SongLinkURLs struct {
@@ -79,11 +81,23 @@ type qobuzAvailabilityTrack struct {
 }
 
 func NewSongLinkClient() *SongLinkClient {
+	return NewSongLinkClientWithContext(context.Background())
+}
+
+func NewSongLinkClientWithContext(ctx context.Context) *SongLinkClient {
 	return &SongLinkClient{
+		ctx: ctx,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 	}
+}
+
+func (s *SongLinkClient) operationContext() context.Context {
+	if s.ctx == nil {
+		return context.Background()
+	}
+	return s.ctx
 }
 
 func (s *SongLinkClient) GetAllURLsFromSpotify(spotifyTrackID string, region string) (*SongLinkURLs, error) {
@@ -100,7 +114,7 @@ func (s *SongLinkClient) GetAllURLsFromSpotify(spotifyTrackID string, region str
 	}
 
 	if urls.TidalURL == "" && urls.ISRC != "" {
-		if tidalURL, searchErr := lookupTidalURLByISRC(urls.ISRC); searchErr == nil {
+		if tidalURL, searchErr := lookupTidalURLByISRCWithContext(s.operationContext(), urls.ISRC); searchErr == nil {
 			urls.TidalURL = tidalURL
 			fmt.Printf("Found Tidal URL via ISRC search: %s\n", tidalURL)
 		}
@@ -145,7 +159,7 @@ func (s *SongLinkClient) CheckTrackAvailability(spotifyTrackID string) (*TrackAv
 	}
 
 	if isrc == "" && availability.DeezerURL != "" {
-		if resolvedISRC, deezerErr := getDeezerISRC(availability.DeezerURL); deezerErr == nil {
+		if resolvedISRC, deezerErr := getDeezerISRC(s.operationContext(), availability.DeezerURL); deezerErr == nil {
 			isrc = resolvedISRC
 		}
 	}
@@ -284,7 +298,7 @@ func (s *SongLinkClient) GetDeezerURLFromSpotify(spotifyTrackID string) (string,
 	return "", fmt.Errorf("deezer link not found")
 }
 
-func getDeezerISRC(deezerURL string) (string, error) {
+func getDeezerISRC(ctx context.Context, deezerURL string) (string, error) {
 	trackID, err := extractDeezerTrackID(deezerURL)
 	if err != nil {
 		return "", err
@@ -293,7 +307,11 @@ func getDeezerISRC(deezerURL string) (string, error) {
 	apiURL := fmt.Sprintf("https://api.deezer.com/track/%s", trackID)
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(apiURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to call Deezer API: %w", err)
 	}
@@ -327,7 +345,7 @@ func (s *SongLinkClient) GetISRC(spotifyID string) (string, error) {
 	}
 
 	if links != nil && links.DeezerURL != "" {
-		if isrc, deezerErr := getDeezerISRC(links.DeezerURL); deezerErr == nil {
+		if isrc, deezerErr := getDeezerISRC(s.operationContext(), links.DeezerURL); deezerErr == nil {
 			return isrc, nil
 		}
 	}
@@ -372,7 +390,7 @@ func (s *SongLinkClient) scrapeSongLinkPage(pageURL string, region string) (*son
 	req.Header.Set("Sec-Fetch-Site", "none")
 	req.Header.Set("Sec-Fetch-User", "?1")
 
-	resp, err := s.client.Do(req)
+	resp, err := s.client.Do(req.WithContext(s.operationContext()))
 	if err != nil {
 		return nil, fmt.Errorf("failed to call song.link: %w", err)
 	}
@@ -383,7 +401,7 @@ func (s *SongLinkClient) scrapeSongLinkPage(pageURL string, region string) (*son
 		return nil, fmt.Errorf("song.link returned status %d (%s)", resp.StatusCode, strings.TrimSpace(string(bodyPreview)))
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readBoundedBody(resp.Body, 8<<20)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read song.link response: %w", err)
 	}
@@ -442,7 +460,7 @@ func (s *SongLinkClient) lookupDeezerTrackURLByISRC(isrc string) (string, error)
 	}
 	req.Header.Set("User-Agent", songLinkUserAgent)
 
-	resp, err := s.client.Do(req)
+	resp, err := s.client.Do(req.WithContext(s.operationContext()))
 	if err != nil {
 		return "", fmt.Errorf("failed to call Deezer ISRC API: %w", err)
 	}

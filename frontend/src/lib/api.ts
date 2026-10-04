@@ -1,11 +1,11 @@
-import type { SpotifyMetadataResponse, DownloadRequest, DownloadResponse, HealthResponse, CurrentIPInfo, LyricsDownloadRequest, LyricsDownloadResponse, CoverDownloadRequest, CoverDownloadResponse, HeaderDownloadRequest, HeaderDownloadResponse, GalleryImageDownloadRequest, GalleryImageDownloadResponse, AvatarDownloadRequest, AvatarDownloadResponse, } from "@/types/api";
-import { GetSpotifyMetadata, GetCurrentIPInfo, DownloadTrack, DownloadLyrics, DownloadCover, DownloadHeader, DownloadGalleryImage, DownloadAvatar } from "../../wailsjs/go/main/App";
+import type { SpotifyMetadataResponse, DownloadRequest, DownloadResponse, LyricsDownloadRequest, LyricsDownloadResponse, CoverDownloadRequest, CoverDownloadResponse, HeaderDownloadRequest, HeaderDownloadResponse, GalleryImageDownloadRequest, GalleryImageDownloadResponse, AvatarDownloadRequest, AvatarDownloadResponse, } from "@/types/api";
+import { GetSpotifyMetadata, DownloadTrack, DownloadLyrics, DownloadCover, DownloadHeader, DownloadGalleryImage, DownloadAvatar } from "../../wailsjs/go/main/App";
 import { main } from "../../wailsjs/go/models";
 import { getSettings } from "@/lib/settings";
 function resolveArtistSeparator(separator: unknown): ", " | "; " {
     return separator === "semicolon" ? "; " : ", ";
 }
-export async function fetchSpotifyMetadata(url: string, batch: boolean = true, delay: number = 1.0, timeout: number = 300.0, separator?: "comma" | "semicolon"): Promise<SpotifyMetadataResponse> {
+export async function fetchSpotifyMetadata(url: string, batch: boolean = true, delay: number = 1.0, timeout: number = 300.0, separator?: "comma" | "semicolon", requestId?: string): Promise<SpotifyMetadataResponse> {
     const activeSeparator = resolveArtistSeparator(separator ?? getSettings().separator);
     const req = new main.SpotifyMetadataRequest({
         url,
@@ -13,7 +13,9 @@ export async function fetchSpotifyMetadata(url: string, batch: boolean = true, d
         delay,
         timeout,
         separator: activeSeparator,
+        client_request_id: requestId,
     });
+    Object.assign(req, { client_request_id: requestId });
     const jsonString = await GetSpotifyMetadata(req);
     return JSON.parse(jsonString);
 }
@@ -45,16 +47,6 @@ export async function downloadTrack(request: DownloadRequest): Promise<DownloadR
         req.use_single_genre = request.use_single_genre;
     }
     return await DownloadTrack(req);
-}
-export async function checkHealth(): Promise<HealthResponse> {
-    return {
-        status: "ok",
-        time: new Date().toISOString(),
-    };
-}
-export async function fetchCurrentIPInfo(): Promise<CurrentIPInfo> {
-    const jsonString = await GetCurrentIPInfo();
-    return JSON.parse(jsonString);
 }
 export async function downloadLyrics(request: LyricsDownloadRequest): Promise<LyricsDownloadResponse> {
     const settings = getSettings();

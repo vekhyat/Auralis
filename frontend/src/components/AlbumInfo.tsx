@@ -1,7 +1,7 @@
 import { translateMessage } from "@/i18n";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import { FolderOpen, ImageDown, FileText, ListPlus, CircleCheck } from "lucide-react";
+import { FolderOpen, ImageDown, FileText, Download, CircleCheck } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SearchAndSort } from "./SearchAndSort";
@@ -180,7 +180,7 @@ export function AlbumInfo({ albumInfo, trackList, searchQuery, sortBy, selectedT
             setDownloadingAlbumCover(false);
         }
     };
-    return (<div className="flex items-start gap-6">
+    return (<div className="collection-layout flex flex-col gap-7">
       <div className="min-w-0 flex-1 space-y-4">
         <SearchAndSort searchQuery={searchQuery} sortBy={sortBy} onSearchChange={onSearchChange} onSortChange={onSortChange}/>
         <TrackList tracks={trackList} searchQuery={searchQuery} sortBy={sortBy} selectedTracks={selectedTracks} downloadedTracks={downloadedTracks} failedTracks={failedTracks} skippedTracks={skippedTracks} currentPage={currentPage} itemsPerPage={itemsPerPage} showCheckboxes={true} hideAlbumColumn={true} folderName={albumInfo.name} downloadedLyrics={downloadedLyrics} failedLyrics={failedLyrics} skippedLyrics={skippedLyrics} downloadingLyricsTrack={downloadingLyricsTrack} checkingAvailabilityTrack={checkingAvailabilityTrack} availabilityMap={availabilityMap} onToggleTrack={onToggleTrack} onToggleSelectAll={onToggleSelectAll} onSelectTrackRange={onSelectTrackRange} onQueueTrack={onQueueTrack} onDownloadLyrics={onDownloadLyrics} onDownloadCover={onDownloadCover} downloadedCovers={downloadedCovers} failedCovers={failedCovers} skippedCovers={skippedCovers} downloadingCoverTrack={downloadingCoverTrack} onCheckAvailability={onCheckAvailability} onPageChange={onPageChange} onArtistClick={onArtistClick} onTrackClick={onTrackClick}/>
@@ -215,11 +215,11 @@ export function AlbumInfo({ albumInfo, trackList, searchQuery, sortBy, selectedT
         ]}
         actions={<>
           <Button size="sm" variant={allTracksQueued ? "outline" : "default"} onClick={onQueueAll}>
-            {allTracksQueued ? (<CircleCheck className="size-3.5"/>) : (<ListPlus className="size-3.5"/>)}
-            {t(allTracksQueued ? "translation.queue.alreadyInQueue" : "translation.queue.addToQueue")}
+            {allTracksQueued ? (<CircleCheck className="size-3.5"/>) : (<Download className="size-3.5"/>)}
+            {t(allTracksQueued ? "translation.downloads.requested" : "translation.downloads.download")}
           </Button>
-          {selectedTracks.length > 0 && onQueueSelected && (<Button size="sm" variant="outline" onClick={onQueueSelected}>{selectedTracksQueued ? (<CircleCheck className="size-3.5"/>) : (<ListPlus className="size-3.5"/>)}
-            {selectedTracksQueued ? t("translation.queue.alreadyInQueue") : t("translation.queue.addSelectedQueueValue1", { value1: selectedTracks.length.toLocaleString() })}</Button>)}
+          {selectedTracks.length > 0 && onQueueSelected && (<Button size="sm" variant="outline" onClick={onQueueSelected}>{selectedTracksQueued ? (<CircleCheck className="size-3.5"/>) : (<Download className="size-3.5"/>)}
+            {selectedTracksQueued ? t("translation.downloads.requested") : t("translation.downloads.downloadSelected", { value1: selectedTracks.length.toLocaleString() })}</Button>)}
           {onDownloadAllLyrics && (<Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="outline" size="icon-sm" disabled={isBulkDownloadingLyrics} onClick={onDownloadAllLyrics}>

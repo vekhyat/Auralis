@@ -1,0 +1,13 @@
+[
+  {
+    "id": "antra-qobuz",
+    "service": "qobuz",
+    "quality": "24",
+    "passed": true,
+    "elapsed_seconds": 43.4348205,
+    "codec": "flac",
+    "bit_depth": 24,
+    "sample_rate": 96000,
+    "duration_seconds": 259.36
+  }
+]

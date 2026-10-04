@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/url"
 	"os"
 
@@ -24,6 +25,7 @@ import (
 )
 
 type App struct {
+	close                        closeGate
 	ctx                          context.Context
 	replayGainAnalysisMu         sync.Mutex
 	replayGainAnalysisCancel     context.CancelFunc
@@ -135,18 +137,20 @@ type timedResult[T any] struct {
 	err   error
 }
 
-func runWithTimeout[T any](timeout time.Duration, fn func() (T, error)) (T, error) {
+func runWithTimeout[T any](timeout time.Duration, fn func(context.Context) (T, error)) (T, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 	resultCh := make(chan timedResult[T], 1)
 
 	go func() {
-		value, err := fn()
+		value, err := fn(ctx)
 		resultCh <- timedResult[T]{value: value, err: err}
 	}()
 
 	select {
 	case result := <-resultCh:
 		return result.value, result.err
-	case <-time.After(timeout):
+	case <-ctx.Done():
 		var zero T
 		return zero, fmt.Errorf("operation timed out after %s", timeout)
 	}
@@ -317,6 +321,9 @@ func (a *App) getFirstArtist(artistString string) string {
 }
 
 func (a *App) startup(ctx context.Context) {
+	backend.SetVerificationPresentationHandler(func(p backend.VerificationPresentation) {
+		runtime.EventsEmit(ctx,"source-verification",sourceVerificationView(p))
+	})
 	a.ctx = ctx
 	if err := backend.RegisterAuralisProtocol(); err != nil {
 		fmt.Printf("Failed to register auralis:// protocol: %v\n", err)
@@ -345,24 +352,30 @@ func (a *App) startup(ctx context.Context) {
 	if err := backend.CleanupLegacyTidalPublicAPIState(); err != nil {
 		fmt.Printf("Failed to clean legacy Tidal API cache: %v\n", err)
 	}
-	if err := backend.SanitizePersistedConfigSettings(); err != nil {
-		fmt.Printf("Failed to sanitize persisted config settings: %v\n", err)
+	if err := backend.MigratePersistedConfigSettings(); err != nil {
+		fmt.Printf("Failed to migrate persisted config settings: %v\n", err)
 	}
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	backend.StopAcceptingDownloadsAndDrain()
 	backend.CloseLibraryIndexDB()
-	backend.ClosePersistentQueueDB()
-	backend.CloseHistoryDB()
+	if err := backend.ClosePersistentQueueDB(); err != nil {
+		fmt.Printf("Failed to close queue DB: %v\n", err)
+	}
+	if err := backend.CloseHistoryDB(); err != nil {
+		fmt.Printf("Failed to close history DB: %v\n", err)
+	}
 	backend.CloseISRCCacheDB()
 }
 
 type SpotifyMetadataRequest struct {
-	URL       string  `json:"url"`
-	Batch     bool    `json:"batch"`
-	Delay     float64 `json:"delay"`
-	Timeout   float64 `json:"timeout"`
-	Separator string  `json:"separator,omitempty"`
+	URL             string  `json:"url"`
+	Batch           bool    `json:"batch"`
+	Delay           float64 `json:"delay"`
+	Timeout         float64 `json:"timeout"`
+	Separator       string  `json:"separator,omitempty"`
+	ClientRequestID string  `json:"client_request_id,omitempty"`
 }
 
 type DownloadRequest struct {
@@ -516,6 +529,374 @@ func autoConvertExtension(req DownloadRequest) string {
 	return "." + format
 }
 
+func downloadCancelledResult(itemID string) (DownloadResponse, error) {
+	if itemID != "" {
+		backend.SkipDownloadItem(itemID, "")
+	}
+	return DownloadResponse{
+		Success:   false,
+		Message:   "Download cancelled",
+		Error:     "Download cancelled",
+		ItemID:    itemID,
+		Cancelled: true,
+	}, nil
+}
+
+func prepareDownloadStagingDir(finalOutputDir string) (string, error) {
+	if strings.TrimSpace(finalOutputDir) == "" {
+		finalOutputDir = "."
+	}
+	if err := os.MkdirAll(finalOutputDir, 0o755); err != nil {
+		return "", err
+	}
+	absFinal, err := filepath.Abs(finalOutputDir)
+	if err != nil {
+		return "", err
+	}
+	// Stay inside the writable output folder, including when it is a junction
+	// to another volume. The library scanner excludes these staging folders.
+	return os.MkdirTemp(absFinal, ".auralis-incoming-*")
+}
+
+func pathIsInside(path, dir string) bool {
+	rel, err := filepath.Rel(filepath.Clean(dir), filepath.Clean(path))
+	if err != nil || rel == "." || rel == "" || filepath.IsAbs(rel) {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func removeNewDownloadArtifact(path, stagingDir string) {
+	if path == "" || strings.HasPrefix(path, "EXISTS:") {
+		return
+	}
+	if stagingDir != "" && !pathIsInside(path, stagingDir) {
+		fmt.Printf("Leaving existing file in place: %s\n", path)
+		return
+	}
+	cleanupInvalidDownloadArtifacts(path)
+}
+
+// stagedPublishOptions controls how a finished download leaves staging.
+// Suffix mode never overwrites an occupied name. Without it, valid destination
+// audio is kept and invalid audio is replaced only after the new file is valid.
+type stagedPublishOptions struct {
+	redownloadWithSuffix bool
+	expectedSeconds      int
+	stagedAudioValidated bool
+}
+
+type stagedFilePlan struct {
+	src  string
+	dst  string
+	keep bool
+}
+
+func finalizeStagedDownload(stagingDir, finalDir string, opts stagedPublishOptions, paths ...*string) (bool, error) {
+	if strings.TrimSpace(stagingDir) == "" {
+		return false, nil
+	}
+	stagingDir = filepath.Clean(stagingDir)
+	finalDir = filepath.Clean(finalDir)
+	stagedFiles, err := collectStagedFiles(stagingDir)
+	if err != nil {
+		return false, err
+	}
+
+	primary := ""
+	if len(paths) > 0 && paths[0] != nil && *paths[0] != "" && pathIsInside(*paths[0], stagingDir) {
+		primary = filepath.Clean(*paths[0])
+	}
+
+	audioPlans := make(map[string]stagedFilePlan, len(stagedFiles))
+	for _, src := range stagedFiles {
+		if !shouldPlanStagedAudio(src, paths) {
+			continue
+		}
+		plan, planErr := planStagedAudio(src, stagingDir, finalDir, opts)
+		if planErr != nil {
+			return false, planErr
+		}
+		audioPlans[src] = plan
+	}
+
+	if primary != "" {
+		if plan, ok := audioPlans[primary]; ok && plan.keep {
+			if err := retargetKeptDownloadPaths(paths, stagingDir, finalDir, plan.dst); err != nil {
+				return false, err
+			}
+			fmt.Printf("Keeping existing audio: %s\n", plan.dst)
+			return true, nil
+		}
+	}
+
+	moves := make(map[string]string, len(stagedFiles))
+	published := make(map[string]string, len(stagedFiles))
+	for src, plan := range audioPlans {
+		if plan.keep {
+			published[src] = plan.dst
+			continue
+		}
+		moves[src] = plan.dst
+	}
+	for _, src := range stagedFiles {
+		if _, planned := audioPlans[src]; planned {
+			continue
+		}
+		rel, relErr := filepath.Rel(stagingDir, src)
+		if relErr != nil {
+			return false, relErr
+		}
+		dst := filepath.Join(finalDir, rel)
+		if adjusted, ok := stagedSidecarDest(rel, primary, audioPlans, stagingDir, finalDir); ok {
+			dst = adjusted
+		}
+		info, statErr := os.Lstat(dst)
+		if statErr == nil {
+			if info.IsDir() {
+				return false, fmt.Errorf("download destination is a directory: %s", dst)
+			}
+			continue
+		}
+		if !os.IsNotExist(statErr) {
+			return false, statErr
+		}
+		moves[src] = dst
+	}
+
+	claimed := make(map[string]string, len(moves))
+	for src, dst := range moves {
+		if prev, ok := claimed[filepath.Clean(dst)]; ok && prev != src {
+			return false, fmt.Errorf("multiple staged files planned for %s", dst)
+		}
+		claimed[filepath.Clean(dst)] = src
+	}
+	for src, dst := range moves {
+		if err := backend.MoveFileReplace(src, dst); err != nil {
+			return false, err
+		}
+		published[src] = dst
+	}
+	if err := applyStagedPathUpdates(paths, stagingDir, finalDir, published); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
+func collectStagedFiles(stagingDir string) ([]string, error) {
+	files := make([]string, 0)
+	err := filepath.WalkDir(stagingDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() || !pathIsInside(path, stagingDir) {
+			return nil
+		}
+		files = append(files, filepath.Clean(path))
+		return nil
+	})
+	return files, err
+}
+
+func shouldPlanStagedAudio(src string, paths []*string) bool {
+	if isPublishAudio(src) {
+		return true
+	}
+	clean := filepath.Clean(src)
+	for _, path := range paths {
+		if path != nil && *path != "" && filepath.Clean(*path) == clean {
+			return true
+		}
+	}
+	return false
+}
+
+func isPublishAudio(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".flac", ".mp3", ".m4a", ".mp4", ".m4b", ".aac", ".wav", ".aiff", ".aif", ".ogg", ".opus", ".ape", ".wv", ".mpc":
+		return true
+	default:
+		return false
+	}
+}
+
+func planStagedAudio(src, stagingDir, finalDir string, opts stagedPublishOptions) (stagedFilePlan, error) {
+	rel, err := filepath.Rel(stagingDir, src)
+	if err != nil {
+		return stagedFilePlan{}, err
+	}
+	dst := filepath.Join(finalDir, rel)
+	info, statErr := os.Lstat(dst)
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return stagedFilePlan{}, statErr
+	}
+	if statErr == nil && info.IsDir() {
+		return stagedFilePlan{}, fmt.Errorf("download destination is a directory: %s", dst)
+	}
+	if os.IsNotExist(statErr) {
+		return stagedFilePlan{src: src, dst: dst}, nil
+	}
+	if opts.redownloadWithSuffix {
+		free, freeErr := firstUnoccupiedPublishPath(dst)
+		if freeErr != nil {
+			return stagedFilePlan{}, freeErr
+		}
+		return stagedFilePlan{src: src, dst: free}, nil
+	}
+	if backend.AcceptExistingMedia(dst, opts.expectedSeconds) {
+		return stagedFilePlan{src: src, dst: dst, keep: true}, nil
+	}
+	if !stagedAudioMayReplace(src, opts) {
+		return stagedFilePlan{}, fmt.Errorf("refusing to replace %s until the downloaded audio is valid", dst)
+	}
+	return stagedFilePlan{src: src, dst: dst}, nil
+}
+
+func stagedAudioMayReplace(src string, opts stagedPublishOptions) bool {
+	return opts.stagedAudioValidated && backend.AcceptExistingMedia(src, opts.expectedSeconds)
+}
+
+func firstUnoccupiedPublishPath(path string) (string, error) {
+	ext := filepath.Ext(path)
+	base := strings.TrimSuffix(path, ext)
+	for i := 1; ; i++ {
+		candidate := fmt.Sprintf("%s_%02d%s", base, i, ext)
+		_, err := os.Lstat(candidate)
+		if os.IsNotExist(err) {
+			return candidate, nil
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+}
+
+func stagedSidecarDest(rel, primary string, plans map[string]stagedFilePlan, stagingDir, finalDir string) (string, bool) {
+	for src, plan := range plans {
+		audioRel, err := filepath.Rel(stagingDir, src)
+		if err != nil {
+			continue
+		}
+		if !strings.EqualFold(rel, audioRel+".cover.jpg") {
+			continue
+		}
+		destRel, err := filepath.Rel(finalDir, plan.dst)
+		if err != nil {
+			return "", false
+		}
+		return filepath.Join(finalDir, destRel+".cover.jpg"), true
+	}
+	plan, ok := plans[filepath.Clean(primary)]
+	if !ok || primary == "" {
+		return "", false
+	}
+	audioRel, err := filepath.Rel(stagingDir, primary)
+	if err != nil {
+		return "", false
+	}
+	destRel, err := filepath.Rel(finalDir, plan.dst)
+	if err != nil {
+		return "", false
+	}
+	oldStem := strings.TrimSuffix(audioRel, filepath.Ext(audioRel))
+	newStem := strings.TrimSuffix(destRel, filepath.Ext(destRel))
+	for _, ext := range []string{".lrc", ".jpg", ".jpeg", ".png"} {
+		if strings.EqualFold(rel, oldStem+ext) {
+			return filepath.Join(finalDir, newStem+ext), true
+		}
+	}
+	return "", false
+}
+
+func retargetKeptDownloadPaths(paths []*string, stagingDir, finalDir, primaryDest string) error {
+	for _, path := range paths {
+		if path == nil || *path == "" || !pathIsInside(*path, stagingDir) {
+			continue
+		}
+		rel, err := filepath.Rel(stagingDir, *path)
+		if err != nil {
+			return err
+		}
+		dst := filepath.Join(finalDir, rel)
+		info, statErr := os.Stat(dst)
+		if statErr == nil && !info.IsDir() {
+			*path = dst
+			continue
+		}
+		*path = primaryDest
+	}
+	return nil
+}
+
+func applyStagedPathUpdates(paths []*string, stagingDir, finalDir string, published map[string]string) error {
+	for _, path := range paths {
+		if path == nil || *path == "" {
+			continue
+		}
+		if dst, ok := published[filepath.Clean(*path)]; ok {
+			*path = dst
+			continue
+		}
+		if !pathIsInside(*path, stagingDir) {
+			continue
+		}
+		rel, err := filepath.Rel(stagingDir, *path)
+		if err != nil {
+			return err
+		}
+		*path = filepath.Join(finalDir, rel)
+	}
+	return nil
+}
+
+func recordDownloadHistory(filename string, req DownloadRequest, source string) {
+	quality := "Unknown"
+	durationStr := "0:00"
+	if file, err := os.Open(filename); err != nil {
+		fmt.Printf("[History] recording without metadata for %s: %v\n", filename, err)
+	} else {
+		_ = file.Close()
+		meta, err := backend.GetTrackMetadata(filename)
+		if err != nil {
+			fmt.Printf("[History] metadata unavailable for %s: %v\n", filename, err)
+		} else {
+			if meta.Bitrate > 0 {
+				quality = fmt.Sprintf("%dkbps/%.1fkHz", meta.Bitrate/1000, float64(meta.SampleRate)/1000.0)
+			} else if meta.SampleRate > 0 {
+				quality = fmt.Sprintf("%.1fkHz", float64(meta.SampleRate)/1000.0)
+			}
+			duration := int(meta.Duration)
+			durationStr = fmt.Sprintf("%d:%02d", duration/60, duration%60)
+		}
+	}
+
+	item := backend.HistoryItem{
+		SpotifyID:   req.SpotifyID,
+		Title:       req.TrackName,
+		Artists:     req.ArtistName,
+		Album:       req.AlbumName,
+		DurationStr: durationStr,
+		CoverURL:    req.CoverURL,
+		Quality:     quality,
+		Path:        filename,
+		Source:      source,
+	}
+	item.Format = strings.ToUpper(strings.TrimSpace(req.AudioFormat))
+	if ext := filepath.Ext(filename); len(ext) > 1 {
+		item.Format = strings.ToUpper(ext[1:])
+	}
+	switch item.Format {
+	case "6", "7", "27", "LOSSLESS", "HI_RES", "HI_RES_LOSSLESS":
+		item.Format = "FLAC"
+	case "ALAC", "APPLE", "ATMOS", "M4A-AAC", "M4A-ALAC":
+		item.Format = "M4A"
+	}
+
+	if err := backend.AddHistoryItem(item, "Auralis"); err != nil {
+		fmt.Fprintf(os.Stderr, "[History] failed to record download %s: %v\n", filename, err)
+	}
+}
+
 func cleanupInvalidDownloadArtifacts(paths ...string) {
 	seen := make(map[string]struct{}, len(paths))
 	for _, path := range paths {
@@ -583,11 +964,19 @@ func (a *App) GetSpotifyMetadata(req SpotifyMetadataRequest) (string, error) {
 	}
 
 	streamID := atomic.AddUint64(&a.metadataStreamGeneration, 1)
-	runtime.EventsEmit(a.ctx, "metadata-stream-begin", streamID)
+	if req.ClientRequestID == "" {
+		runtime.EventsEmit(a.ctx, "metadata-stream-begin", streamID)
+	} else {
+		runtime.EventsEmit(a.ctx, "metadata-stream-begin", map[string]interface{}{
+			"id":         streamID,
+			"request_id": req.ClientRequestID,
+		})
+	}
 	data, err := backend.GetFilteredSpotifyData(ctx, req.URL, req.Batch, time.Duration(req.Delay*float64(time.Second)), separator, func(tracks interface{}) {
 		runtime.EventsEmit(a.ctx, "metadata-stream", map[string]interface{}{
-			"id":      streamID,
-			"payload": tracks,
+			"id":         streamID,
+			"request_id": req.ClientRequestID,
+			"payload":    tracks,
 		})
 	})
 	if err != nil {
@@ -649,6 +1038,16 @@ func (a *App) SearchSpotifyByType(req SpotifySearchByTypeRequest) ([]backend.Sea
 }
 
 func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
+	if err := backend.TryBeginTrackedDownload(); err != nil {
+		return downloadCancelledResult("")
+	}
+	defer backend.EndTrackedDownload()
+
+	downloadCtx, finishDownloadScope := backend.BeginDownloadCancellationScope()
+	defer finishDownloadScope()
+	if downloadCtx.Err() != nil {
+		return downloadCancelledResult("")
+	}
 
 	if req.Service == "qobuz" && req.SpotifyID == "" {
 		return DownloadResponse{
@@ -707,18 +1106,8 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 	backend.StartDownloadItem(itemID)
 	defer backend.SetDownloading(false)
 
-	_, finishDownloadScope := backend.BeginDownloadCancellationScope()
-	defer finishDownloadScope()
-
-	if err := backend.CheckDownloadCancelled(); err != nil {
-		backend.SkipDownloadItem(itemID, "")
-		return DownloadResponse{
-			Success:   false,
-			Message:   "Download cancelled",
-			Error:     "Download cancelled",
-			ItemID:    itemID,
-			Cancelled: true,
-		}, nil
+	if downloadCtx.Err() != nil {
+		return downloadCancelledResult(itemID)
 	}
 
 	spotifyURL := ""
@@ -742,7 +1131,7 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 	}
 
 	if req.SpotifyID != "" && (req.Copyright == "" || req.Publisher == "" || req.Composer == "" || req.SpotifyTotalDiscs == 0 || req.ReleaseDate == "" || req.SpotifyTotalTracks == 0 || req.SpotifyTrackNumber == 0) {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(downloadCtx, 10*time.Second)
 		defer cancel()
 
 		trackURL := fmt.Sprintf("https://open.spotify.com/track/%s", req.SpotifyID)
@@ -804,18 +1193,15 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 		expectedFilename = strings.TrimSuffix(expectedFilename, filepath.Ext(expectedFilename)) + autoConvertExtension(req)
 		expectedPath := filepath.Join(req.OutputDir, expectedFilename)
 
-		if !backend.GetRedownloadWithSuffixSetting() {
-			if fileInfo, err := os.Stat(expectedPath); err == nil && fileInfo.Size() > 100*1024 {
-
-				backend.SkipDownloadItem(itemID, expectedPath)
-				return DownloadResponse{
-					Success:       true,
-					Message:       "File already exists",
-					File:          expectedPath,
-					AlreadyExists: true,
-					ItemID:        itemID,
-				}, nil
-			}
+		if !backend.GetRedownloadWithSuffixSetting() && backend.AcceptExistingMedia(expectedPath, req.Duration) {
+			backend.SkipDownloadItem(itemID, expectedPath)
+			return DownloadResponse{
+				Success:       true,
+				Message:       "File already exists",
+				File:          expectedPath,
+				AlreadyExists: true,
+				ItemID:        itemID,
+			}, nil
 		}
 	}
 
@@ -841,8 +1227,9 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 		}
 
 		if req.Service == "qobuz" {
+			isrcCtx := backend.ActiveDownloadContext()
 			go func() {
-				client := backend.NewSongLinkClient()
+				client := backend.NewSongLinkClientWithContext(isrcCtx)
 				isrc, err := client.GetISRCDirect(req.SpotifyID)
 				if err != nil {
 					fmt.Printf("Warning: failed to resolve ISRC for Qobuz: %v\n", err)
@@ -857,6 +1244,19 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 		close(isrcChan)
 	}
 
+	finalOutputDir := req.OutputDir
+	stagingDir, stagingErr := prepareDownloadStagingDir(finalOutputDir)
+	if stagingErr != nil {
+		errMsg := fmt.Sprintf("failed to prepare download directory: %v", stagingErr)
+		backend.FailDownloadItem(itemID, errMsg)
+		return DownloadResponse{Success: false, Error: errMsg, ItemID: itemID}, fmt.Errorf("%s", errMsg)
+	}
+	defer func() {
+		_ = os.RemoveAll(stagingDir)
+	}()
+	req.OutputDir = stagingDir
+
+	sourceStarted := time.Now()
 	switch req.Service {
 	case "amazon":
 
@@ -882,7 +1282,11 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 		isrc := strings.TrimSpace(req.ISRC)
 		if isrc == "" {
 			fmt.Println("Waiting for ISRC (Qobuz dependency)...")
-			isrc = <-isrcChan
+			select {
+			case isrc = <-isrcChan:
+			case <-downloadCtx.Done():
+				return downloadCancelledResult(itemID)
+			}
 		}
 		downloader := backend.NewQobuzDownloader()
 		if strings.HasPrefix(strings.TrimRight(strings.TrimSpace(req.QobuzAPIURL), "/"), "https://") {
@@ -930,40 +1334,23 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 		})
 
 	default:
+		errMsg := fmt.Sprintf("Unknown service: %s", req.Service)
+		backend.FailDownloadItem(itemID, errMsg)
 		return DownloadResponse{
 			Success: false,
-			Error:   fmt.Sprintf("Unknown service: %s", req.Service),
+			Error:   errMsg,
 		}, fmt.Errorf("unknown service: %s", req.Service)
 	}
 
 	if err != nil {
 		if backend.IsDownloadCancelledError(err) {
-			if filename != "" && !strings.HasPrefix(filename, "EXISTS:") {
-				if _, statErr := os.Stat(filename); statErr == nil {
-					os.Remove(filename)
-				}
-			}
-			backend.SkipDownloadItem(itemID, "")
-			return DownloadResponse{
-				Success:   false,
-				Message:   "Download cancelled",
-				Error:     "Download cancelled",
-				ItemID:    itemID,
-				Cancelled: true,
-			}, nil
+			removeNewDownloadArtifact(filename, stagingDir)
+			return downloadCancelledResult(itemID)
 		}
 
+		backend.RecordServiceDownload(req.Service, req.AudioFormat, time.Since(sourceStarted), false, err)
 		backend.FailDownloadItem(itemID, fmt.Sprintf("Download failed: %v", err))
-
-		if filename != "" && !strings.HasPrefix(filename, "EXISTS:") {
-
-			if _, statErr := os.Stat(filename); statErr == nil {
-				fmt.Printf("Removing corrupted/partial file after failed download: %s\n", filename)
-				if removeErr := os.Remove(filename); removeErr != nil {
-					fmt.Printf("Warning: Failed to remove corrupted file %s: %v\n", filename, removeErr)
-				}
-			}
-		}
+		removeNewDownloadArtifact(filename, stagingDir)
 
 		return DownloadResponse{
 			Success: false,
@@ -973,29 +1360,32 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 	}
 
 	alreadyExists := false
+	stagedAudioValidated := false
 	if strings.HasPrefix(filename, "EXISTS:") {
 		alreadyExists = true
 		filename = strings.TrimPrefix(filename, "EXISTS:")
+		stagedAudioValidated = true
+	}
+
+	if alreadyExists && !backend.AcceptExistingMedia(filename, req.Duration) {
+		fmt.Printf("Existing file failed audio validation and was left in place: %s\n", filename)
+		msg := "existing file failed audio validation"
+		backend.FailDownloadItem(itemID, msg)
+		return DownloadResponse{Success: false, Error: msg, ItemID: itemID}, errors.New(msg)
 	}
 
 	if !alreadyExists {
-		if err := backend.CheckDownloadCancelled(); err != nil {
-			cleanupInvalidDownloadArtifacts(filename)
-			backend.SkipDownloadItem(itemID, "")
-			return DownloadResponse{
-				Success:   false,
-				Message:   "Download cancelled",
-				Error:     "Download cancelled",
-				ItemID:    itemID,
-				Cancelled: true,
-			}, nil
+		if downloadCtx.Err() != nil {
+			removeNewDownloadArtifact(filename, stagingDir)
+			return downloadCancelledResult(itemID)
 		}
 	}
 
 	if !alreadyExists {
 		validated, validationErr := backend.ValidateDownloadedTrackDuration(filename, req.Duration)
 		if validationErr != nil {
-			cleanupInvalidDownloadArtifacts(filename)
+			backend.RecordServiceDownload(req.Service, req.AudioFormat, time.Since(sourceStarted), false, validationErr)
+			removeNewDownloadArtifact(filename, stagingDir)
 			errorMessage := validationErr.Error()
 			backend.FailDownloadItem(itemID, errorMessage)
 			return DownloadResponse{
@@ -1004,14 +1394,27 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 				ItemID:  itemID,
 			}, errors.New(errorMessage)
 		}
-		if !validated {
+		if validated {
+			stagedAudioValidated = true
+		} else {
 			fmt.Printf("[DownloadValidation] Skipped duration validation for %s (expected=%ds)\n", filename, req.Duration)
+			stagedAudioValidated = backend.AcceptExistingMedia(filename, 0)
 		}
 	}
 
+	if !alreadyExists {
+		backend.RecordServiceDownloadedFile(req.Service, req.AudioFormat, filename, time.Since(sourceStarted), stagedAudioValidated && req.Duration > 0)
+	}
 	if !alreadyExists && req.SpotifyID != "" && req.EmbedLyrics && (strings.HasSuffix(filename, ".flac") || strings.HasSuffix(filename, ".mp3") || strings.HasSuffix(filename, ".m4a")) {
 		fmt.Printf("\nWaiting for lyrics fetch to complete...\n")
-		lyrics := <-lyricsChan
+		var lyrics string
+		select {
+		case lyrics = <-lyricsChan:
+		case <-time.After(45 * time.Second):
+			fmt.Println("Lyrics fetch timed out; continuing without embedded lyrics")
+		case <-downloadCtx.Done():
+			fmt.Println("Lyrics fetch cancelled; continuing without embedded lyrics")
+		}
 		if lyrics != "" {
 			fmt.Printf("\n--- Full LRC Content ---\n")
 			fmt.Println(lyrics)
@@ -1073,6 +1476,22 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 			}
 		}
 	}
+	if err := backend.CheckDownloadCancelled(); err != nil {
+		return downloadCancelledResult(itemID)
+	}
+	keptExisting, publishErr := finalizeStagedDownload(stagingDir, finalOutputDir, stagedPublishOptions{
+		redownloadWithSuffix: backend.GetRedownloadWithSuffixSetting(),
+		expectedSeconds:      req.Duration,
+		stagedAudioValidated: stagedAudioValidated,
+	}, &filename, &originalFile, &convertedFile)
+	if publishErr != nil {
+		backend.FailDownloadItem(itemID, publishErr.Error())
+		return DownloadResponse{Success: false, Error: "Failed to publish downloaded file: " + publishErr.Error(), ItemID: itemID}, publishErr
+	}
+	if keptExisting {
+		alreadyExists = true
+	}
+	req.OutputDir = finalOutputDir
 	libraryRoot := strings.TrimSpace(req.LibraryRoot)
 	if libraryRoot == "" {
 		if persistedSettings == nil {
@@ -1122,54 +1541,7 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 			backend.CompleteDownloadItem(itemID, filename, 0)
 		}
 
-		historySource := req.Service
-
-		go func(fPath, track, artist, album, sID, cover, format, source string) {
-			time.Sleep(2 * time.Second)
-
-			quality := "Unknown"
-			durationStr := "0:00"
-
-			meta, err := backend.GetTrackMetadata(fPath)
-			if err == nil {
-				if meta.Bitrate > 0 {
-					quality = fmt.Sprintf("%dkbps/%.1fkHz", meta.Bitrate/1000, float64(meta.SampleRate)/1000.0)
-				} else if meta.SampleRate > 0 {
-					quality = fmt.Sprintf("%.1fkHz", float64(meta.SampleRate)/1000.0)
-				}
-				d := int(meta.Duration)
-				durationStr = fmt.Sprintf("%d:%02d", d/60, d%60)
-			} else {
-				fmt.Printf("[History] Failed to get metadata for %s: %v\n", fPath, err)
-			}
-
-			item := backend.HistoryItem{
-				SpotifyID:   sID,
-				Title:       track,
-				Artists:     artist,
-				Album:       album,
-				DurationStr: durationStr,
-				CoverURL:    cover,
-				Quality:     quality,
-				Path:        fPath,
-				Source:      source,
-			}
-
-			item.Format = strings.ToUpper(strings.TrimSpace(format))
-
-			if ext := filepath.Ext(fPath); len(ext) > 1 {
-				item.Format = strings.ToUpper(ext[1:])
-			}
-
-			switch item.Format {
-			case "6", "7", "27", "LOSSLESS", "HI_RES", "HI_RES_LOSSLESS":
-				item.Format = "FLAC"
-			case "ALAC", "APPLE", "ATMOS", "M4A-AAC", "M4A-ALAC":
-				item.Format = "M4A"
-			}
-
-			backend.AddHistoryItem(item, "Auralis")
-		}(filename, req.TrackName, req.ArtistName, req.AlbumName, req.SpotifyID, req.CoverURL, req.AudioFormat, historySource)
+		recordDownloadHistory(filename, req, req.Service)
 	}
 
 	return DownloadResponse{
@@ -1304,7 +1676,7 @@ func (a *App) ClearAllDownloads() {
 
 func (a *App) AddToDownloadQueue(spotifyID, trackName, artistName, albumName string) string {
 	itemID := fmt.Sprintf("%s-%d", spotifyID, time.Now().UnixNano())
-	backend.AddToQueue(itemID, trackName, artistName, albumName, "")
+	backend.AddToQueue(itemID, trackName, artistName, albumName, spotifyID)
 	return itemID
 }
 
@@ -1389,7 +1761,7 @@ func (a *App) ExportFailedDownloads() (string, error) {
 }
 
 func (a *App) CheckAPIStatus(apiType string, apiURL string) bool {
-	isOnline, err := runWithTimeout(checkOperationTimeout, func() (bool, error) {
+	isOnline, err := runWithTimeout(checkOperationTimeout, func(context.Context) (bool, error) {
 		switch apiType {
 		case "tidal":
 			return checkGroupedAPIStatus("tidal", buildTidalStatusCheckURLs(apiURL)), nil
@@ -1427,7 +1799,7 @@ func (a *App) CheckAPIStatus(apiType string, apiURL string) bool {
 }
 
 func (a *App) CheckAPIStatusReport(apiType string, apiURL string) APIStatusReport {
-	report, err := runWithTimeout(checkOperationTimeout, func() (APIStatusReport, error) {
+	report, err := runWithTimeout(checkOperationTimeout, func(context.Context) (APIStatusReport, error) {
 		switch apiType {
 		case "tidal":
 			return buildGroupedAPIStatusReport("tidal", buildTidalStatusCheckURLs(apiURL), false), nil
@@ -1522,7 +1894,7 @@ func (a *App) FetchSpotiFLACStatusPayload(kind string) (map[string]string, error
 		return nil, fmt.Errorf("unknown SpotiFLAC status payload: %s", kind)
 	}
 
-	return runWithTimeout(checkOperationTimeout, func() (map[string]string, error) {
+	return runWithTimeout(checkOperationTimeout, func(context.Context) (map[string]string, error) {
 		return fetchSpotiFLACStatusPayload(statusURL)
 	})
 }
@@ -2245,8 +2617,8 @@ func (a *App) CheckTrackAvailability(spotifyTrackID string) (string, error) {
 		return "", fmt.Errorf("spotify track ID is required")
 	}
 
-	return runWithTimeout(checkOperationTimeout, func() (string, error) {
-		client := backend.NewSongLinkClient()
+	return runWithTimeout(checkOperationTimeout, func(ctx context.Context) (string, error) {
+		client := backend.NewSongLinkClientWithContext(ctx)
 		availability, err := client.CheckTrackAvailability(spotifyTrackID)
 		if err != nil {
 			return "", err
@@ -2656,6 +3028,9 @@ type CheckFileExistenceRequest struct {
 	IncludeTrackNumber  bool   `json:"include_track_number,omitempty"`
 	AudioFormat         string `json:"audio_format,omitempty"`
 	RelativePath        string `json:"relative_path,omitempty"`
+	// Duration is the expected length in seconds. Zero means the caller did
+	// not send one; the file must still be readable audio before it counts.
+	Duration int `json:"duration,omitempty"`
 }
 
 type CheckFileExistenceResult struct {
@@ -2763,10 +3138,10 @@ func buildExistenceFilenameCandidates(t CheckFileExistenceRequest, defaultFilena
 	return filenames
 }
 
-func findExpectedFileInTargetDirectory(targetDir string, filenames []string) (string, bool) {
+func findExpectedFileInTargetDirectory(targetDir string, filenames []string, expectedSeconds int) (string, bool) {
 	for _, filename := range filenames {
 		path := filepath.Join(targetDir, filename)
-		if fileInfo, err := os.Stat(path); err == nil && !fileInfo.IsDir() && fileInfo.Size() > 100*1024 {
+		if backend.AcceptExistingMedia(path, expectedSeconds) {
 			return path, true
 		}
 	}
@@ -2829,7 +3204,7 @@ func (a *App) CheckFilesExistence(outputDir string, rootDir string, tracks []Che
 				})
 				if lookupErr != nil {
 					fmt.Printf("Warning: library index Spotify ID lookup failed: %v\n", lookupErr)
-				} else if exists {
+				} else if exists && backend.AcceptExistingMedia(path, t.Duration) {
 					res.Exists = true
 					res.FilePath = path
 					resultsChan <- result{index: idx, result: res}
@@ -2857,13 +3232,13 @@ func (a *App) CheckFilesExistence(outputDir string, rootDir string, tracks []Che
 			})
 			if lookupErr != nil {
 				fmt.Printf("Warning: library index lookup failed: %v\n", lookupErr)
-			} else if exists {
+			} else if exists && backend.AcceptExistingMedia(path, t.Duration) {
 				res.Exists = true
 				res.FilePath = path
 			}
 			filenameFallbackAllowed := existingFileCheckMode == "filename" || existingFileCheckMode == "hybrid" || (existingFileCheckMode == "isrc" && isrc == "")
 			if !res.Exists && filenameFallbackAllowed {
-				if path, exists := findExpectedFileInTargetDirectory(targetDir, filenames); exists {
+				if path, exists := findExpectedFileInTargetDirectory(targetDir, filenames, t.Duration); exists {
 					res.Exists = true
 					res.FilePath = path
 					if indexErr := backend.RegisterLibraryFile(scanRoot, path, t.SpotifyID, isrc); indexErr != nil {
@@ -2899,11 +3274,7 @@ func (a *App) GetPreviewURL(trackID string) (string, error) {
 }
 
 func (a *App) GetConfigPath() (string, error) {
-	dir, err := backend.GetFFmpegDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "config.json"), nil
+	return backend.GetConfigPath()
 }
 
 func (a *App) GetFontsPath() (string, error) {
@@ -2915,25 +3286,7 @@ func (a *App) GetFontsPath() (string, error) {
 }
 
 func (a *App) SaveSettings(settings map[string]interface{}) error {
-	configPath, err := a.GetConfigPath()
-	if err != nil {
-		return err
-	}
-	settings = backend.SanitizeSettingsMap(settings)
-
-	dir := filepath.Dir(configPath)
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return err
-		}
-	}
-
-	data, err := backend.MarshalConfigSettings(settings)
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(configPath, data, 0644)
+	return backend.SaveConfigSettings(settings)
 }
 
 func (a *App) SaveFonts(fonts []map[string]interface{}) error {
@@ -2958,32 +3311,7 @@ func (a *App) SaveFonts(fonts []map[string]interface{}) error {
 }
 
 func (a *App) LoadSettings() (map[string]interface{}, error) {
-	configPath, err := a.GetConfigPath()
-	if err != nil {
-		return nil, err
-	}
-
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		return nil, nil
-	}
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, err
-	}
-
-	var settings map[string]interface{}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return nil, err
-	}
-
-	settings = backend.SanitizeSettingsMap(backend.FlattenConfigSettings(settings))
-
-	if err := a.SaveSettings(settings); err != nil {
-		return nil, err
-	}
-
-	return settings, nil
+	return backend.LoadConfigSettings()
 }
 
 func (a *App) LoadFonts() ([]map[string]interface{}, error) {

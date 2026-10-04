@@ -41,7 +41,7 @@ No success-green, no warning-amber surfaces anywhere.
 - Data (ISRC, times, counts, versions, log): `"Cascadia Mono", ui-monospace`.
 - Scale: page titles `text-lg/semibold`; section heads small-caps `text-sm/semibold`
   over a hairline; row titles `text-[13px]/medium`; meta `text-xs` muted.
-- No hero type. Nothing larger than `text-lg` outside numeric tool readouts (`text-2xl`).
+- No hero type. Nothing larger than `text-lg`.
 
 ## Shape & line
 
@@ -67,7 +67,7 @@ Icons are 14–16px, muted by default, never animated in loops.
 ## Shell — the omnibar titlebar
 
 ```
-[ ▪ Auralis ] [← →] [ paste-or-search omnibar ……… ] [ Library Queueⁿ History Tools Settings ] [⋯] [ _ □ × ]
+[ ▪ Auralis ] [← →] [ paste-or-search omnibar ……… ] [ Library Queueⁿ History Settings ] [⋯] [ _ □ × ]
 ```
 
 - One fixed 44px bar; the whole bar drags, controls opt out (`--wails-draggable`).
@@ -79,8 +79,8 @@ Icons are 14–16px, muted by default, never animated in loops.
 - A quiet `⋯` overflow holds version, Debug logs, issue-report dialog, website.
 - Window controls are recognizable Windows affordances (min/max/close), close hovers
   destructive.
-- Volume and IP/network left the titlebar: preview volume lives in Settings behavior,
-  network status in Settings → Status; no flag-and-eye menubar.
+- Volume and IP/network left the titlebar: preview volume lives in Settings behavior.
+  There is no flag-and-eye menubar and no source-status panel.
 - Minimum window 1280×800 (min 1200×720) so the desk split never collapses.
 
 ## Library page — catalog + inspector
@@ -111,10 +111,9 @@ lists (# · thumb 28px · title (+Explicit, status word) · album · dur · play
   keep their sub-track sheets.
 - **History:** Downloads/Fetches as text filters; same ruled table grammar; format and
   timestamps in mono.
-- **Tools:** grouped rows — title, one-line description, chevron. Group filters are
-  words. No saturated tiles, no emerald/violet/rose blocks.
 - **Settings:** stacked sections with hairline headings (General · Download path ·
-  Download source · Custom instances · Naming · File management · Metadata · Status).
+  Download source · Custom instances · Naming · File management · Metadata).
+  No Tools destination, and no source-status section.
   No tab strip, no base/accent color dots, no Google-fonts menu. Theme control is the
   single light/auto/dark mode select. Stored legacy `theme`/`baseColor`/`fontFamily`
   values are ignored at apply time; first run defaults to **light**.
@@ -148,8 +147,8 @@ code path that paints theme variables onto `:root` anymore.
 | 130px recent-fetch cards, type chips, red X | ruled recents list via `CatalogRow`, text Remove |
 | 192px cover hero, huge titles, red E | 120px sharp inspector cover, `text-lg` names, spelled Explicit |
 | Bordered table, 40px thumbs | ruled rows, 28px thumbs, status words |
-| Volume/IP menubar in titlebar | removed; network in Settings → Status |
-| Colored tool tiles | grouped rows |
+| Volume/IP menubar in titlebar | removed; no source-status panel |
+| Colored tool tiles | removed; no Tools destination |
 | Flush settings tab strip | stacked hairline sections |
 | Scroll-top FAB | killed |
 | Teal rounded waveform mark | ruled-stamp mark, Prussian on paper |

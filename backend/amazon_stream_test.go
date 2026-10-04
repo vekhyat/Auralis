@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/http"
 	"testing"
-	"time"
 )
 
 func TestIsTransientAmazonStreamError(t *testing.T) {
@@ -29,7 +29,11 @@ func TestIsTransientAmazonStreamError(t *testing.T) {
 
 func TestAmazonStreamClientTimeout(t *testing.T) {
 	client := amazonStreamHTTPClient()
-	if client.Timeout != 5*time.Minute {
-		t.Fatalf("stream timeout = %s, want 5m", client.Timeout)
+	if client.Timeout != mediaDownloadTimeout {
+		t.Fatalf("stream timeout = %s, want %s", client.Timeout, mediaDownloadTimeout)
+	}
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok || transport.ResponseHeaderTimeout != mediaHeaderTimeout {
+		t.Fatal("stream client should give up on response headers instead of hanging")
 	}
 }

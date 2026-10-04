@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
-	"io"
 	"net/http"
 	"regexp"
 	"strings"
@@ -21,7 +20,7 @@ func (s *SongLinkClient) populateLinksFromSongstats(links *resolvedTrackLinks, i
 	}
 	req.Header.Set("User-Agent", songLinkUserAgent)
 
-	resp, err := s.client.Do(req)
+	resp, err := s.client.Do(req.WithContext(s.operationContext()))
 	if err != nil {
 		return fmt.Errorf("failed to fetch Songstats page: %w", err)
 	}
@@ -31,7 +30,7 @@ func (s *SongLinkClient) populateLinksFromSongstats(links *resolvedTrackLinks, i
 		return fmt.Errorf("Songstats returned status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readBoundedBody(resp.Body, 8<<20)
 	if err != nil {
 		return fmt.Errorf("failed to read Songstats response: %w", err)
 	}

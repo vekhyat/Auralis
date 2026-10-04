@@ -23,7 +23,7 @@ type RecentFetchItem struct {
 
 var (
 	recentFetchesMu          sync.Mutex
-	recentFetchesDirResolver = GetFFmpegDir
+	recentFetchesDirResolver = EnsureAppDataDir
 )
 
 func recentFetchesFilePath() (string, error) {
@@ -88,5 +88,5 @@ func SaveRecentFetches(items []RecentFetchItem) error {
 		return err
 	}
 
-	return os.WriteFile(filePath, data, 0o644)
+	return WriteFileAtomic(filePath, data, 0o644)
 }

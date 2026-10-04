@@ -3,7 +3,6 @@ package backend
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -11,6 +10,10 @@ import (
 )
 
 func downloadDeezerTrack(p ExtraDownloadParams, destPath string) (string, string, error) {
+	return downloadExtraCommunitySources(p, destPath, "deezer", downloadDeezerTrackNative)
+}
+
+func downloadDeezerTrackNative(p ExtraDownloadParams, destPath string) (string, string, error) {
 	trackID := ""
 	sourceURL := p.ServiceURL
 	if sourceURL != "" {
@@ -48,20 +51,44 @@ func downloadDeezerTrack(p ExtraDownloadParams, destPath string) (string, string
 		return path, sourceURL, streamErr
 	}
 
-	resp, err := antraMirrorGet("deezer", "/api/stream/"+url.PathEscape(trackID), nil, 4*time.Minute)
-	if err != nil {
-		return "", sourceURL, err
+	var encrypted []byte
+	var lastErr error
+	for attempt := 1; attempt <= downloadRetryLimit; attempt++ {
+		if attempt > 1 {
+			fmt.Printf("Deezer stream stalled, retrying (%d/%d): %v\n", attempt, downloadRetryLimit, lastErr)
+			if sleepErr := SleepWithDownloadContext(time.Duration(attempt-1) * time.Second); sleepErr != nil {
+				return "", sourceURL, sleepErr
+			}
+		}
+		resp, err := antraMirrorGet("deezer", "/api/stream/"+url.PathEscape(trackID), nil, 4*time.Minute)
+		if err != nil {
+			lastErr = err
+			if IsDownloadCancelledError(err) || !retryableDownloadError(err) {
+				return "", sourceURL, err
+			}
+			continue
+		}
+		if resp.StatusCode != 200 {
+			resp.Body.Close()
+			return "", sourceURL, fmt.Errorf("deezer stream HTTP %d", resp.StatusCode)
+		}
+		var buf bytes.Buffer
+		pw := NewProgressWriter(&buf)
+		_, err = copyDownloadBodyLimit(pw, resp.Body, 200<<20)
+		if err != nil {
+			lastErr = err
+			if IsDownloadCancelledError(err) || !retryableDownloadError(err) || attempt == downloadRetryLimit {
+				return "", sourceURL, WrapDownloadCancelled(err)
+			}
+			continue
+		}
+		encrypted = buf.Bytes()
+		lastErr = nil
+		break
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return "", sourceURL, fmt.Errorf("deezer stream HTTP %d", resp.StatusCode)
+	if lastErr != nil {
+		return "", sourceURL, lastErr
 	}
-	var buf bytes.Buffer
-	pw := NewProgressWriter(&buf)
-	if _, err := io.Copy(pw, io.LimitReader(resp.Body, 200<<20)); err != nil {
-		return "", sourceURL, WrapDownloadCancelled(err)
-	}
-	encrypted := buf.Bytes()
 	decrypted, err := decryptDeezerStream(encrypted, key)
 	if err != nil {
 		return "", sourceURL, err
