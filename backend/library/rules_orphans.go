@@ -40,10 +40,14 @@ var orphanRule = Rule{
 		}
 
 		for _, stray := range scan.StrayFiles {
+			albumDir := path.Dir(stray)
+			if albumDir == "." {
+				albumDir = ""
+			}
 			issues = append(issues, Issue{
 				RuleID:   "ORPHAN",
 				Path:     filepath.Join(scan.Root, filepath.FromSlash(stray)),
-				AlbumDir: path.Dir(stray),
+				AlbumDir: albumDir,
 				Message:  "stray artwork/lyrics file with no audio in the folder",
 				Fixable:  false,
 			})

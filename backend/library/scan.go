@@ -100,15 +100,17 @@ func ScanLibrary(ctx context.Context, root string, progress func(ScanProgress)) 
 		if audioExtensions[ext] {
 			audioPaths = append(audioPaths, path)
 			if rel, err := filepath.Rel(root, filepath.Dir(path)); err == nil {
-				audioDirs[filepath.ToSlash(rel)] = true
+				d := filepath.ToSlash(rel)
+				if d == "." {
+					d = ""
+				}
+				audioDirs[d] = true
 			}
 			return nil
 		}
 		if ext == ".jpg" || ext == ".jpeg" || ext == ".lrc" {
-			dir := filepath.Dir(path)
-			if rel, err := filepath.Rel(root, dir); err == nil {
-				scan.StrayFiles = append(scan.StrayFiles, filepath.ToSlash(rel)+"/"+filepath.Base(path))
-				_ = dir
+			if rel, err := filepath.Rel(root, path); err == nil {
+				scan.StrayFiles = append(scan.StrayFiles, filepath.ToSlash(rel))
 			}
 		}
 		return nil
