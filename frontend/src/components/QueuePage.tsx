@@ -1,29 +1,15 @@
 import { t } from "@/i18n";
 import { Fragment, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Search, Filter, Trash2, Play, Pause, StopCircle, RotateCcw, CircleCheckBig, XCircle, Music2, ListOrdered, Eraser } from "lucide-react";
-import { isMixedQueueRun, isProtectedQueueStatus } from "@/lib/queue-guards";
+import { Trash2, RotateCcw, CircleCheckBig, XCircle, Music2, ListOrdered } from "lucide-react";
+import { isProtectedQueueStatus } from "@/lib/queue-guards";
 import { canRetryQueuePersistence, queuePersistenceNotice } from "@/lib/queue-persistence";
-import { clearFinishedQueueItems, clearQueue, getQueuePersistenceState, removeQueueItem, removeTrackFromQueueItem, retryQueueItem, retryQueuePersistence, subscribeQueuePersistence, type QueueItem, type QueueItemType, type QueuePersistenceState } from "@/lib/queue";
+import { getQueuePersistenceState, removeQueueItem, removeTrackFromQueueItem, retryQueueItem, retryQueuePersistence, subscribeQueuePersistence, type QueueItem, type QueueItemType, type QueuePersistenceState } from "@/lib/queue";
 import type { TrackMetadata } from "@/types/api";
-const TABS: Array<{
-    value: QueueItemType | "all";
-    label: string;
-}> = [
-    { value: "all", label: "translation.queue.all" },
-    { value: "track", label: "translation.common.tracks" },
-    { value: "album", label: "translation.common.albums" },
-    { value: "playlist", label: "translation.common.playlists" },
-    { value: "artist", label: "translation.common.artists" },
-];
 const ITEMS_PER_PAGE = 50;
-type StatusFilter = "all" | "pending" | "running" | "paused" | "done" | "partial" | "skipped" | "failed";
 interface QueuePageProps {
     items: QueueItem[];
     isSuspended?: boolean;
@@ -74,12 +60,8 @@ function getPaginationPages(current: number, total: number): (number | "ellipsis
     }
     return pages;
 }
-export function QueuePage({ isSuspended = false, onOpenLibrary, onOpenFolder, items, isProcessing, isPausing, processingType, downloadedTracks, failedTracks, skippedTracks, downloadingTracks, onStart, onPause, onStop, isDirectDownloading = false, onStopDirect }: QueuePageProps) {
-    const [activeTab, setActiveTab] = useState<QueueItemType | "all">("all");
-    const [searchQuery, setSearchQuery] = useState("");
-    const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+export function QueuePage({ isSuspended = false, onOpenLibrary, onOpenFolder: _onOpenFolder, items, isProcessing: _isProcessing, isPausing, processingType: _processingType, downloadedTracks, failedTracks, skippedTracks, downloadingTracks, onStart: _onStart, onPause: _onPause, onStop: _onStop, isDirectDownloading: _isDirectDownloading, onStopDirect: _onStopDirect }: QueuePageProps) {
     const [currentPage, setCurrentPage] = useState(1);
-    const [showClearConfirm, setShowClearConfirm] = useState(false);
     const [expandedIds, setExpandedIds] = useState<string[]>([]);
     const [persistence, setPersistence] = useState<QueuePersistenceState>(() => getQueuePersistenceState());
     useEffect(() => subscribeQueuePersistence(setPersistence), []);
@@ -105,7 +87,7 @@ export function QueuePage({ isSuspended = false, onOpenLibrary, onOpenFolder, it
             case "downloading":
                 return <Spinner className="size-3.5"/>;
             case "skipped":
-                return <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{t("translation.queue.skipped")}</span>;
+                return <span className="text-xs text-muted-foreground">{t("translation.queue.skipped")}</span>;
             case "done":
                 return <CircleCheckBig className="size-3.5"/>;
             case "failed":
@@ -126,44 +108,12 @@ export function QueuePage({ isSuspended = false, onOpenLibrary, onOpenFolder, it
         }
         return { done, failed };
     };
-    const tabItems = activeTab === "all" ? items : items.filter((item) => item.type === activeTab);
-    const statusMatches = (item: QueueItem) => {
-        if (statusFilter === "all")
-            return true;
-        if (statusFilter === "failed")
-            return item.status === "failed" || item.status === "partial" || Object.values(item.trackResults || {}).includes("failed");
-        if (statusFilter === "skipped")
-            return item.status === "skipped" || Object.values(item.trackResults || {}).includes("skipped");
-        return item.status === statusFilter;
-    };
-    const statusItems = tabItems.filter(statusMatches);
-    const filteredItems = searchQuery
-        ? statusItems.filter((item) => {
-            const query = searchQuery.toLowerCase();
-            return (item.name.toLowerCase().includes(query) ||
-                item.artist.toLowerCase().includes(query) ||
-                item.info.toLowerCase().includes(query));
-        })
-        : statusItems;
-    const pendingCount = items.filter((item) => item.status === "pending").length;
-    const runnableCount = pendingCount + items.filter((item) => item.status === "paused").length;
-    const finishedCount = tabItems.filter((item) => ["done", "partial", "skipped", "failed"].includes(item.status)).length;
-    const removableCount = tabItems.filter((item) => !isProtectedQueueStatus(item.status)).length;
-    const mixedRun = isMixedQueueRun(isProcessing, processingType);
+    const filteredItems = items;
     const persistenceNotice = queuePersistenceNotice(persistence);
     const totalPages = Math.max(1, Math.ceil(filteredItems.length / ITEMS_PER_PAGE));
     const page = Math.min(currentPage, totalPages);
     const startIndex = (page - 1) * ITEMS_PER_PAGE;
     const paginated = filteredItems.slice(startIndex, startIndex + ITEMS_PER_PAGE);
-    const handleTabChange = (value: QueueItemType | "all") => {
-        setActiveTab(value);
-        setCurrentPage(1);
-    };
-
-    const handleClearTab = () => {
-        clearQueue(activeTab === "all" ? undefined : activeTab);
-        setShowClearConfirm(false);
-    };
     const renderStatus = (item: QueueItem) => {
         if (item.status === "running") {
             return (<div className="flex items-center justify-center gap-1.5 text-xs font-medium text-primary">
@@ -171,20 +121,20 @@ export function QueuePage({ isSuspended = false, onOpenLibrary, onOpenFolder, it
                     {isPausing ? t("translation.queue.pausing") : t("translation.queue.running")}</div>);
         }
         if (item.status === "paused") {
-            return (<span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{t("translation.queue.paused")}</span>);
+            return (<span className="text-xs text-muted-foreground">{t("translation.queue.paused")}</span>);
         }
         if (item.status === "done") {
-            return (<span className="font-mono text-[10px] uppercase tracking-wider">{t("translation.queue.done")}</span>);
+            return (<span className="text-xs">{t("translation.queue.done")}</span>);
         }
         if (item.status === "partial")
-            return (<span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{t("translation.queue.partial")}</span>);
+            return (<span className="text-xs text-muted-foreground">{t("translation.queue.partial")}</span>);
         if (item.status === "skipped")
-            return (<span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{t("translation.queue.skipped")}</span>);
+            return (<span className="text-xs text-muted-foreground">{t("translation.queue.skipped")}</span>);
         if (item.status === "failed") {
             return (<TooltipProvider>
                     <Tooltip delayDuration={0}>
                         <TooltipTrigger asChild>
-                            <span className="font-mono text-[10px] uppercase tracking-wider text-destructive">
+                            <span className="text-xs text-destructive">
                                 {t("translation.queue.failed")}</span>
                         </TooltipTrigger>
                         <TooltipContent>
@@ -193,33 +143,12 @@ export function QueuePage({ isSuspended = false, onOpenLibrary, onOpenFolder, it
                     </Tooltip>
                 </TooltipProvider>);
         }
-        return (<span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{t("translation.queue.pending")}</span>);
+        return (<span className="text-xs text-muted-foreground">{t("translation.queue.pending")}</span>);
     };
     return (<div className="space-y-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-                <div><h1 className="text-3xl font-semibold tracking-tight">{t("translation.downloads.title")}</h1><p className="mt-2 text-sm text-muted-foreground">{t(isSuspended ? "translation.downloads.pausedHint" : "translation.downloads.autoHint")}</p></div>
-                <div className="flex items-center gap-2">
-                    {isProcessing ? (<>
-                        {mixedRun && (<span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{t("translation.queue.all")}</span>)}
-                        <Button variant="outline" onClick={() => onPause()} disabled={isPausing} className="cursor-pointer gap-2">
-                            <Pause className="h-4 w-4"/>
-                            {isPausing ? t("translation.queue.pausing") : t("translation.queue.pauseAll")}
-                        </Button>
-                        <Button variant="destructive" onClick={() => onStop()} className="cursor-pointer gap-2">
-                            <StopCircle className="h-4 w-4"/>
-                            {t("translation.downloads.cancelCurrent")}
-                        </Button>
-                    </>) : isDirectDownloading ? (<>
-                        <Button variant="destructive" onClick={() => onStopDirect?.()} className="cursor-pointer gap-2">
-                            <StopCircle className="h-4 w-4"/>
-                            {t("translation.common.stop")}
-                        </Button>
-                    </>) : runnableCount > 0 ? (<Button onClick={() => onStart()} disabled={runnableCount === 0} className="cursor-pointer gap-2">
-                            <Play className="h-4 w-4"/>
-                            {t("translation.queue.resumeAll")}
-                        </Button>) : null}
-                    {onOpenFolder && <Button variant="outline" onClick={onOpenFolder}>{t("translation.common.openFolder")}</Button>}
-                </div>
+            <div>
+                <h1 className="text-3xl font-semibold tracking-tight">{t("translation.downloads.title")}</h1>
+                <p className="mt-2 text-sm text-muted-foreground">{t(isSuspended ? "translation.downloads.pausedHint" : "translation.downloads.autoHint")}</p>
             </div>
             {persistenceNotice !== "quiet" && (<div className="flex flex-wrap items-center justify-between gap-2 border border-border px-3 py-2">
                     <p className="text-sm">
@@ -236,49 +165,6 @@ export function QueuePage({ isSuspended = false, onOpenLibrary, onOpenFolder, it
                             {t("translation.queue.retry")}
                         </Button>)}
                 </div>)}
-
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border pb-2">
-                {TABS.map((tab) => {
-            const count = tab.value === "all" ? items.length : items.filter((item) => item.type === tab.value).length;
-            return (<button key={tab.value} type="button" onClick={() => handleTabChange(tab.value)} className={`cursor-pointer text-[13px] transition-colors ${activeTab === tab.value ? "font-semibold text-primary underline decoration-primary underline-offset-[6px]" : "text-muted-foreground hover:text-foreground"}`}>
-                            {t(tab.label)}
-                            {count > 0 && (<span className="ml-1 font-mono text-[11px] tabular-nums opacity-75">{count.toLocaleString("en-US")}</span>)}
-                        </button>);
-        })}
-            </div>
-
-            <div className="flex items-center gap-2">
-                <div className="relative flex-1">
-                    <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground"/>
-                    <Input placeholder={t("translation.queue.searchQueue")} value={searchQuery} onChange={(e) => {
-            setSearchQuery(e.target.value);
-            setCurrentPage(1);
-        }} className="pl-8 h-9"/>
-                </div>
-                <Select value={statusFilter} onValueChange={(value) => { setStatusFilter(value as StatusFilter); setCurrentPage(1); }}>
-                    <SelectTrigger className="h-9 min-w-36">
-                        <Filter className="h-4 w-4 text-muted-foreground"/>
-                        <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent align="end">
-                        <SelectItem value="all">{t("translation.queue.allStatuses")}</SelectItem>
-                        <SelectItem value="pending">{t("translation.queue.pending")}</SelectItem>
-                        <SelectItem value="running">{t("translation.queue.running")}</SelectItem>
-                        <SelectItem value="paused">{t("translation.queue.paused")}</SelectItem>
-                        <SelectItem value="done">{t("translation.queue.done")}</SelectItem>
-                        <SelectItem value="partial">{t("translation.queue.partial")}</SelectItem>
-                        <SelectItem value="skipped">{t("translation.queue.skipped")}</SelectItem>
-                        <SelectItem value="failed">{t("translation.queue.failed")}</SelectItem>
-                    </SelectContent>
-                </Select>
-                <Button variant="outline" onClick={() => clearFinishedQueueItems(activeTab === "all" ? undefined : activeTab)} disabled={finishedCount === 0} className="cursor-pointer gap-2">
-                    <Eraser className="h-4 w-4"/>
-                    {t("translation.queue.clearFinished")}</Button>
-                <Button variant="destructive" onClick={() => setShowClearConfirm(true)} disabled={removableCount === 0} className="cursor-pointer gap-2">
-                    <Trash2 className="h-4 w-4"/>
-                    {t("translation.common.clearAll")}</Button>
-
-            </div>
 
             <div>
                 {paginated.length === 0 ? (<div className="flex flex-col items-center justify-center gap-3 p-16 text-center text-muted-foreground">
@@ -324,7 +210,7 @@ export function QueuePage({ isSuspended = false, onOpenLibrary, onOpenFolder, it
                                         </div>
                                     </td>
                                     <td className="hidden p-3 align-middle text-sm text-muted-foreground md:table-cell">
-                                        <div className="truncate">{item.info}</div>
+                                        <div className="truncate">{item.type === "track" ? item.info : ""}</div>
                                     </td>
                                     <td className="hidden p-3 text-center align-middle font-mono text-xs tabular-nums text-muted-foreground lg:table-cell">
                                         <div className="flex flex-col items-center">
@@ -346,7 +232,7 @@ export function QueuePage({ isSuspended = false, onOpenLibrary, onOpenFolder, it
                                             {(item.status === "failed" || item.status === "partial") && (<TooltipProvider>
                                                 <Tooltip delayDuration={0}>
                                                     <TooltipTrigger asChild>
-                                                        <Button variant="ghost" size="icon" className="cursor-pointer" onClick={() => retryQueueItem(item.id)}>
+                                                        <Button variant="ghost" size="icon" className="cursor-pointer" aria-label={t("translation.queue.retry")} onClick={() => retryQueueItem(item.id)}>
                                                             <RotateCcw className="h-4 w-4"/>
                                                         </Button>
                                                     </TooltipTrigger>
@@ -358,7 +244,7 @@ export function QueuePage({ isSuspended = false, onOpenLibrary, onOpenFolder, it
                                             <TooltipProvider>
                                                 <Tooltip delayDuration={0}>
                                                     <TooltipTrigger asChild>
-                                                        <Button variant="ghost" size="icon" className="cursor-pointer text-destructive hover:text-destructive" onClick={() => {
+                                                        <Button variant="ghost" size="icon" className="cursor-pointer text-destructive hover:text-destructive" aria-label={t("translation.downloads.cancelRequest")} onClick={() => {
                     if (!isProtectedQueueStatus(item.status))
                         removeQueueItem(item.id);
                 }} disabled={isProtectedQueueStatus(item.status)}>
@@ -366,7 +252,7 @@ export function QueuePage({ isSuspended = false, onOpenLibrary, onOpenFolder, it
                                                         </Button>
                                                     </TooltipTrigger>
                                                     <TooltipContent>
-                                                        <p>{t("translation.queue.removeFromQueue")}</p>
+                                                        <p>{t("translation.downloads.cancelRequest")}</p>
                                                     </TooltipContent>
                                                 </Tooltip>
                                             </TooltipProvider>
@@ -418,7 +304,7 @@ export function QueuePage({ isSuspended = false, onOpenLibrary, onOpenFolder, it
                                         <TooltipProvider>
                                             <Tooltip delayDuration={0}>
                                                 <TooltipTrigger asChild>
-                                                    <Button variant="ghost" size="icon" className="cursor-pointer text-destructive hover:text-destructive" onClick={() => {
+                                                    <Button variant="ghost" size="icon" className="cursor-pointer text-destructive hover:text-destructive" aria-label={t("translation.downloads.cancelRequest")} onClick={() => {
                         if (!isProtectedQueueStatus(item.status))
                             removeTrackFromQueueItem(item.id, trackIndex);
                     }} disabled={isProtectedQueueStatus(item.status)}>
@@ -426,7 +312,7 @@ export function QueuePage({ isSuspended = false, onOpenLibrary, onOpenFolder, it
                                                     </Button>
                                                 </TooltipTrigger>
                                                 <TooltipContent>
-                                                    <p>{t("translation.queue.removeFromQueue")}</p>
+                                                    <p>{t("translation.downloads.cancelRequest")}</p>
                                                 </TooltipContent>
                                             </Tooltip>
                                         </TooltipProvider>
@@ -471,20 +357,5 @@ export function QueuePage({ isSuspended = false, onOpenLibrary, onOpenFolder, it
                         </PaginationItem>
                     </PaginationContent>
                 </Pagination>)}
-
-            <Dialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>
-                <DialogContent className="max-w-md [&>button]:hidden">
-                    <DialogHeader>
-                        <DialogTitle>{t("translation.queue.clearQueue")}</DialogTitle>
-                        <DialogDescription>
-                            {t("translation.queue.willRemoveAllQueued")}</DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setShowClearConfirm(false)} className="cursor-pointer">{t("translation.common.cancel")}</Button>
-                        <Button variant="destructive" onClick={handleClearTab} className="cursor-pointer">
-                            {t("translation.common.clearAll")}</Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
         </div>);
 }

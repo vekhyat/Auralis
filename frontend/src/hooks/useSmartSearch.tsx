@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     MAX_RECENT_SEARCHES,
     RECENT_SEARCHES_KEY,
@@ -19,9 +19,10 @@ interface UseSmartSearchOptions {
 }
 
 /**
- * Smart omnibar state machine: link classification, debounced catalog
- * search, per-tab sorting/filtering and recent queries. Resets happen in
- * input events; the effect only schedules the network call.
+ * Smart omnibar state machine: link classification, catalog search,
+ * per-tab sorting/filtering and recent queries. Resets happen in input
+ * events. Typing debounces the network call; Enter on search text runs
+ * that same search immediately.
  */
 export function useSmartSearch({ url, onUrlChange, onFetch, onFetchUrl }: UseSmartSearchOptions): SmartSearchController {
     const [searchResults, setSearchResults] = useState<backend.SearchResponse | null>(null);
@@ -43,6 +44,7 @@ export function useSmartSearch({ url, onUrlChange, onFetch, onFetchUrl }: UseSma
     const [invalidUrl, setInvalidUrl] = useState("");
     const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const searchRequestRef = useRef(0);
+    const inFlightSearchRef = useRef<{ query: string; requestId: number } | null>(null);
     const loadingMoreRef = useRef(false);
     const nextDialogPromptedRef = useRef(false);
     const inputKind = classifySmartInput(url);
@@ -50,7 +52,7 @@ export function useSmartSearch({ url, onUrlChange, onFetch, onFetchUrl }: UseSma
     // Derived: a query is "searching" until its results have settled.
     const isSearching = isSearchInput && url.trim() !== "" && settledFor !== url.trim();
 
-    const saveRecentSearch = (query: string) => {
+    const saveRecentSearch = useCallback((query: string) => {
         const trimmed = query.trim();
         if (!trimmed)
             return;
@@ -65,7 +67,59 @@ export function useSmartSearch({ url, onUrlChange, onFetch, onFetchUrl }: UseSma
             }
             return updated;
         });
-    };
+    }, []);
+    const runSearch = useCallback(async (query: string, requestId: number) => {
+        const trimmed = query.trim();
+        if (!trimmed || requestId !== searchRequestRef.current) {
+            return;
+        }
+        const inflight = inFlightSearchRef.current;
+        if (inflight?.query === trimmed && inflight.requestId === requestId) {
+            return;
+        }
+        inFlightSearchRef.current = { query: trimmed, requestId };
+        try {
+            const results = await SearchSpotify({
+                query,
+                limit: SEARCH_LIMIT,
+            });
+            if (requestId !== searchRequestRef.current) {
+                return;
+            }
+            setSearchResults(results);
+            setLastSearchedQuery(trimmed);
+            saveRecentSearch(trimmed);
+            setHasMore({
+                tracks: results.tracks.length === SEARCH_LIMIT,
+                albums: results.albums.length === SEARCH_LIMIT,
+                artists: results.artists.length === SEARCH_LIMIT,
+                playlists: results.playlists.length === SEARCH_LIMIT,
+            });
+            if (results.tracks.length > 0)
+                setActiveTab("tracks");
+            else if (results.albums.length > 0)
+                setActiveTab("albums");
+            else if (results.artists.length > 0)
+                setActiveTab("artists");
+            else if (results.playlists.length > 0)
+                setActiveTab("playlists");
+        }
+        catch (error) {
+            if (requestId !== searchRequestRef.current) {
+                return;
+            }
+            console.error("Search failed:", error);
+            setSearchResults(null);
+        }
+        finally {
+            if (requestId === searchRequestRef.current) {
+                setSettledFor(trimmed);
+                if (inFlightSearchRef.current?.requestId === requestId) {
+                    inFlightSearchRef.current = null;
+                }
+            }
+        }
+    }, [saveRecentSearch]);
     const removeRecentSearch = (query: string) => {
         setRecentSearches((prev) => {
             const updated = prev.filter((s) => s !== query);
@@ -93,6 +147,9 @@ export function useSmartSearch({ url, onUrlChange, onFetch, onFetchUrl }: UseSma
         }
         setSearchResults(null);
         setLastSearchedQuery("");
+        // Results were just cleared, so no query is settled any more. Retyping
+        // the same text must show the spinner and accept Enter again.
+        setSettledFor("");
         setResultFilter("");
         setSortOrder("default");
         if (nextKind === "next-url") {
@@ -113,48 +170,13 @@ export function useSmartSearch({ url, onUrlChange, onFetch, onFetchUrl }: UseSma
             return;
         }
         const requestId = ++searchRequestRef.current;
+        const query = url;
         if (searchTimeoutRef.current) {
             clearTimeout(searchTimeoutRef.current);
         }
-        searchTimeoutRef.current = setTimeout(async () => {
-            try {
-                const results = await SearchSpotify({
-                    query: url,
-                    limit: SEARCH_LIMIT,
-                });
-                if (requestId !== searchRequestRef.current) {
-                    return;
-                }
-                setSearchResults(results);
-                setLastSearchedQuery(url.trim());
-                saveRecentSearch(url.trim());
-                setHasMore({
-                    tracks: results.tracks.length === SEARCH_LIMIT,
-                    albums: results.albums.length === SEARCH_LIMIT,
-                    artists: results.artists.length === SEARCH_LIMIT,
-                    playlists: results.playlists.length === SEARCH_LIMIT,
-                });
-                if (results.tracks.length > 0)
-                    setActiveTab("tracks");
-                else if (results.albums.length > 0)
-                    setActiveTab("albums");
-                else if (results.artists.length > 0)
-                    setActiveTab("artists");
-                else if (results.playlists.length > 0)
-                    setActiveTab("playlists");
-            }
-            catch (error) {
-                if (requestId !== searchRequestRef.current) {
-                    return;
-                }
-                console.error("Search failed:", error);
-                setSearchResults(null);
-            }
-            finally {
-                if (requestId === searchRequestRef.current) {
-                    setSettledFor(url.trim());
-                }
-            }
+        searchTimeoutRef.current = setTimeout(() => {
+            searchTimeoutRef.current = null;
+            void runSearch(query, requestId);
         }, 400);
         return () => {
             if (searchTimeoutRef.current) {
@@ -162,7 +184,7 @@ export function useSmartSearch({ url, onUrlChange, onFetch, onFetchUrl }: UseSma
                 searchTimeoutRef.current = null;
             }
         };
-    }, [url, isSearchInput]);
+    }, [url, isSearchInput, runSearch]);
 
     const getTabCount = (tab: ResultTab): number => {
         if (!searchResults)
@@ -249,7 +271,25 @@ export function useSmartSearch({ url, onUrlChange, onFetch, onFetchUrl }: UseSma
         }
         if (inputKind === "spotify") {
             onFetch();
+            return;
         }
+        if (inputKind !== "search") {
+            return;
+        }
+        const trimmed = url.trim();
+        if (!trimmed || settledFor === trimmed) {
+            return;
+        }
+        const inflight = inFlightSearchRef.current;
+        if (inflight?.query === trimmed && inflight.requestId === searchRequestRef.current) {
+            return;
+        }
+        if (searchTimeoutRef.current) {
+            clearTimeout(searchTimeoutRef.current);
+            searchTimeoutRef.current = null;
+        }
+        const requestId = ++searchRequestRef.current;
+        void runSearch(url, requestId);
     };
     const fetchResult = (externalUrl: string) => {
         void onFetchUrl(externalUrl);

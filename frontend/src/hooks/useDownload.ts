@@ -1,10 +1,10 @@
+import { rankDownloadServices } from "@/lib/source-priority";
 import { useState } from "react";
 import { t, translateMessage } from "@/i18n";
 import { downloadExecution, type DownloadExecutionKind } from "@/lib/download-execution";
 import { expectedTrackDurationSeconds, type QueueAttemptDisposition } from "@/lib/queue-guards";
 import { downloadTrack, fetchSpotifyMetadata } from "@/lib/api";
 import { getSettings, parseTemplate, extendAutoOrder, getEffectiveAlbumFilenameTemplate, templateUsesAlbumTrackNumber, getAlbumCategoryLabel, type Settings, type TemplateData } from "@/lib/settings";
-import { rankDownloadServices } from "@/lib/source-priority";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { joinPath, sanitizePath, getFirstArtist } from "@/lib/utils";
 import { logger } from "@/lib/logger";
@@ -139,7 +139,7 @@ function formatSourceSuffix(response: {
     const url = response.source_url?.trim();
     const label = response.source_label?.trim();
     if (label && url)
-        return ` [source: ${label} → ${url}]`;
+        return ` [source: ${label} â†’ ${url}]`;
     if (url)
         return ` [source: ${url}]`;
     if (label)

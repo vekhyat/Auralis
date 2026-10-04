@@ -1,17 +1,15 @@
 import { t } from "@/i18n";
 import { useEffect, useState, useRef , useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Trash2, ExternalLink, Search, ArrowUpDown, History, Play, Pause, Database, CloudUpload, Music2 } from "lucide-react";
+import { Trash2, Search, ArrowUpDown, History, Play, Pause, Database, CloudUpload } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
 import { GetDownloadHistory, ClearDownloadHistory, GetPreviewURL, GetFetchHistory, DeleteDownloadHistoryItem, DeleteFetchHistoryItem, ClearFetchHistoryByType } from "../../wailsjs/go/main/App";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { openExternal } from "@/lib/utils";
 import { getPreviewVolume } from "@/lib/preview";
 import { createPreviewPlayback, type PreviewPlayback } from "@/lib/preview-player";
-import { TidalIcon, QobuzIcon, AmazonIcon } from "./PlatformIcons";
 const formatDate = (timestamp: number) => {
     const date = new Date(timestamp * 1000);
     const year = date.getFullYear();
@@ -103,31 +101,6 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
     const setFetchSearchQuery = useCallback((value: string) => { updateFetchSearchQuery(value); setFetchCurrentPage(1); }, []);
     const setActiveFetchTab = useCallback((value: string) => { updateActiveFetchTab(value); setFetchCurrentPage(1); }, []);
     const ITEMS_PER_PAGE = 50;
-    const getTrackLink = (spotifyId: string) => {
-        if (spotifyId?.startsWith("tidal_"))
-            return { url: `https://listen.tidal.com/track/${spotifyId.replace("tidal_", "")}`, label: t("translation.history.openTidal") };
-        if (spotifyId?.startsWith("qobuz_"))
-            return { url: `https://www.qobuz.com/track/${spotifyId.replace("qobuz_", "")}`, label: t("translation.history.openQobuz") };
-        if (spotifyId?.startsWith("amazon_"))
-            return { url: `https://music.amazon.com/tracks/${spotifyId.replace("amazon_", "")}`, label: t("translation.history.openAmazonMusic") };
-        if (spotifyId?.startsWith("deezer_"))
-            return { url: `https://www.deezer.com/track/${spotifyId.replace("deezer_", "")}`, label: t("translation.history.openDeezer") };
-        return { url: `https://open.spotify.com/track/${spotifyId}`, label: t("translation.history.openSpotify") };
-    };
-    const getSourceIcon = (source: string) => {
-        const s = source?.toLowerCase() || "";
-        if (s.includes("tidal"))
-            return <TidalIcon className="h-4 w-4 object-contain rounded"/>;
-        if (s.includes("qobuz"))
-            return <QobuzIcon className="h-4 w-4 object-contain"/>;
-        if (s.includes("amazon"))
-            return <AmazonIcon className="h-4 w-4 object-contain rounded"/>;
-        if (s.includes("deezer"))
-            return <Music2 className="h-4 w-4"/>;
-        if (s.includes("spotify"))
-            return <Music2 className="h-4 w-4"/>;
-        return <Music2 className="h-4 w-4 opacity-50"/>;
-    };
     const fetchDownloadHistory = async () => {
         try {
             const items = await GetDownloadHistory();
@@ -379,8 +352,7 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
                                     <th className="hidden h-9 w-32 px-3 text-left align-middle text-[10px] font-semibold tracking-widest uppercase text-muted-foreground lg:table-cell">{t("translation.common.format")}</th>
                                     <th className="hidden h-9 w-16 px-3 text-left align-middle whitespace-nowrap font-mono text-[10px] font-semibold tracking-widest uppercase text-muted-foreground xl:table-cell">{t("translation.history.dur")}</th>
                                     <th className="hidden h-9 w-36 px-3 text-left align-middle whitespace-nowrap font-mono text-[10px] font-semibold tracking-widest uppercase text-muted-foreground md:table-cell">{t("translation.history.downloaded")}</th>
-                                    <th className="h-9 w-16 px-3 text-center align-middle whitespace-nowrap text-[10px] font-semibold tracking-widest uppercase text-muted-foreground">{t("translation.history.source")}</th>
-                                    <th className="h-9 w-32 px-3 text-center align-middle whitespace-nowrap text-[10px] font-semibold tracking-widest uppercase text-muted-foreground">{t("translation.common.actions")}</th>
+                                    <th className="h-9 w-24 px-3 text-center align-middle whitespace-nowrap text-[10px] font-semibold tracking-widest uppercase text-muted-foreground">{t("translation.common.actions")}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -418,22 +390,6 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
                                             </div>
                                         </td>
                                         <td className="p-3 align-middle text-center">
-                                            <div className="flex items-center justify-center">
-                                                <TooltipProvider>
-                                                    <Tooltip delayDuration={0}>
-                                                        <TooltipTrigger asChild>
-                                                            <div className="flex items-center justify-center">
-                                                                {getSourceIcon(item.source)}
-                                                            </div>
-                                                        </TooltipTrigger>
-                                                        <TooltipContent>
-                                                            <p className="capitalize">{item.source || t("translation.backend.unknown")}</p>
-                                                        </TooltipContent>
-                                                    </Tooltip>
-                                                </TooltipProvider>
-                                            </div>
-                                        </td>
-                                        <td className="p-3 align-middle text-center">
                                             <div className="flex items-center justify-center gap-1">
                                                 {!(item.spotify_id?.startsWith('tidal_') || item.spotify_id?.startsWith('qobuz_') || item.spotify_id?.startsWith('amazon_') || item.spotify_id?.startsWith('deezer_')) && (<TooltipProvider>
                                                         <Tooltip delayDuration={0}>
@@ -447,19 +403,6 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
                                                             </TooltipContent>
                                                         </Tooltip>
                                                     </TooltipProvider>)}
-
-                                                <TooltipProvider>
-                                                    <Tooltip delayDuration={0}>
-                                                        <TooltipTrigger asChild>
-                                                            <Button variant="ghost" size="icon" className="cursor-pointer" onClick={() => openExternal(getTrackLink(item.spotify_id).url)}>
-                                                                <ExternalLink className="h-4 w-4"/>
-                                                            </Button>
-                                                        </TooltipTrigger>
-                                                        <TooltipContent>
-                                                            <p>{getTrackLink(item.spotify_id).label}</p>
-                                                        </TooltipContent>
-                                                    </Tooltip>
-                                                </TooltipProvider>
 
                                                 <TooltipProvider>
                                                     <Tooltip delayDuration={0}>

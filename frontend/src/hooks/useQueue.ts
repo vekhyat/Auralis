@@ -135,6 +135,8 @@ export function useQueue(download: QueueDownloadHandlers) {
                     updateQueueItem(item.id, { status });
                     if (queueRunHaltsBeforeNextItem(status) || downloadExecution.isPauseRequested()) {
                         shouldPauseRef.current = true;
+                        suspendedRef.current = true;
+                        setIsSuspended(true);
                         setIsPausing(true);
                     }
                 }
@@ -159,13 +161,16 @@ export function useQueue(download: QueueDownloadHandlers) {
         finally {
             const paused = shouldPauseRef.current;
             const stopped = shouldStopRef.current;
-            if (paused && !stopped) {
+            if (paused || stopped) {
+                // Persist the hold on the next request so a restart still waits
+                // for an explicit Resume after a pause or a cancel.
                 const nextItem = getNextItem();
                 if (nextItem) {
                     if (nextItem.status === "pending") {
                         updateQueueItem(nextItem.id, { status: "paused" });
                     }
-                    toast.info(t("translation.queue.pauseCompleted"));
+                    if (!stopped)
+                        toast.info(t("translation.queue.pauseCompleted"));
                 }
             }
             const followAdded = downloadExecution.consumeFollowUp(paused, stopped);

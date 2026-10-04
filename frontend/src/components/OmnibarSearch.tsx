@@ -43,7 +43,7 @@ export function OmnibarSearch({ value, busy = false, onChange, onSubmit, classNa
             console.error("Failed to read clipboard:", error);
         }
     };
-    return (<div className={cn("relative flex h-8 min-w-0 items-center", className)}>
+    return (<div className={cn("relative flex h-10 min-w-0 items-center", className)}>
       <input
         ref={inputRef}
         id="spotify-smart-search"
@@ -55,7 +55,7 @@ export function OmnibarSearch({ value, busy = false, onChange, onSubmit, classNa
         onKeyDown={handleKeyDown}
         placeholder={t(OMNIBAR_PLACEHOLDER_KEY)}
         aria-label={t(OMNIBAR_PLACEHOLDER_KEY)}
-        className="h-full w-full rounded-[2px] border border-input bg-card pr-14 pl-3 text-[13px] text-foreground transition-colors outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-ring/40"
+        className="h-full w-full rounded-lg border border-input bg-card pr-14 pl-3 text-[13px] text-foreground transition-colors outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-ring/40"
       />
       <div className="absolute top-0 right-1.5 flex h-full items-center gap-0.5">
         {busy ? (<Spinner className="mr-1"/>) : null}

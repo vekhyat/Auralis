@@ -16,8 +16,12 @@ import (
 
 var regexpAmazonASIN = regexp.MustCompile(`(B[0-9A-Z]{9})`)
 
-// antraAmazonDecrypt is decryptWithMP4FF. Tests record the granted key passed in.
-var antraAmazonDecrypt = decryptWithMP4FF
+// antraAmazonDecrypt and antraAmazonRemux are the community Amazon pipeline.
+// Tests replace them to check key passthrough without ffmpeg.
+var (
+	antraAmazonDecrypt = decryptWithMP4FF
+	antraAmazonRemux   = amazonRemuxWithFFmpeg
+)
 
 type antraSearchHit struct {
 	TrackID    string
@@ -527,15 +531,20 @@ func antraAmazonTrackToFile(trackID, destPath string, query url.Values) (string,
 		return "", err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		return "", fmt.Errorf("amazon track HTTP %d", resp.StatusCode)
+	}
+	if !antraContentTypeIsJSON(resp.Header.Get("Content-Type")) {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		return "", fmt.Errorf("amazon track returned no json metadata")
+	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
 		return "", err
 	}
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("amazon track HTTP %d", resp.StatusCode)
-	}
 	if antraBodyLooksAudio(body, resp.Header.Get("Content-Type")) {
-		return writeAntraAudioBytes(destPath, body, resp.Header.Get("Content-Type"))
+		return "", fmt.Errorf("amazon track returned no json metadata")
 	}
 	info, err := parseAntraTrackPayload(body)
 	if err != nil || info.StreamURL == "" {
@@ -583,12 +592,21 @@ func antraReadMirrorTrack(service, path string, query url.Values) (antraTrackInf
 		return antraTrackInfo{}, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		return antraTrackInfo{}, fmt.Errorf("%s track HTTP %d", service, resp.StatusCode)
+	}
+	contentType := resp.Header.Get("Content-Type")
+	if antraContentTypeIsAudio(contentType) {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		return antraTrackInfo{}, fmt.Errorf("%s track returned no json metadata", service)
+	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
 		return antraTrackInfo{}, err
 	}
-	if resp.StatusCode != http.StatusOK {
-		return antraTrackInfo{}, fmt.Errorf("%s track HTTP %d", service, resp.StatusCode)
+	if antraBodyLooksAudio(body, contentType) {
+		return antraTrackInfo{}, fmt.Errorf("%s track returned no json metadata", service)
 	}
 	info, err := parseAntraTrackPayload(body)
 	if err != nil {
@@ -604,7 +622,19 @@ func antraMaterializeStream(info antraTrackInfo, destPath string) (string, error
 	return antraMaterializeAmazon(info, destPath, false)
 }
 
+func antraAmazonCodecIsSpatial(codec string) bool {
+	switch strings.ToLower(strings.TrimSpace(codec)) {
+	case "eac3", "ec-3", "ec3", "ac-3", "ac3", "ac4", "ac-4", "atmos":
+		return true
+	default:
+		return false
+	}
+}
+
 func antraMaterializeAmazon(info antraTrackInfo, destPath string, atmos bool) (string, error) {
+	if atmos && !antraAmazonCodecIsSpatial(info.Codec) {
+		return "", fmt.Errorf("amazon mirror did not return atmos")
+	}
 	downloaded, err := antraDownloadURLToFile(info.StreamURL, destPath)
 	if err != nil {
 		return "", err
@@ -616,7 +646,7 @@ func antraMaterializeAmazon(info antraTrackInfo, destPath string, atmos bool) (s
 	if err := antraAmazonDecrypt([]string{info.DecryptionKey}, downloaded, decryptedPath); err != nil {
 		_ = os.Remove(downloaded)
 		_ = os.Remove(decryptedPath)
-		return "", fmt.Errorf("protected stream was not readable audio: %w", err)
+		return "", fmt.Errorf("protected stream was not readable audio")
 	}
 	_ = os.Remove(downloaded)
 	targetExt := ".flac"
@@ -625,7 +655,7 @@ func antraMaterializeAmazon(info antraTrackInfo, destPath string, atmos bool) (s
 		targetExt = ".m4a"
 	}
 	finalPath := replaceAudioExtension(destPath, targetExt)
-	if err := amazonRemuxWithFFmpeg(decryptedPath, finalPath, targetExt); err != nil {
+	if err := antraAmazonRemux(decryptedPath, finalPath, targetExt); err != nil {
 		_ = os.Remove(decryptedPath)
 		_ = os.Remove(finalPath)
 		return "", err
@@ -643,38 +673,25 @@ func antraContentTypeIsJSON(contentType string) bool {
 	return strings.Contains(strings.ToLower(contentType), "json")
 }
 
-func antraBodyLooksAudio(body []byte, contentType string) bool {
-	if antraContentTypeIsJSON(contentType) || len(body) == 0 || body[0] == '{' || body[0] == '[' {
-		return false
-	}
+func antraContentTypeIsAudio(contentType string) bool {
 	ct := strings.ToLower(contentType)
-	if strings.Contains(ct, "audio") || strings.Contains(ct, "octet-stream") || strings.Contains(ct, "mp4") {
-		return true
-	}
-	return len(body) >= 4 && (string(body[:4]) == "fLaC" || (len(body) >= 8 && string(body[4:8]) == "ftyp") || string(body[:3]) == "ID3")
+	return strings.Contains(ct, "audio") || strings.Contains(ct, "octet-stream") || strings.Contains(ct, "mp4")
 }
 
-func writeAntraAudioBytes(destPath string, body []byte, contentType string) (string, error) {
-	partPath := destPath + ".part"
-	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil && filepath.Dir(destPath) != "." {
-		return "", err
+func antraBodyLooksAudio(body []byte, contentType string) bool {
+	if len(body) == 0 || body[0] == '{' || body[0] == '[' {
+		return false
 	}
-	if err := os.WriteFile(partPath, body, 0644); err != nil {
-		return "", err
+	if antraContentTypeIsAudio(contentType) {
+		return true
 	}
-	ext := extensionFromContentType(contentType)
-	if sniff, sniffErr := sniffAudioExtension(partPath); sniffErr == nil && sniff != "" {
-		ext = sniff
+	if len(body) >= 4 && string(body[:4]) == "fLaC" {
+		return true
 	}
-	if ext == "" {
-		ext = filepath.Ext(destPath)
+	if len(body) >= 8 && string(body[4:8]) == "ftyp" {
+		return true
 	}
-	finalPath := replaceAudioExtension(destPath, ext)
-	if err := os.Rename(partPath, finalPath); err != nil {
-		_ = os.Remove(partPath)
-		return "", err
-	}
-	return finalPath, nil
+	return len(body) >= 3 && string(body[:3]) == "ID3"
 }
 
 func antraRedactDetail(detail string) string {

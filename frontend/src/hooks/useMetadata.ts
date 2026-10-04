@@ -148,7 +148,7 @@ export function useMetadata() {
                 const tracks = payload as TrackMetadata[];
                 fetchedCount.current += tracks.length;
                 if (loadingToastId.current && currentName.current) {
-                    toast.silentInfo(t("translation.migrated.useMetadata.fetchingTracksFor", { value1: currentName.current.toLowerCase() }), {
+                    toast.silentInfo(t("translation.migrated.useMetadata.fetchingTracksFor", { value1: currentName.current }), {
                         id: loadingToastId.current,
                         description: t("translation.metadata.fetched", { count: fetchedCount.current, formattedCount: fetchedCount.current.toLocaleString() })
                     });
@@ -171,7 +171,7 @@ export function useMetadata() {
             if (name) {
                 currentName.current = name;
                 if (loadingToastId.current) {
-                    toast.silentInfo(t("translation.migrated.useMetadata.fetchingTracksFor", { value1: name.toLowerCase() }), {
+                    toast.silentInfo(t("translation.migrated.useMetadata.fetchingTracksFor", { value1: name }), {
                         id: loadingToastId.current,
                         description: t("translation.metadata.fetched", { count: fetchedCount.current, formattedCount: fetchedCount.current.toLocaleString() })
                     });
@@ -256,7 +256,7 @@ export function useMetadata() {
     const fetchMetadataDirectly = async (url: string, originUrl?: string, ownedGeneration?: number) => {
         const generation = ownedGeneration ?? beginRequest();
         if (!allows(generation, "finally")) {
-            return;
+            return null;
         }
         // Artist search claims before the URL exists, so a late begin from the
         // previous read can attach. Drop it when this read actually starts.
@@ -281,7 +281,7 @@ export function useMetadata() {
                     logger.warning("playlist appears to be empty or private");
                     toast.error(t("translation.download.playlistNotFoundMayBe"));
                     setMetadata(null);
-                    return;
+                    return null;
                 }
             }
             else if ("album_info" in data) {
@@ -290,7 +290,7 @@ export function useMetadata() {
                     logger.warning("album appears to be empty or not found");
                     toast.error(t("translation.download.albumNotFoundMayBe"));
                     setMetadata(null);
-                    return;
+                    return null;
                 }
             }
             commitNavigation(url, data);
@@ -313,10 +313,11 @@ export function useMetadata() {
             }
             logger.info(`fetch completed in ${elapsed}s`);
             toast.success(t("translation.download.metadataFetchedSuccessfully"));
+            return data;
         }
         catch (err) {
             if (!allows(generation, "error")) {
-                return;
+                return null;
             }
             const rawError = err instanceof Error ? err.message : t("translation.app.fetchFailed");
             const errorMsg = translateMessage(rawError);
@@ -325,6 +326,7 @@ export function useMetadata() {
             showFetchFailureAdvice(rawError);
             const current = navigationHistory.current[navigationIndex.current];
             setMetadata(current?.metadata ?? null);
+            return null;
         }
         finally {
             finishOwnedRequest(generation);
@@ -358,12 +360,9 @@ export function useMetadata() {
         if (isArtistUrl) {
             logger.info("artist url detected");
             setPendingArtistName(null);
-            await fetchMetadataDirectly(urlToFetch, originUrl);
         }
-        else {
-            await fetchMetadataDirectly(urlToFetch, originUrl);
-        }
-        return urlToFetch;
+        const data = await fetchMetadataDirectly(urlToFetch, originUrl);
+        return data ? { url: urlToFetch, data } : null;
     };
     const handleAlbumClick = (album: {
         id: string;
@@ -490,6 +489,7 @@ export function useMetadata() {
         goBack: () => moveNavigation(-1),
         goForward: () => moveNavigation(1),
         handleFetchMetadata,
+        saveToHistory,
         handleAlbumClick,
         handleConfirmAlbumFetch,
         handleArtistClick,

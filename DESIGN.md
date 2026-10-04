@@ -1,164 +1,156 @@
-# DESIGN.md — Auralis "Dawn Catalog"
-
-Written from the shipped build (`build/bin/Auralis.exe`), not from intent. Product truth
-lives in [`PRODUCT.md`](./PRODUCT.md); this file records the visual world as it exists.
-
+---
+name: Auralis Artwork Library
+description: Choose music by its artwork, download once, and keep exploring.
+colors:
+  primary: "oklch(0.38 0.08 250)"
+  paper: "oklch(0.97 0.006 250)"
+  ink: "oklch(0.22 0.02 250)"
+  card: "oklch(0.985 0.004 250)"
+  rule: "oklch(0.86 0.01 250)"
+  dark-paper: "oklch(0.19 0.012 250)"
+  dark-ink: "oklch(0.92 0.008 250)"
+  dark-primary: "oklch(0.74 0.085 250)"
+typography:
+  heading:
+    fontFamily: 'system-ui, "Segoe UI", sans-serif'
+    fontSize: "32px"
+    fontWeight: 600
+    lineHeight: "1.15"
+    letterSpacing: "-0.025em"
+  body:
+    fontFamily: 'system-ui, "Segoe UI", sans-serif'
+    fontSize: "14px"
+    fontWeight: 400
+  data:
+    fontFamily: '"Cascadia Mono", ui-monospace, monospace'
+    fontSize: "12px"
+rounded:
+  sm: "4px"
+  md: "6px"
+  lg: "8px"
+  xl: "12px"
+spacing:
+  compact: "8px"
+  group: "20px"
+  section: "32px"
+components:
+  button-primary:
+    backgroundColor: "{colors.primary}"
+    rounded: "{rounded.md}"
+    height: "36px"
+  search-input:
+    backgroundColor: "{colors.card}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.lg}"
+    height: "40px"
 ---
 
-## Thesis
+# Auralis Artwork Library
 
-Auralis is a **catalog desk you type into**. The primary control is an omnibar in the
-titlebar; everything below it is ruled paper — dense rows you read, select, and send to
-the queue. There is no navigation rail, no centered hero, no cover-card theater.
+## Overview
 
-## World
+Auralis remains a Windows desktop downloader built with Go, Wails v2, React,
+and Windows WebView2. The user explicitly excludes Electron. PRODUCT.md owns
+product truth; design/download-first.md owns the surface workflow.
 
-**Dawn catalog**: cool paper, iron ink, hairline rules. Light is the default scene — a
-daytime desk. Dark is the same desk after hours: same hue family, cool slate paper,
-never OLED black.
+The user selected an artwork-led music library. Record sleeves supply color and
+recognition; quiet cool-paper chrome supports browsing and file management.
+The former text-only catalog, small side inspector, and manual Start Queue
+experience are superseded. Light remains default, with a matching dark skin.
 
-| Token | Light | Dark |
-|---|---|---|
-| Paper (`--background`) | `oklch(0.97 0.006 250)` | `oklch(0.19 0.012 250)` |
-| Ink (`--foreground`) | `oklch(0.22 0.02 250)` | `oklch(0.92 0.008 250)` |
-| Rule (`--border`) | `oklch(0.86 0.01 250)` | `oklch(0.31 0.015 250)` |
-| Accent (Prussian) | `oklch(0.38 0.08 250)` | `oklch(0.74 0.085 250)` |
+## Colors
 
-One accent. It appears in exactly four jobs:
+The CSS custom properties in frontend/src/index.css remain normative. Prussian
+ink identifies the active destination, selection, focus, and primary Download.
+Dark uses the same token roles. Destructive red marks errors and destructive
+controls. Availability uses actual provider names and links. Covers are untinted.
+There is no accent, font, or base-color picker.
 
-1. The current destination word in the titlebar.
-2. The focused omnibar / focused input.
-3. The selected row (ink text on a faint Prussian wash).
-4. The primary action button in an inspector.
+## Typography
 
-Status is **words**, not traffic lights: `Done`, `Failed`, `Skipped`, `Pending`,
-`Running` set as small mono caps in ink or muted ink; destructive red only for failure.
-No success-green, no warning-amber surfaces anywhere.
+System UI/Segoe UI keeps the interface native without webfont loading. Page and
+collection headings are 30–32px semibold; search inspector headings are 24px;
+artwork titles/controls are 14px; compact track titles are 13px with 12px metadata.
+Monospace is reserved for durations, speeds, identifiers, counts, and logs.
+Artwork titles truncate with their full title available; collection headings wrap.
 
-## Type
+## Layout
 
-- UI: `system-ui, "Segoe UI", sans-serif` — Windows-native, no webfont loading.
-- Data (ISRC, times, counts, versions, log): `"Cascadia Mono", ui-monospace`.
-- Scale: page titles `text-lg/semibold`; section heads small-caps `text-sm/semibold`
-  over a hairline; row titles `text-[13px]/medium`; meta `text-xs` muted.
-- No hero type. Nothing larger than `text-lg`.
+- Shell: a 64px draggable titlebar holds search and Windows window controls.
+  Controls opt out of Wails dragging. A 184px destination column holds Library,
+  Downloads, History, and Settings; Debug/version/help stay in overflow.
+- Content scrolls independently between titlebar and the persistent 76px download
+  shelf. The content uses 32px padding and a 1600px maximum width.
+- Library: recent artwork uses 2/3/5 columns. Search uses 2/3/4 columns and a
+  selected-result inspector. These are recently explored items, not a streaming
+  feed or a complete representation of files already on disk.
+- Collections: a 208px square cover sits beside title/actions/metadata above the
+  full-width track list. Artist releases also use artwork shelves.
+- Downloads opens on All. Type/status filters refine one workspace; they do not
+  create separate workers. Collections expand into track rows.
+- Verify desktop at 1440×900 and 1200×720. Below 1100px, navigation narrows to
+  152px and search inspection stacks; below 760px, destinations become an icon
+  column. These fallbacks do not establish a shipping mobile platform.
 
-## Shape & line
+## Elevation & Depth
 
-- Radius **0–2px** everywhere: inputs, buttons, dialogs, covers, popovers
-  (`--radius-md/lg/xl = 2px`, `--radius-sm = 0px`).
-- Hairline rules (`1px border-border`) structure every list. Rows are separated by
-  rules, not cards. Cards exist as quiet panels only where a container is required.
-- No shadows on any surface. Popovers/toasts are separated by rule + contrast alone.
-- Covers are sharp squares: 28px in rows, 120px in inspectors.
+Flat surfaces, subtle active washes, and hairline separators provide hierarchy.
+Avoid decorative shadows and glass. A cover lifts 4px on hover over 200ms;
+reduced motion disables it. Spinners indicate work. Notifications sit 92px above
+bottom so they cannot cover download controls.
 
-## Mark
+## Shapes
 
-Ink stamp on paper: a square hairline frame containing three ruled rows, the middle one
-Prussian — a catalog entry highlighted. Ships as `frontend/public/icon.svg`, regenerated
-to `build/appicon.png` and `build/windows/icon.ico` by `frontend/scripts/generate-icon.js`.
+Shared radius tokens are 4/6/8/12px. Artwork squares use 8px corners; selection
+containers use 12px. Existing utility panels/toasts retain some explicit 2px
+corners. Track rows use rules rather than cards. Keep the existing ruled-stamp
+Auralis mark and static Lucide icons.
 
-## Icons
+## Components
 
-One family: **Lucide, static**. All looping animated nav/tool icons were removed with
-their wrapper components (`ui/home.tsx`, `ui/history-icon.tsx`, `ui/tool-case.tsx`, …).
-Icons are 14–16px, muted by default, never animated in loops.
+ArtworkCard/CoverArt: titles, artists, and real metadata accompany square covers.
+Missing or failed images use a music-icon fallback. Selection has a quiet accent
+wash and clear keyboard focus. InspectorPane is a side inspector for search and
+an artwork header above collection tracks. Download is primary; metadata stays a
+definition list. Lyrics, cover, source, and folder actions keep their operations.
 
-## Shell — the omnibar titlebar
+TrackList keeps Download, Preview, and More visible. More contains secondary
+lyrics/cover/source actions. Checkboxes have accessible names including track
+identity, keyboard handlers, and a mixed select-all state.
 
-```
-[ ▪ Auralis ] [← →] [ paste-or-search omnibar ……… ] [ Library Queueⁿ History Settings ] [⋯] [ _ □ × ]
-```
+DownloadShelf stays available while browsing. It shows active music, waiting
+count, size/speed, pause/resume/cancel, Downloads, and Open Folder. Meaningful
+state text is a polite atomic status region; changing MB/s stays outside it.
+Saved feedback and failure guidance keep the operator oriented.
 
-- One fixed 44px bar; the whole bar drags, controls opt out (`--wails-draggable`).
-- The **omnibar is the product**: paste a Spotify link or type a query; Enter commits;
-  clipboard-paste and clear live inside the field; validation dialogs are shared paper.
-- Destinations are **words**, current one in accent with an underline rule; Queue count
-  is a mono numeral after the word.
-- Back/forward walk catalog history. Reload is not chrome.
-- A quiet `⋯` overflow holds version, Debug logs, issue-report dialog, website.
-- Window controls are recognizable Windows affordances (min/max/close), close hovers
-  destructive.
-- Volume and IP/network left the titlebar: preview volume lives in Settings behavior.
-  There is no flag-and-eye menubar and no source-status panel.
-- Minimum window 1280×800 (min 1200×720) so the desk split never collapses.
+Download starts automatically when idle; later requests wait. Pause lets the
+current track settle and holds subsequent work, including new requests, until
+explicit Resume. Cooldowns also suspend work. Retry preserves saved/skipped
+tracks and schedules the worker. Cancel current removes its request after the
+transfer settles, preserves completed files, and leaves later requests resumable.
+Interrupted saved requests remain available after reopening. Preserve the shared
+execution lease, persistence failure notices, protected running items, and backend
+binding names. There is no required Start Queue step for a fresh normal download.
 
-## Library page — catalog + inspector
+History retains download/fetch records. Settings retains stacked configuration
+sections and light/auto/dark skins. Debug retains its log view. Naming, metadata,
+lyrics, covers, and provider behavior retain their established contracts.
 
-Empty state: one line of instruction under the omnibar, recent searches as underlined
-text links, recent fetches as a **ruled list** (28px cover · title · artist · type word ·
-time · text Remove). No cards, no colored type chips, no circular X.
+Verification: 39 frontend tests, type checking, lint, and the Windows Wails build
+pass. Six browser captures and 13 interaction checks cover both desktop sizes
+using production React components with development-only simulated bindings.
+Sample track lists/transfers are labeled; preview fixtures are excluded from the
+production entry. This does not prove live provider downloads or native close
+behavior. The current broader Go suite fails TestAntraAmazonResolvePassesGrantedKey
+in existing Amazon mirror code. New workflow copy falls back to English in other
+locales; existing translations and key IDs remain.
 
-Search state: dense result rows (title · artist · type data right-aligned). Type filters
-are words with counts above the rows; filter + sort are inline tools in the pane header.
-Clicking a row selects it (accent ink); the selected entry is inspected in the right
-pane; double-click fetches directly.
+## Do's and Don'ts
 
-Fetched item: track lists (or discography rows) fill the left pane; the inspector pane
-on the right holds a modest 120px sharp cover, name at readable scale, metadata as a
-definition list over hairlines, and actions as a text/button row (Queue, Lyrics, Cover,
-Folder…). Availability renders as provider-name links (Tidal/Qobuz/Amazon) with small
-uncolored marks; not-found is a quiet word. Explicit is spelled out, never a red E.
-
-One row grammar everywhere: `CatalogRow` powers recents, search results, discography
-rows; `TrackList` renders the same grammar as a table for albums/playlists/queue-scale
-lists (# · thumb 28px · title (+Explicit, status word) · album · dur · plays · actions).
-
-## Secondary surfaces
-
-- **Queue:** full-width ruled table; type filters as words with counts; status column is
-  words (Running in accent, Failed in destructive, rest in ink/muted). Expandable items
-  keep their sub-track sheets.
-- **History:** Downloads/Fetches as text filters; same ruled table grammar; format and
-  timestamps in mono.
-- **Settings:** stacked sections with hairline headings (General · Download path ·
-  Download source · Custom instances · Naming · File management · Metadata).
-  No Tools destination, and no source-status section.
-  No tab strip, no base/accent color dots, no Google-fonts menu. Theme control is the
-  single light/auto/dark mode select. Stored legacy `theme`/`baseColor`/`fontFamily`
-  values are ignored at apply time; first run defaults to **light**.
-- **Debug:** monospace log on a bordered paper card; levels differentiated by ink weight,
-  errors in destructive red.
-- **Toasts:** popover paper, ink text, muted icon; error icon red. No pastel slabs.
-- **Cooldown:** a ruled notice strip on the paper near the top of content.
-- **Download progress:** docked bottom-right as a quiet status line (mono MB/s).
-- **Scrollbars:** thin, trackless, rule-colored thumbs; never brand-colored.
-
-## Motion
-
-Functional only: spinners, fade/slide of toasts and banners, hover tints. No looping
-animations, no ping badges, no animated nav art. Reduced-motion honored globally.
-
-## Identity lock
-
-Two skins, one system. `themes.ts` collapses to compatibility stubs; the skins live as
-CSS custom properties in `index.css`. There is no accent picker, no font picker, and no
-code path that paints theme variables onto `:root` anymore.
-
-## Old → new map
-
-| SpotiFLAC DNA | Auralis now |
-|---|---|
-| `Sidebar.tsx` rail | deleted; destinations are titlebar words (`pages.ts`) |
-| `Header.tsx` hero + tagline + version badge | deleted; version sits in the overflow menu |
-| Centered `max-w-4xl` home column | full-width desk split |
-| `SearchBar.tsx` field + Fetch button | `OmnibarSearch` in titlebar; Enter fetches |
-| Typing placeholders | static hint copy |
-| 130px recent-fetch cards, type chips, red X | ruled recents list via `CatalogRow`, text Remove |
-| 192px cover hero, huge titles, red E | 120px sharp inspector cover, `text-lg` names, spelled Explicit |
-| Bordered table, 40px thumbs | ruled rows, 28px thumbs, status words |
-| Volume/IP menubar in titlebar | removed; no source-status panel |
-| Colored tool tiles | removed; no Tools destination |
-| Flush settings tab strip | stacked hairline sections |
-| Scroll-top FAB | killed |
-| Teal rounded waveform mark | ruled-stamp mark, Prussian on paper |
-| 17 accents × 7 bases, Geist/Google fonts | locked two-skin dawn catalog, system UI + Cascadia Mono |
-
-## Verification
-
-- `tsc -b` clean; `eslint` error count equal to pre-change baseline (all remaining
-  findings are pre-existing patterns elsewhere in the codebase; all new files lint clean).
-- `go test ./backend` passes (backend untouched).
-- `wails build` → `build/bin/Auralis.exe`.
-- Side-by-side against SpotiFLAC: different skeleton (no rail, no hero, no card grid),
-  different palette family, different type system, different mark. Not matchable at a glance.
+- Do use prominent real artwork for browsing and compact rows for tracks.
+- Do keep download controls available while the operator explores.
+- Do name actions for their result: Download, Resume, Retry, Cancel current.
+- Do preserve explicit pause, completed files, and persistence safeguards.
+- Don't restore a compulsory Add to Queue → Start Queue workflow.
+- Don't migrate to Electron or treat provider changes as styling.
+- Don't represent preview fixtures as user data or browser QA as native QA.

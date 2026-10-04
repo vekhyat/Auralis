@@ -1,15 +1,14 @@
 import { t } from "@/i18n";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { XCircle, FileCheck, FileText, Globe, ImageDown, Play, Pause, Download, CircleCheck } from "lucide-react";
+import { Ellipsis, XCircle, FileCheck, FileText, ImageDown, Play, Pause, Download, CircleCheck } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger, } from "@/components/ui/tooltip";
 import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious, } from "@/components/ui/pagination";
 import type { TrackMetadata, TrackAvailability } from "@/types/api";
 import { usePreview } from "@/hooks/usePreview";
 import { useQueueFeedback } from "@/hooks/useQueueFeedback";
-import { AvailabilityLinks } from "./AvailabilityLinks";
-import { hasAvailabilityLinks } from "@/lib/availability-links";
 import { buildClickableArtists, getClickableArtistKey } from "@/lib/artist-links";
 import { useState } from "react";
 interface TrackListProps {
@@ -56,7 +55,7 @@ interface TrackListProps {
     }) => void;
     onTrackClick?: (track: TrackMetadata) => void;
 }
-export function TrackList({ tracks, searchQuery, sortBy, selectedTracks, downloadedTracks, failedTracks, skippedTracks, currentPage, itemsPerPage, showCheckboxes = false, hideAlbumColumn = false, folderName, isArtistDiscography = false, downloadedLyrics, failedLyrics, skippedLyrics, downloadingLyricsTrack, checkingAvailabilityTrack, availabilityMap, downloadedCovers, failedCovers, skippedCovers, downloadingCoverTrack, onToggleTrack, onToggleSelectAll, onSelectTrackRange, onQueueTrack, onDownloadLyrics, onCheckAvailability, onDownloadCover, onPageChange, onAlbumClick, onArtistClick, onTrackClick, }: TrackListProps) {
+export function TrackList({ tracks, searchQuery, sortBy, selectedTracks, downloadedTracks, failedTracks, skippedTracks, currentPage, itemsPerPage, showCheckboxes = false, hideAlbumColumn = false, folderName, isArtistDiscography = false, downloadedLyrics, failedLyrics, skippedLyrics, downloadingLyricsTrack, checkingAvailabilityTrack: _checkingAvailabilityTrack, availabilityMap: _availabilityMap, downloadedCovers, failedCovers, skippedCovers, downloadingCoverTrack, onToggleTrack, onToggleSelectAll, onSelectTrackRange, onQueueTrack, onDownloadLyrics, onCheckAvailability: _onCheckAvailability, onDownloadCover, onPageChange, onAlbumClick, onArtistClick, onTrackClick, }: TrackListProps) {
     const { playPreview, loadingPreview, playingTrack } = usePreview();
     const { isQueued } = useQueueFeedback();
     const [lastTrackIndex, setLastTrackIndex] = useState<number | null>(null);
@@ -171,30 +170,6 @@ export function TrackList({ tracks, searchQuery, sortBy, selectedTracks, downloa
         const seconds = Math.floor((ms % 60000) / 1000);
         return `${minutes}:${seconds.toString().padStart(2, "0")}`;
     };
-    const formatPlays = (plays: string | undefined) => {
-        if (!plays)
-            return "";
-        const num = parseInt(plays, 10);
-        if (isNaN(num))
-            return plays;
-        return num.toLocaleString();
-    };
-    const getAvailabilityButtonIcon = (spotifyId?: string) => {
-        if (!spotifyId) {
-            return <Globe className="h-4 w-4"/>;
-        }
-        if (checkingAvailabilityTrack === spotifyId) {
-            return <Spinner />;
-        }
-        const availability = availabilityMap?.get(spotifyId);
-        if (!availability) {
-            return <Globe className="h-4 w-4"/>;
-        }
-        if (hasAvailabilityLinks(availability)) {
-            return <CircleCheck className="h-4 w-4"/>;
-        }
-        return <XCircle className="h-4 w-4"/>;
-    };
     return (<div className="space-y-3">
     <div>
       <div className="overflow-x-auto">
@@ -202,7 +177,7 @@ export function TrackList({ tracks, searchQuery, sortBy, selectedTracks, downloa
           <thead>
             <tr className="border-b border-border">
               {showCheckboxes && (<th className="h-9 w-10 px-3 text-left align-middle">
-                <Checkbox checked={allSelected} onCheckedChange={() => onToggleSelectAll(filteredTracks)}/>
+                <Checkbox aria-label={t("translation.downloads.selectAll")} checked={allSelected ? true : filteredTracks.some((track) => track.spotify_id && selectedTracks.includes(track.spotify_id)) ? "indeterminate" : false} onCheckedChange={() => onToggleSelectAll(filteredTracks)}/>
               </th>)}
               <th className="h-9 w-10 px-2 text-left align-middle font-mono text-[10px] font-semibold tracking-widest uppercase text-muted-foreground">
                 #
@@ -215,9 +190,6 @@ export function TrackList({ tracks, searchQuery, sortBy, selectedTracks, downloa
               </th>)}
               <th className="hidden h-9 w-20 px-3 text-left align-middle text-[10px] font-semibold tracking-widest uppercase text-muted-foreground lg:table-cell">
                 {t("translation.trackList.duration")}
-              </th>
-              <th className="hidden h-9 w-28 px-3 text-left align-middle text-[10px] font-semibold tracking-widest uppercase text-muted-foreground xl:table-cell">
-                {t("translation.migrated.TrackList.plays")}
               </th>
               <th className="h-9 w-32 px-3 text-center align-middle text-[10px] font-semibold tracking-widest uppercase text-muted-foreground">
                 {t("translation.common.actions")}
@@ -249,7 +221,7 @@ export function TrackList({ tracks, searchQuery, sortBy, selectedTracks, downloa
             const trackStatusTone = trackStatusWord === t("translation.queue.failed") ? "text-destructive" : "text-muted-foreground";
             return (<tr key={getTrackKey(track)} onClick={showCheckboxes ? handleRowSelect : undefined} className={`border-b border-border transition-colors hover:bg-muted/60 ${showCheckboxes && track.spotify_id ? "cursor-pointer select-none" : ""}`}>
               {showCheckboxes && (<td className="px-3 py-2 align-middle">
-                {track.spotify_id && (<Checkbox checked={selectedTracks.includes(track.spotify_id)} className="pointer-events-none"/>)}
+                {track.spotify_id && (<Checkbox aria-label={t("translation.downloads.selectTrack", { name: track.name, artist: track.artists })} checked={selectedTracks.includes(track.spotify_id)} onClick={(event) => event.stopPropagation()} onCheckedChange={() => onToggleTrack(track.spotify_id!)}/>)}
               </td>)}
               <td className="px-2 py-2 text-right align-middle font-mono text-xs tabular-nums text-muted-foreground">
                 <div className="flex flex-col items-center gap-0.5">
@@ -310,14 +282,11 @@ export function TrackList({ tracks, searchQuery, sortBy, selectedTracks, downloa
               <td className="hidden px-3 py-2 align-middle font-mono text-xs tabular-nums text-muted-foreground lg:table-cell">
                 {formatDuration(track.duration_ms)}
               </td>
-              <td className="hidden px-3 py-2 align-middle font-mono text-xs tabular-nums text-muted-foreground xl:table-cell">
-                {track.plays ? formatPlays(track.plays) : ""}
-              </td>
               <td className="px-3 py-2 text-center align-middle">
                 <div className="flex items-center justify-center gap-1" onClick={(event) => event.stopPropagation()}>
                   {track.spotify_id && onQueueTrack && (<Tooltip>
                     <TooltipTrigger asChild>
-                      <Button onClick={() => onQueueTrack(track, startIndex + index + 1)} size="icon" variant={trackQueued ? "outline" : "default"}>
+                      <Button onClick={() => onQueueTrack(track, startIndex + index + 1)} size="icon" variant="ghost" disabled={trackQueued} aria-label={`${t(trackQueued ? "translation.downloads.requested" : "translation.downloads.download")} · ${track.name}`}>
                         {trackQueued ? (<CircleCheck className="h-4 w-4 text-primary"/>) : (<Download className="h-4 w-4"/>)}
                       </Button>
                     </TooltipTrigger>
@@ -325,7 +294,7 @@ export function TrackList({ tracks, searchQuery, sortBy, selectedTracks, downloa
                   </Tooltip>)}
                   {track.spotify_id && (<Tooltip>
                     <TooltipTrigger asChild>
-                      <Button onClick={() => playPreview(track.spotify_id!, track.name)} size="icon" variant="outline" disabled={loadingPreview === track.spotify_id}>
+                      <Button aria-label={`${t(playingTrack === track.spotify_id ? "translation.migrated.TrackList.stopPreview" : "translation.migrated.TrackList.playPreview")} · ${track.name}`} onClick={() => playPreview(track.spotify_id!, track.name)} size="icon" variant="outline" disabled={loadingPreview === track.spotify_id}>
                         {loadingPreview === track.spotify_id ? (<Spinner />) : playingTrack === track.spotify_id ? (<Pause className="h-4 w-4"/>) : (<Play className="h-4 w-4"/>)}
                       </Button>
                     </TooltipTrigger>
@@ -333,39 +302,19 @@ export function TrackList({ tracks, searchQuery, sortBy, selectedTracks, downloa
                       <p>{playingTrack === track.spotify_id ? t("translation.migrated.TrackList.stopPreview") : t("translation.migrated.TrackList.playPreview")}</p>
                     </TooltipContent>
                   </Tooltip>)}
-                  {track.spotify_id && onDownloadLyrics && (<Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button onClick={() => onDownloadLyrics(track.spotify_id!, track.name, track.artists, track.album_name, folderName, isArtistDiscography, startIndex + index + 1, track.album_artist, track.release_date, track.disc_number)} size="icon" variant="outline" disabled={downloadingLyricsTrack === track.spotify_id}>
-                        {downloadingLyricsTrack === track.spotify_id ? (<Spinner />) : skippedLyrics?.has(track.spotify_id) ? (<FileCheck className="h-4 w-4"/>) : downloadedLyrics?.has(track.spotify_id) ? (<CircleCheck className="h-4 w-4"/>) : failedLyrics?.has(track.spotify_id) ? (<XCircle className="h-4 w-4"/>) : (<FileText className="h-4 w-4"/>)}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>{t("translation.common.downloadSeparateLyric")}</p>
-                    </TooltipContent>
-                  </Tooltip>)}
-                  {track.images && onDownloadCover && (<Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button onClick={() => {
-                        const trackId = track.spotify_id || `${track.name}-${track.artists}`;
-                        onDownloadCover(track.images, track.name, track.artists, track.album_name, folderName, isArtistDiscography, startIndex + index + 1, trackId, track.album_artist, track.release_date, track.disc_number);
-                    }} size="icon" variant="outline" disabled={downloadingCoverTrack === (track.spotify_id || `${track.name}-${track.artists}`)}>
-                        {downloadingCoverTrack === (track.spotify_id || `${track.name}-${track.artists}`) ? (<Spinner />) : skippedCovers?.has(track.spotify_id || `${track.name}-${track.artists}`) ? (<FileCheck className="h-4 w-4"/>) : downloadedCovers?.has(track.spotify_id || `${track.name}-${track.artists}`) ? (<CircleCheck className="h-4 w-4"/>) : failedCovers?.has(track.spotify_id || `${track.name}-${track.artists}`) ? (<XCircle className="h-4 w-4"/>) : (<ImageDown className="h-4 w-4"/>)}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>{t("translation.common.downloadSeparateCover")}</p>
-                    </TooltipContent>
-                  </Tooltip>)}
-                  {track.spotify_id && onCheckAvailability && (<Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button onClick={() => onCheckAvailability(track.spotify_id!)} size="icon" variant="outline" disabled={checkingAvailabilityTrack === track.spotify_id}>
-                        {getAvailabilityButtonIcon(track.spotify_id)}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent className="pointer-events-auto">
-                      <AvailabilityLinks availability={track.spotify_id ? availabilityMap?.get(track.spotify_id) : undefined}/>
-                    </TooltipContent>
-                  </Tooltip>)}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label={`${t("translation.common.more")} · ${track.name}`}><Ellipsis className="size-4" /></Button></DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="min-w-32">
+                      {track.spotify_id && onDownloadLyrics && <DropdownMenuItem disabled={downloadingLyricsTrack === track.spotify_id} onSelect={() => onDownloadLyrics(track.spotify_id!, track.name, track.artists, track.album_name, folderName, isArtistDiscography, startIndex + index + 1, track.album_artist, track.release_date, track.disc_number)}>
+                        {downloadingLyricsTrack === track.spotify_id ? <Spinner /> : skippedLyrics?.has(track.spotify_id) ? <FileCheck /> : downloadedLyrics?.has(track.spotify_id) ? <CircleCheck /> : failedLyrics?.has(track.spotify_id) ? <XCircle /> : <FileText />}
+                        {t("translation.common.downloadSeparateLyric")}
+                      </DropdownMenuItem>}
+                      {track.images && onDownloadCover && <DropdownMenuItem disabled={downloadingCoverTrack === (track.spotify_id || `${track.name}-${track.artists}`)} onSelect={() => onDownloadCover(track.images, track.name, track.artists, track.album_name, folderName, isArtistDiscography, startIndex + index + 1, track.spotify_id || `${track.name}-${track.artists}`, track.album_artist, track.release_date, track.disc_number)}>
+                        {downloadingCoverTrack === (track.spotify_id || `${track.name}-${track.artists}`) ? <Spinner /> : skippedCovers?.has(track.spotify_id || `${track.name}-${track.artists}`) ? <FileCheck /> : downloadedCovers?.has(track.spotify_id || `${track.name}-${track.artists}`) ? <CircleCheck /> : failedCovers?.has(track.spotify_id || `${track.name}-${track.artists}`) ? <XCircle /> : <ImageDown />}
+                        {t("translation.common.downloadSeparateCover")}
+                      </DropdownMenuItem>}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </td>
             </tr>);

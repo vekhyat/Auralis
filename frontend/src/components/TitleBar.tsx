@@ -12,6 +12,7 @@ import {
     ExternalLink,
     Minus,
     Square,
+    Usb,
     X,
 } from "lucide-react";
 import { WindowMinimise, WindowToggleMaximise, Quit } from "../../wailsjs/runtime/runtime";
@@ -42,10 +43,11 @@ interface TitleBarProps {
     currentPage: PageType;
     onPageChange: (page: DestinationPage | "debug") => void;
     queueCount?: number;
+    showDevices?: boolean;
     omnibar: OmnibarBinding;
 }
 
-export function TitleBar({ canGoBack = false, canGoForward = false, navigationDisabled = false, onBack, onForward, currentPage, onPageChange, queueCount = 0, omnibar }: TitleBarProps) {
+export function TitleBar({ canGoBack = false, canGoForward = false, navigationDisabled = false, onBack, onForward, currentPage, onPageChange, queueCount = 0, showDevices = false, omnibar }: TitleBarProps) {
     const { t } = useTranslation();
     const [isIssuesDialogOpen, setIsIssuesDialogOpen] = useState(false);
     const [hasIssueAgreement, setHasIssueAgreement] = useState(false);
@@ -64,10 +66,11 @@ export function TitleBar({ canGoBack = false, canGoForward = false, navigationDi
         main: t("translation.sidebar.library"),
         queue: t("translation.downloads.title"),
         history: t("translation.sidebar.history"),
+        devices: t("translation.devices.destination"),
         settings: t("translation.sidebar.settings"),
     };
-    const destinationIcons = { main: Library, queue: Download, history: History, settings: Settings };
-    const destinations = PRIMARY_DESTINATIONS.map((page) => ({
+    const destinationIcons = { main: Library, queue: Download, history: History, devices: Usb, settings: Settings };
+    const destinations = PRIMARY_DESTINATIONS.filter((page) => page !== "devices" || showDevices).map((page) => ({
         page,
         label: destinationLabel[page],
         active: currentPage === page,

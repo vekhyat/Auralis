@@ -18,7 +18,8 @@
       "week_one": "{{count}} week",
       "week_other": "{{count}} weeks",
       "year_one": "{{count}} year",
-      "year_other": "{{count}} years"
+      "year_other": "{{count}} years",
+      "ago": "{{value}} ago"
     },
     "album": {
       "fetchMetadataConfirm": "Do you want to fetch metadata for this album?"
@@ -434,7 +435,8 @@
       "rank": "Rank",
       "genres": "Genres",
       "verified": "Verified",
-      "discography": "Discography"
+      "discography": "Discography",
+      "chooseTracks": "Choose tracks"
     },
     "history": {
       "clearDownloadHistory": "Clear Download History?",
@@ -1041,8 +1043,8 @@
         "preparingDownload": "Preparing download..."
       },
       "FetchHistory": {
-        "recentFetch": "Recent Fetch",
-        "recentFetches": "Recent Fetches"
+        "recentFetch": "Recently explored",
+        "recentFetches": "Recently explored"
       },
       "FileManagerPage": {
         "failedToReadMetadata": "Failed to read metadata",
@@ -1256,6 +1258,7 @@
       "added": "{{name}} added to downloads",
       "addedPaused": "{{name}} added · downloads are paused",
       "trackCount": "{{count}} tracks",
+      "trackCount_one": "{{count}} track",
       "ready": "Ready when you are",
       "autoHint": "Downloads start automatically. Keep exploring while we take care of the files.",
       "downloading": "Downloading",
@@ -1268,7 +1271,69 @@
       "libraryTitle": "Your music, ready to keep.",
       "libraryHint": "Find a favorite. Explore the artwork and track list. Download it in one click.",
       "emptyLibrary": "Start with something you love",
-      "emptyLibraryHint": "Paste a Spotify link or search for an artist, album, or track above. Your recently explored music will appear here."
+      "emptyLibraryHint": "Paste a Spotify link or search for an artist, album, or track above. Your recently explored music will appear here.",
+      "checkSources": "Check download sources",
+      "cancelRequest": "Remove from downloads",
+      "saved": "Saved to your music folder",
+      "needsAttention": "Open Downloads to review this request",
+      "selectAll": "Select all displayed tracks",
+      "selectTrack": "Select {{name}} by {{artist}}",
+      "waitingCount": "{{count}} requests waiting",
+      "waitingCount_one": "{{count}} request waiting",
+      "quality": "Quality",
+      "qualityHint": "Choose the file for new downloads. If that quality is not available, the next best file is saved.",
+      "couldntGet": "Couldn't save this",
+      "couldntSave": "This one did not save. Try again in a moment.",
+      "tryAgain": "Try again",
+      "settingUp": "Setting up",
+      "ffmpegNeed": "Auralis needs an audio tool before it can save files.",
+      "couldntOpen": "Couldn't open this",
+      "couldntOpenHint": "This link didn't load. Try again in a moment."
+    },
+    "devices": {
+      "destination": "Devices",
+      "title": "Devices",
+      "intro": "Connect an iPod. Auralis copies the music and writes the player database, so iTunes is not required.",
+      "empty": "No iPod connected",
+      "emptyHint": "Plug the iPod into USB. If Windows does not show a drive, turn on disk mode on the iPod and connect it again.",
+      "warnNoDrive": "Windows cannot read this iPod. If it was formatted on a Mac, restore it and choose Windows (FAT32). If there is no drive letter, turn on disk mode and reconnect.",
+      "warnUnsupported": "This model uses a database Auralis cannot write safely. Nothing was changed.",
+      "warnUnverified": "This model is not in the known list. Songs can still be sent. Eject and check the iPod before you rely on the copy.",
+      "warnDatabase": "The database on the iPod could not be read. Send is off so it is not replaced with an empty library. Doctor can rebuild it after keeping a backup.",
+      "warnRockbox": "Rockbox is installed and the stock database is not written. Files are copied as they are, including FLAC. The original player will not list them.",
+      "warnNoFirewire": "This iPod needs a FireWire ID to sign its database, and none was found. Send is off.",
+      "free": "{{free}} free of {{total}}",
+      "tracks": "Tracks",
+      "sendFiles": "Send files",
+      "sendFolder": "Send folder",
+      "eject": "Eject",
+      "remove": "Remove",
+      "alac": "Lossless ALAC",
+      "aac": "Smaller AAC",
+      "copyNote": "MP3, AAC, ALAC, WAV, and AIFF files that already fit are copied unchanged. Everything else is converted.",
+      "sending": "Copying",
+      "writing": "Writing the database",
+      "doctor": "Doctor",
+      "orphans": "On the iPod, not in the database",
+      "missing": "In the database, file missing",
+      "addOrphans": "Add orphans",
+      "dropMissing": "Drop missing",
+      "rebuild": "Rebuild database",
+      "connected": "{{name}} connected",
+      "sent": "Sent {{count}}",
+      "skipped": "Skipped {{count}}",
+      "ejectFailed": "Windows did not eject the iPod. Use Safely Remove Hardware.",
+      "doctorOk": "Database updated",
+      "covers": "Album art on the iPod screen is not written yet. Songs, artists, and albums still come from the file tags.",
+      "backup": "The previous database is kept as iTunesDB.auralis.bak.",
+      "modeStock": "Stock firmware",
+      "modeRockbox": "Rockbox",
+      "modeUnreadable": "Not readable",
+      "modeUnsupported": "Not supported",
+      "noTracks": "No tracks on this iPod yet.",
+      "confirmRemove": "Remove the selected songs from the iPod? The files are deleted.",
+      "confirmRebuild": "Rebuild the database from the files on the iPod? The current database is backed up first.",
+      "dualBoot": "Rockbox is also installed. The same files are listed in Playlists/Auralis.m3u8."
     },
     "communitySources": {
       "title": "Community download sources",

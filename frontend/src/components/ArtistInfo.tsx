@@ -7,7 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { SearchAndSort } from "./SearchAndSort";
 import { TrackList } from "./TrackList";
 import { InspectorPane } from "./InspectorPane";
-import { CatalogRow } from "./CatalogRow";
+import { ArtworkCard } from "./ArtworkCard";
 import type { TrackMetadata, TrackAvailability } from "@/types/api";
 import { downloadHeader, downloadGalleryImage, downloadAvatar } from "@/lib/api";
 import { getAlbumCategoryLabel, getSettings } from "@/lib/settings";
@@ -172,7 +172,7 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
             const first = tracks[0];
             added += addCollectionToQueue({
                 type: "album", name: first.album_name, artist: first.album_artist || first.artists,
-                info: `${tracks.length} ${t("translation.common.tracks")}`, image: first.images || "",
+                info: t("translation.downloads.trackCount", { count: tracks.length }), image: first.images || "",
                 folderName: first.album_name, isAlbum: true, tracks,
             }).added;
         }
@@ -457,7 +457,7 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
                     {formatAlbumFilterLabel(filter)}
                   </button>))}
               </div>)}
-            <div className="border-b border-border">
+            <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 xl:grid-cols-5">
               {filteredAlbums.map((album) => {
                 const albumTracks = trackList.filter(t => t.album_id === album.id);
                 const tracksWithId = albumTracks.filter(t => t.spotify_id);
@@ -473,7 +473,7 @@ export function ArtistInfo({ artistInfo, albumList, trackList, searchQuery, sort
                         return;
                     onToggleSelectAll(albumTracks);
                 };
-                return (<CatalogRow
+                return (<ArtworkCard
                   key={album.id}
                   cover={album.images || undefined}
                   coverFallback="AL"

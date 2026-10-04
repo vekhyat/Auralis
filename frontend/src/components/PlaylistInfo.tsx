@@ -1,10 +1,9 @@
 import { translateMessage } from "@/i18n";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import { FolderOpen, ImageDown, FileText, Download, CircleCheck } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Ellipsis, FolderOpen, ImageDown, FileText, Download, CircleCheck } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { SearchAndSort } from "./SearchAndSort";
 import { TrackList } from "./TrackList";
 import { InspectorPane } from "./InspectorPane";
 import { getSettings } from "@/lib/settings";
@@ -82,7 +81,7 @@ interface PlaylistInfoProps {
     onTrackClick: (track: TrackMetadata) => void;
     onBack?: () => void;
 }
-export function PlaylistInfo({ playlistInfo, trackList, searchQuery, sortBy, selectedTracks, downloadedTracks, failedTracks, skippedTracks, currentPage, itemsPerPage, downloadedLyrics, failedLyrics, skippedLyrics, downloadingLyricsTrack, checkingAvailabilityTrack, availabilityMap, downloadedCovers, failedCovers, skippedCovers, downloadingCoverTrack, isBulkDownloadingCovers, isBulkDownloadingLyrics, isMetadataLoading = false, onSearchChange, onSortChange, onToggleTrack, onToggleSelectAll, onSelectTrackRange, onDownloadLyrics, onDownloadCover, onCheckAvailability, onDownloadAllLyrics, onDownloadAllCovers, onQueueAll, onQueueSelected, onQueueTrack, onOpenFolder, onPageChange, onAlbumClick, onArtistClick, onTrackClick, onBack, }: PlaylistInfoProps) {
+export function PlaylistInfo({ playlistInfo, trackList, searchQuery, sortBy, selectedTracks, downloadedTracks, failedTracks, skippedTracks, currentPage, itemsPerPage, downloadedLyrics, failedLyrics, skippedLyrics, downloadingLyricsTrack, checkingAvailabilityTrack, availabilityMap, downloadedCovers, failedCovers, skippedCovers, downloadingCoverTrack, isBulkDownloadingCovers, isBulkDownloadingLyrics, isMetadataLoading = false, onSearchChange: _onSearchChange, onSortChange: _onSortChange, onToggleTrack, onToggleSelectAll, onSelectTrackRange, onDownloadLyrics, onDownloadCover, onCheckAvailability, onDownloadAllLyrics, onDownloadAllCovers, onQueueAll, onQueueSelected, onQueueTrack, onOpenFolder, onPageChange, onAlbumClick, onArtistClick, onTrackClick, onBack, }: PlaylistInfoProps) {
     const { t } = useTranslation();
     const settings = getSettings();
     const playlistName = playlistInfo.owner.name;
@@ -151,36 +150,23 @@ export function PlaylistInfo({ playlistInfo, trackList, searchQuery, sortBy, sel
             setDownloadingPlaylistCover(false);
         }
     };
+    const trackCountLabel = showStreamingProgress
+        ? t("translation.migrated.PlaylistInfo.tracks", { value1: fetchedTrackCount.toLocaleString(), value2: totalTrackCount.toLocaleString() })
+        : t("translation.downloads.trackCount", { count: Math.max(totalTrackCount, fetchedTrackCount) });
     return (<div className="collection-layout flex flex-col gap-7">
       <div className="min-w-0 flex-1 space-y-4">
-        <SearchAndSort searchQuery={searchQuery} sortBy={sortBy} onSearchChange={onSearchChange} onSortChange={onSortChange}/>
         <TrackList tracks={trackList} searchQuery={searchQuery} sortBy={sortBy} selectedTracks={selectedTracks} downloadedTracks={downloadedTracks} failedTracks={failedTracks} skippedTracks={skippedTracks} currentPage={currentPage} itemsPerPage={itemsPerPage} showCheckboxes={true} hideAlbumColumn={false} folderName={playlistFolderName} downloadedLyrics={downloadedLyrics} failedLyrics={failedLyrics} skippedLyrics={skippedLyrics} downloadingLyricsTrack={downloadingLyricsTrack} checkingAvailabilityTrack={checkingAvailabilityTrack} availabilityMap={availabilityMap} downloadedCovers={downloadedCovers} failedCovers={failedCovers} skippedCovers={skippedCovers} downloadingCoverTrack={downloadingCoverTrack} onToggleTrack={onToggleTrack} onToggleSelectAll={onToggleSelectAll} onSelectTrackRange={onSelectTrackRange} onQueueTrack={onQueueTrack} onDownloadLyrics={onDownloadLyrics} onDownloadCover={onDownloadCover} onCheckAvailability={onCheckAvailability} onPageChange={onPageChange} onAlbumClick={onAlbumClick} onArtistClick={onArtistClick} onTrackClick={onTrackClick}/>
       </div>
 
       <InspectorPane
         eyebrow={t("translation.playlistInfo.playlist")}
         title={playlistName}
-        subtitle={playlistInfo.description}
+        subtitle={<>
+          {playlistInfo.owner.display_name}
+          {" · "}
+          <span className="font-mono tabular-nums">{trackCountLabel}</span>
+        </>}
         cover={playlistInfo.cover || undefined}
-        rows={[
-            {
-                label: t("translation.catalog.owner"),
-                value: (<span className="flex items-center justify-end gap-2 truncate">
-                    {playlistInfo.owner.images ? (<img src={playlistInfo.owner.images} alt="" className="size-4 rounded-[2px] object-cover"/>) : null}
-                    <span className="truncate">{playlistInfo.owner.display_name}</span>
-                  </span>),
-            },
-            {
-                label: t("translation.artistInfo.tracks"),
-                value: showStreamingProgress
-                    ? <span className="font-mono tabular-nums">{`${fetchedTrackCount.toLocaleString()} / ${totalTrackCount.toLocaleString()}`}</span>
-                    : <span className="font-mono tabular-nums">{Math.max(totalTrackCount, fetchedTrackCount).toLocaleString()}</span>,
-            },
-            {
-                label: t("translation.catalog.followers"),
-                value: <span className="font-mono tabular-nums">{playlistInfo.followers.total.toLocaleString()}</span>,
-            },
-        ]}
         actions={<>
           <Button size="sm" variant={allTracksQueued ? "outline" : "default"} onClick={onQueueAll}>
             {allTracksQueued ? (<CircleCheck className="size-3.5"/>) : (<Download className="size-3.5"/>)}
@@ -188,38 +174,29 @@ export function PlaylistInfo({ playlistInfo, trackList, searchQuery, sortBy, sel
           </Button>
           {selectedTracks.length > 0 && onQueueSelected && (<Button size="sm" variant="outline" onClick={onQueueSelected}>{selectedTracksQueued ? (<CircleCheck className="size-3.5"/>) : (<Download className="size-3.5"/>)}
             {selectedTracksQueued ? t("translation.downloads.requested") : t("translation.downloads.downloadSelected", { value1: selectedTracks.length.toLocaleString() })}</Button>)}
-          {onDownloadAllLyrics && (<Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="outline" size="icon-sm" disabled={isBulkDownloadingLyrics} onClick={onDownloadAllLyrics}>
-                  {isBulkDownloadingLyrics ? <Spinner /> : <FileText className="size-3.5"/>}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent><p>{t("translation.common.downloadAllLyrics")}</p></TooltipContent>
-            </Tooltip>)}
-          {onDownloadAllCovers && (<Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="outline" size="icon-sm" disabled={isBulkDownloadingCovers} onClick={onDownloadAllCovers}>
-                  {isBulkDownloadingCovers ? <Spinner /> : <ImageDown className="size-3.5"/>}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent><p>{t("translation.common.downloadAllSeparateCovers")}</p></TooltipContent>
-            </Tooltip>)}
-          {playlistInfo.cover && (<Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="outline" size="icon-sm" disabled={downloadingPlaylistCover} onClick={() => void handleDownloadPlaylistCover()}>
-                  {downloadingPlaylistCover ? <Spinner /> : <ImageDown className="size-3.5"/>}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent><p>{t("translation.playlistInfo.downloadSeparatePlaylistCover")}</p></TooltipContent>
-            </Tooltip>)}
-          {downloadedTracks.size > 0 && (<Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="outline" size="icon-sm" onClick={onOpenFolder}>
-                  <FolderOpen className="size-3.5"/>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent><p>{t("translation.common.openFolder")}</p></TooltipContent>
-            </Tooltip>)}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1.5">{t("translation.common.more")}<Ellipsis className="size-3.5"/></Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              {onDownloadAllLyrics && <DropdownMenuItem disabled={isBulkDownloadingLyrics} onSelect={onDownloadAllLyrics}>
+                {isBulkDownloadingLyrics ? <Spinner /> : <FileText className="size-3.5"/>}
+                {t("translation.common.downloadAllLyrics")}
+              </DropdownMenuItem>}
+              {onDownloadAllCovers && <DropdownMenuItem disabled={isBulkDownloadingCovers} onSelect={onDownloadAllCovers}>
+                {isBulkDownloadingCovers ? <Spinner /> : <ImageDown className="size-3.5"/>}
+                {t("translation.common.downloadAllSeparateCovers")}
+              </DropdownMenuItem>}
+              {playlistInfo.cover && <DropdownMenuItem disabled={downloadingPlaylistCover} onSelect={() => void handleDownloadPlaylistCover()}>
+                {downloadingPlaylistCover ? <Spinner /> : <ImageDown className="size-3.5"/>}
+                {t("translation.playlistInfo.downloadSeparatePlaylistCover")}
+              </DropdownMenuItem>}
+              {downloadedTracks.size > 0 && <DropdownMenuItem onSelect={onOpenFolder}>
+                <FolderOpen className="size-3.5"/>
+                {t("translation.common.openFolder")}
+              </DropdownMenuItem>}
+            </DropdownMenuContent>
+          </DropdownMenu>
           {onBack ? (<Button variant="ghost" size="sm" className="h-8 px-2 text-xs text-muted-foreground" onClick={onBack}>
               {t("translation.common.back")}
             </Button>) : null}

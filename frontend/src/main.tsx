@@ -37,7 +37,7 @@ async function bootstrap() {
     createRoot(document.getElementById("root")!).render(<StrictMode>
         <MotionConfig reducedMotion="user">
           <App />
-          <Toaster position="bottom-left" duration={1000}/>
+          <Toaster position="bottom-left" offset={{ bottom: 92, left: 20 }} duration={1000}/>
         </MotionConfig>
       </StrictMode>);
 }

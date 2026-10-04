@@ -58,4 +58,31 @@ test("a valid legacy queue is removed only after its database save succeeds", as
   assert.equal(await fixture.queue.flushQueuePersistence(), true);
 });
 
+test("new download requests and retries signal the automatic worker without repeating completed tracks", async (t) => {
+  const { queue } = await storageFixture(t, "[]");
+  let signals = 0;
+  const unsubscribe = queue.subscribeQueueAutoStart(() => { signals += 1; });
+  t.after(unsubscribe);
+  const tracks = [
+    { spotify_id: "first", name: "First", artists: "Artist", album_name: "Album", images: "", external_urls: "", duration_ms: 1000, track_number: 1, release_date: "2026" },
+    { spotify_id: "second", name: "Second", artists: "Artist", album_name: "Album", images: "", external_urls: "", duration_ms: 1000, track_number: 2, release_date: "2026" },
+  ];
+  queue.addCollectionToQueue({ type: "album", name: "Album", artist: "Artist", info: "2 tracks", image: "", tracks });
+  assert.equal(signals, 1);
+  const item = queue.getQueue()[0];
+  queue.addCollectionToQueue({ type: "album", name: "Album", artist: "Artist", info: "2 tracks", image: "", tracks });
+  assert.equal(signals, 1, "duplicate requests do not schedule another transfer");
+  queue.updateQueueItem(item.id, { status: "partial", trackResults: { first: "done", second: "failed" }, trackFilePaths: { first: "C:/Music/first.flac" } });
+  queue.retryQueueItem(item.id);
+  assert.equal(signals, 2);
+  assert.deepEqual(queue.getQueue()[0].trackResults, { first: "done" });
+  assert.deepEqual(queue.getRemainingQueueTracks(queue.getQueue()[0]).map((track) => track.spotify_id), ["second"]);
+  queue.updateQueueItem(item.id, { status: "running" });
+  queue.retryQueueItem(item.id);
+  assert.equal(signals, 2, "retry cannot replace a running request");
+  queue.addTracksToQueue([{ ...tracks[0], spotify_id: "third" }]);
+  assert.equal(signals, 3, "single tracks share the same automatic worker");
+  await queue.flushQueuePersistence();
+});
+
 test.after(() => hooks.deregister());

@@ -1,14 +1,13 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowUpDown, Search, XCircle } from "lucide-react";
+import { ArrowUpDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { FetchHistory, type HistoryItem } from "@/components/FetchHistory";
 import { ArtworkCard } from "./ArtworkCard";
-import { Music2, ArrowUp } from "lucide-react";
-import { InspectorPane, InspectorLinkAction } from "./InspectorPane";
+import { Music2 } from "lucide-react";
+import { InspectorPane } from "./InspectorPane";
 import type { SmartSearchController, ResultTab } from "@/hooks/smart-search-core";
 import { cn } from "@/lib/utils";
 
@@ -25,6 +24,9 @@ interface CatalogPaneProps {
     onHistorySelect: (item: HistoryItem) => void;
     onHistoryRemove: (id: string) => void;
     onRecentSearchSelect: (query: string) => void;
+    onDownloadResult: (url: string) => void;
+    /** Result URLs whose tracks are still being read for a download. */
+    requestingDownloads: ReadonlySet<string>;
     hasMetadata: boolean;
 }
 
@@ -33,20 +35,19 @@ interface CatalogPaneProps {
  * one-line hint; a query turns it into dense result rows with the selected
  * entry inspected on the right.
  */
-export function CatalogPane({ controller, query, history, onHistorySelect, onHistoryRemove, onRecentSearchSelect, hasMetadata }: CatalogPaneProps) {
+export function CatalogPane({ controller, query, history, onHistorySelect, onHistoryRemove, onRecentSearchSelect, onDownloadResult, requestingDownloads, hasMetadata }: CatalogPaneProps) {
     const { t } = useTranslation();
     if (controller.inputKind === "search") {
-        return <SearchResults controller={controller} query={query}/>;
+        return <SearchResults controller={controller} query={query} onDownloadResult={onDownloadResult} requestingDownloads={requestingDownloads}/>;
     }
     if (hasMetadata) {
         return null;
     }
     return (<div className="flex min-h-full flex-col">
-      <div className="library-intro mb-5 flex items-start justify-between gap-6">
-        <div><h1 className="text-3xl font-semibold tracking-tight">{t("translation.downloads.libraryTitle")}</h1>
-        <p className="mt-3 max-w-[60ch] text-sm leading-6 text-muted-foreground">{t("translation.downloads.libraryHint")}</p></div>
-        <ArrowUp className="mt-2 hidden size-5 text-muted-foreground sm:block" />
-      </div>
+      {history.length === 0 && <div className="library-intro mb-5">
+        <h1 className="text-3xl font-semibold tracking-tight">{t("translation.downloads.libraryTitle")}</h1>
+        <p className="mt-3 max-w-[60ch] text-sm leading-6 text-muted-foreground">{t("translation.downloads.libraryHint")}</p>
+      </div>}
       {history.length === 0 && <div className="my-8 flex min-h-52 items-center gap-6 rounded-xl border border-dashed bg-card p-8">
         <Music2 className="size-12 shrink-0 text-primary" strokeWidth={1} />
         <div><h2 className="text-lg font-semibold">{t("translation.downloads.emptyLibrary")}</h2><p className="mt-2 max-w-[52ch] text-sm leading-6 text-muted-foreground">{t("translation.downloads.emptyLibraryHint")}</p></div>
@@ -72,9 +73,11 @@ export function CatalogPane({ controller, query, history, onHistorySelect, onHis
 
 const TAB_KEYS: ResultTab[] = ["tracks", "albums", "artists", "playlists"];
 
-function SearchResults({ controller, query }: {
+function SearchResults({ controller, query, onDownloadResult, requestingDownloads }: {
     controller: SmartSearchController;
     query: string;
+    onDownloadResult: (url: string) => void;
+    requestingDownloads: ReadonlySet<string>;
 }) {
     const { t } = useTranslation();
     const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -88,7 +91,7 @@ function SearchResults({ controller, query }: {
         .map((key) => ({ key, count: controller.getTabCount(key) }))
         .filter((tab) => tab.count > 0);
     const resultsForTab = controller.sortedResults[controller.activeTab];
-    const selected = resultsForTab.find((item) => item.id === selectedId) ?? null;
+    const selected = resultsForTab.find((item) => item.id === selectedId) ?? resultsForTab[0] ?? null;
     const sortOptions = getSortOptions(controller.activeTab, t);
 
     if (!controller.isSearching && !controller.hasAnyResults) {
@@ -119,18 +122,6 @@ function SearchResults({ controller, query }: {
             </button>))}
           </div>
           <div className="flex items-center gap-2">
-            <div className="relative">
-              <Search className="absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground"/>
-              <Input
-                value={controller.resultFilter}
-                onChange={(event) => controller.setResultFilter(event.target.value)}
-                placeholder={t("translation.migrated.SearchBar.search", { value1: getPluralTabLabel(controller.activeTab, t).toLowerCase() })}
-                className="h-8 w-44 pr-7 pl-7 text-[13px]"
-              />
-              {controller.resultFilter ? (<button type="button" aria-label={t("translation.migrated.SearchBar.clearSearchInput")} className="absolute top-1/2 right-1.5 -translate-y-1/2 cursor-pointer text-muted-foreground transition-colors hover:text-foreground" onClick={() => controller.setResultFilter("")}>
-                <XCircle className="size-3.5"/>
-              </button>) : null}
-            </div>
             <Select value={controller.sortOrder} onValueChange={controller.setSortOrder}>
               <SelectTrigger className="h-8 w-fit gap-1.5 bg-background text-xs">
                 <ArrowUpDown className="size-3.5 text-muted-foreground"/>
@@ -154,7 +145,7 @@ function SearchResults({ controller, query }: {
             title={item.name}
             subtitle={getResultSubtitle(item)}
             meta={getResultMeta(item)}
-            selected={selectedId === item.id}
+            selected={selected?.id === item.id}
             onClick={() => setSelectedId(item.id)}
             onDoubleClick={() => controller.fetchResult(item.external_urls)}
           />))}
@@ -174,15 +165,18 @@ function SearchResults({ controller, query }: {
         subtitle={selected.artists || selected.owner || undefined}
         cover={selected.images || undefined}
         rows={buildInspectorRows(selected, t)}
-        actions={<>
-          <Button size="sm" disabled={controller.isSearching} onClick={() => controller.fetchResult(selected.external_urls)}>
-            {t("translation.catalog.fetchLossless")}
+        actions={selected.type === "artist" ? (<Button size="sm" disabled={controller.isSearching} onClick={() => controller.fetchResult(selected.external_urls)}>
+            {t("translation.catalog.discography")}
+          </Button>) : (<>
+          <Button size="sm" disabled={controller.isSearching || requestingDownloads.has(selected.external_urls)} onClick={() => onDownloadResult(selected.external_urls)}>
+            {requestingDownloads.has(selected.external_urls) ? <Spinner /> : null}
+            {t("translation.downloads.download")}
           </Button>
-          <InspectorLinkAction label={linkLabel(selected.external_urls)} url={selected.external_urls}/>
-        </>}
-      />) : (<aside className="hidden w-72 shrink-0 rounded-xl bg-secondary/50 p-6 lg:block">
-        <p className="text-sm text-muted-foreground">{t("translation.catalog.selectToInspect")}</p>
-      </aside>)}
+          <Button size="sm" variant="outline" disabled={controller.isSearching} onClick={() => controller.fetchResult(selected.external_urls)}>
+            {t("translation.catalog.chooseTracks")}
+          </Button>
+        </>)}
+      />) : null}
     </div>);
 }
 
@@ -234,15 +228,6 @@ function getResultMeta(item: { duration_ms?: number; release_date?: string; tota
     if (item.total_tracks)
         return String(item.total_tracks);
     return "";
-}
-
-function linkLabel(url: string): string {
-    try {
-        return new URL(url).hostname.replace(/^www\./, "");
-    }
-    catch {
-        return url.slice(0, 28);
-    }
 }
 
 type TFunc = (key: string, opts?: Record<string, unknown>) => string;

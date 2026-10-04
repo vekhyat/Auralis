@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/vekhyat/Auralis/backend"
+	"github.com/vekhyat/Auralis/backend/devices/ipod"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -31,6 +32,8 @@ type App struct {
 	replayGainAnalysisCancel     context.CancelFunc
 	replayGainAnalysisGeneration uint64
 	metadataStreamGeneration     uint64
+	ipods                        *ipod.Manager
+	ipodStop                     chan struct{}
 }
 
 type CurrentIPInfo struct {
@@ -322,7 +325,7 @@ func (a *App) getFirstArtist(artistString string) string {
 
 func (a *App) startup(ctx context.Context) {
 	backend.SetVerificationPresentationHandler(func(p backend.VerificationPresentation) {
-		runtime.EventsEmit(ctx,"source-verification",sourceVerificationView(p))
+		runtime.EventsEmit(ctx, "source-verification", sourceVerificationView(p))
 	})
 	a.ctx = ctx
 	if err := backend.RegisterAuralisProtocol(); err != nil {
@@ -355,9 +358,11 @@ func (a *App) startup(ctx context.Context) {
 	if err := backend.MigratePersistedConfigSettings(); err != nil {
 		fmt.Printf("Failed to migrate persisted config settings: %v\n", err)
 	}
+	a.startIPodWatch()
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	a.stopIPodWatch()
 	backend.StopAcceptingDownloadsAndDrain()
 	backend.CloseLibraryIndexDB()
 	if err := backend.ClosePersistentQueueDB(); err != nil {
@@ -1255,8 +1260,8 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 		_ = os.RemoveAll(stagingDir)
 	}()
 	req.OutputDir = stagingDir
-
 	sourceStarted := time.Now()
+
 	switch req.Service {
 	case "amazon":
 

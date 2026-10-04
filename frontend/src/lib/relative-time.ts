@@ -54,5 +54,5 @@ export function formatRelativeTime(date: Date | string | number): string {
     else {
         return t("translation.time.justNow");
     }
-    return t("translation.time.releasedAgo", { value: parts.slice(0, 2).join(" ") });
+    return t("translation.time.ago", { value: parts.slice(0, 2).join(" ") });
 }

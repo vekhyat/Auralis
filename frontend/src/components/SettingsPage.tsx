@@ -8,19 +8,46 @@ import { Input } from "@/components/ui/input";
 import { InputWithContext } from "@/components/ui/input-with-context";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, } from "@/components/ui/select";
-import { Tooltip, TooltipContent, TooltipTrigger, } from "@/components/ui/tooltip";
-import { FolderOpen, Save, RotateCcw, CircleHelp, ArrowRight, Trash2, ExternalLink, DatabaseBackup, Search, FolderLock } from "lucide-react";
+import { FolderOpen, Save, RotateCcw, Trash2, ExternalLink, DatabaseBackup, Search, FolderLock } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import { getSettings, getSettingsWithDefaults, loadSettings, saveSettings, resetToDefaultSettings, applyThemeMode, TEMPLATE_VARIABLES, DEFAULT_SETTINGS, sanitizeAutoOrder, type Settings as SettingsType, type MetadataTagToggles, type ExistingFileCheckMode, } from "@/lib/settings";
+import { getSettings, getSettingsWithDefaults, loadSettings, saveSettings, resetToDefaultSettings, applyThemeMode, TEMPLATE_VARIABLES, DEFAULT_SETTINGS, type Settings as SettingsType, type MetadataTagToggles, type ExistingFileCheckMode, } from "@/lib/settings";
 import { FormatEditor } from "@/components/FormatEditor";
 import { BackupSettings, RestoreSettings, SelectFolder, OpenConfigFolder } from "../../wailsjs/go/main/App";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { openExternal } from "@/lib/utils";
-import { AmazonIcon, AppleIcon, DeezerIcon, JioSaavnIcon, QobuzIcon, SonglinkIcon, SongstatsIcon, TidalIcon } from "./PlatformIcons";
 import i18n, { APP_LANGUAGES, type AppLanguage } from "@/i18n";
 import chatGPTIcon from "@/assets/icons/chatgpt.svg";
 import geminiIcon from "@/assets/icons/gemini.png";
+function qualityChoice(settings: SettingsType): "16" | "24" | "atmos" {
+    if (settings.downloader === "tidal") {
+        if (settings.tidalQuality === "ATMOS")
+            return "atmos";
+        if (settings.tidalQuality === "HI_RES_LOSSLESS")
+            return "24";
+        return "16";
+    }
+    if (settings.downloader === "qobuz")
+        return settings.qobuzQuality === "27" ? "24" : "16";
+    if (settings.downloader === "amazon") {
+        if (settings.amazonQuality === "atmos")
+            return "atmos";
+        if (settings.amazonQuality === "24")
+            return "24";
+        return "16";
+    }
+    return settings.autoQuality === "24" || settings.autoQuality === "atmos" ? settings.autoQuality : "16";
+}
+function withAutoQuality(settings: SettingsType, quality: "16" | "24" | "atmos"): SettingsType {
+    return {
+        ...settings,
+        downloader: "auto",
+        autoQuality: quality,
+        tidalQuality: quality === "atmos" ? "ATMOS" : quality === "24" ? "HI_RES_LOSSLESS" : "LOSSLESS",
+        qobuzQuality: quality === "24" ? "27" : "6",
+        amazonQuality: quality,
+    };
+}
 interface SettingsPageProps {
     onUnsavedChangesChange?: (hasUnsavedChanges: boolean) => void;
     onResetRequest?: (resetFn: () => void) => void;
@@ -75,7 +102,7 @@ const METADATA_TAG_OPTIONS: Array<{
     { key: "discNumber", labelKey: "translation.settings.discNumber", example: "1/1" },
     { key: "genre", labelKey: "translation.settings.genre", example: "K-Pop" },
     { key: "composer", labelKey: "translation.settings.composer", example: "EJAE / Mark Sonnenblick / Joong Gyu Kwak" },
-    { key: "copyright", labelKey: "translation.common.copyright", example: "© 2025 Visva Records / Republic Records" },
+    { key: "copyright", labelKey: "translation.common.copyright", example: "Â© 2025 Visva Records / Republic Records" },
     { key: "label", labelKey: "translation.settings.labelPublisher", example: "K-Pop Demon Hunters" },
     { key: "isrc", labelKey: "literal.common.isrc", example: "QZ8BZ2513510" },
     { key: "upc", labelKey: "literal.common.upc", example: "00602478398346" },
@@ -101,13 +128,9 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
         ? LYRICS_TRANSLATION_LANGUAGES.filter((language) => language.code.includes(normalizedLyricsLanguageSearch)
             || t(language.labelKey).toLocaleLowerCase().includes(normalizedLyricsLanguageSearch))
         : LYRICS_TRANSLATION_LANGUAGES;
-    const effectiveDownloader = tempSettings.downloader;
-    const effectiveAutoOrder = sanitizeAutoOrder(tempSettings.autoOrder);
-    const autoAtmosAvailable = !effectiveAutoOrder.includes("qobuz") &&
-        (effectiveAutoOrder.includes("tidal") || effectiveAutoOrder.includes("amazon"));
-    const isAtmosSelected = (effectiveDownloader === "tidal" && tempSettings.tidalQuality === "ATMOS") ||
-        (effectiveDownloader === "amazon" && tempSettings.amazonQuality === "atmos") ||
-        (effectiveDownloader === "auto" && tempSettings.autoQuality === "atmos");
+    const selectedQuality = qualityChoice(tempSettings);
+    const isAtmosSelected = selectedQuality === "atmos";
+    const showCdFallback = selectedQuality === "24" || (isAtmosSelected && tempSettings.allowAtmosFallback && tempSettings.atmosFallbackQuality === "24");
     const resetToSaved = useCallback(() => {
         const freshSavedSettings = getSettings();
         flushSync(() => {
@@ -154,7 +177,8 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
     }, []);
     const handleSave = async () => {
         if (await communitySourcesRef.current?.save() === false) return;
-        await saveSettings(tempSettings);
+        // The page no longer offers a store. Saving applies the visible quality and lets the app pick the file.
+        await saveSettings(withAutoQuality(tempSettings, qualityChoice(tempSettings)));
         await i18n.changeLanguage(tempSettings.language);
         const persistedSettings = getSettings();
         setSavedSettings(persistedSettings);
@@ -233,17 +257,8 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
             setBackupAction(null);
         }
     };
-    const handleTidalQualityChange = async (value: "LOSSLESS" | "HI_RES_LOSSLESS" | "ATMOS") => {
-        setTempSettings((prev) => ({ ...prev, tidalQuality: value }));
-    };
-    const handleQobuzQualityChange = (value: "6" | "7" | "27") => {
-        setTempSettings((prev) => ({ ...prev, qobuzQuality: value }));
-    };
-    const handleAmazonQualityChange = (value: "16" | "24" | "atmos") => {
-        setTempSettings((prev) => ({ ...prev, amazonQuality: value }));
-    };
-    const handleAutoQualityChange = async (value: "16" | "24" | "atmos") => {
-        setTempSettings((prev) => ({ ...prev, autoQuality: value }));
+    const handleQualityChange = (value: "16" | "24" | "atmos") => {
+        setTempSettings((prev) => withAutoQuality(prev, value));
     };
     const persistCustomTidalApi = useCallback(async (nextValue: string) => {
         const normalizedValue = nextValue.trim().replace(/\/+$/g, "");
@@ -406,334 +421,33 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
               </div>
         </section>
         <section className="max-w-2xl space-y-4">
-          <h2 className="border-b border-border pb-1.5 text-sm font-semibold tracking-tight">{t("translation.trackInfo.download")}</h2>
-              <div className="space-y-2">
-                <Label htmlFor="link-resolver">{t("translation.migrated.SettingsPage.linkResolver")}</Label>
-                <div className="flex items-center gap-3 flex-wrap">
-                  <Select value={tempSettings.linkResolver} onValueChange={(value: "songstats" | "songlink") => setTempSettings((prev) => ({
-                ...prev,
-                linkResolver: value,
-            }))}>
-                    <SelectTrigger id="link-resolver" className="h-9 w-fit min-w-35">
-                      <SelectValue placeholder={t("translation.migrated.SettingsPage.selectALinkResolver")}/>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="songlink">
-                        <span className="flex items-center gap-2">
-                          <SonglinkIcon className="h-4 w-4 shrink-0"/>
-                          {t("translation.migrated.SettingsPage.songlink")}
-                        </span>
-                      </SelectItem>
-                      <SelectItem value="songstats">
-                        <span className="flex items-center gap-2">
-                          <SongstatsIcon className="h-4 w-4 shrink-0"/>
-                          {t("literal.platformIcons.songstats")}
-                        </span>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3 pt-2">
-                <Switch id="allow-link-resolver-fallback" checked={tempSettings.allowResolverFallback} onCheckedChange={(checked) => setTempSettings((prev) => ({
-                ...prev,
-                allowResolverFallback: checked,
-            }))}/>
-                <Label htmlFor="allow-link-resolver-fallback" className="text-sm font-normal cursor-pointer">
-                  {t("translation.migrated.SettingsPage.allowResolverFallback")}
-                </Label>
-              </div>
-
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <Label className="text-base font-semibold">{t("translation.sources.community")}</Label>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <CircleHelp className="h-3.5 w-3.5 text-muted-foreground cursor-help"/>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">
-                      <p className="text-xs whitespace-nowrap">{t("translation.migrated.SettingsPage.1Track30s")}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="downloader">{t("translation.history.source")}</Label>
-                <div className="flex items-center gap-3 flex-wrap lg:flex-nowrap">
-                  <Select value={effectiveDownloader} onValueChange={(value: SettingsType["downloader"]) => setTempSettings((prev) => ({
-                ...prev,
-                downloader: value,
-            }))}>
-                    <SelectTrigger id="downloader" className="h-9 w-fit">
-                      <SelectValue placeholder={t("translation.migrated.SettingsPage.selectASource")}/>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="auto">{t("translation.settings.auto")}</SelectItem>
-                      <SelectItem value="tidal">
-                        <span className="flex items-center gap-2">
-                          <TidalIcon />
-                          {t("literal.common.tidal")}
-                        </span>
-                      </SelectItem>
-                      <SelectItem value="qobuz">
-                        <span className="flex items-center gap-2">
-                          <QobuzIcon />
-                          {t("literal.common.qobuz")}
-                        </span>
-                      </SelectItem>
-                      <SelectItem value="amazon">
-                        <span className="flex items-center gap-2">
-                          <AmazonIcon />
-                          {t("literal.common.amazonMusic")}
-                        </span>
-                      </SelectItem>
-                      <SelectItem value="deezer">
-                        <span className="flex items-center gap-2">
-                          <DeezerIcon />
-                          {t("literal.common.deezer")}
-                        </span>
-                      </SelectItem>
-                      <SelectItem value="apple">
-                        <span className="flex items-center gap-2">
-                          <AppleIcon />
-                          {t("literal.common.appleMusic")}
-                        </span>
-                      </SelectItem>
-                      <SelectItem value="jiosaavn">
-                        <span className="flex items-center gap-2">
-                          <JioSaavnIcon />
-                          {t("literal.common.jiosaavn")}
-                        </span>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  {effectiveDownloader === "auto" && (<>
-                      <Select value={effectiveAutoOrder} onValueChange={(value: string) => setTempSettings((prev) => ({
-                    ...prev,
-                    autoOrder: value,
-                    autoQuality: value.includes("qobuz") && prev.autoQuality === "atmos" ? "24" : prev.autoQuality,
-                }))}>
-                        <SelectTrigger className="h-9 w-auto">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="w-fit min-w-max">
-                          <SelectItem value="tidal-qobuz-amazon">
-                                <span className="flex items-center gap-1.5">
-                                  <TidalIcon className="fill-current"/>
-                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                                  <QobuzIcon className="fill-current"/>
-                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                                  <AmazonIcon className="fill-current"/>
-                                </span>
-                              </SelectItem>
-                              <SelectItem value="tidal-amazon-qobuz">
-                                <span className="flex items-center gap-1.5">
-                                  <TidalIcon className="fill-current"/>
-                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                                  <AmazonIcon className="fill-current"/>
-                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                                  <QobuzIcon className="fill-current"/>
-                                </span>
-                              </SelectItem>
-                              <SelectItem value="qobuz-tidal-amazon">
-                                <span className="flex items-center gap-1.5">
-                                  <QobuzIcon className="fill-current"/>
-                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                                  <TidalIcon className="fill-current"/>
-                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                                  <AmazonIcon className="fill-current"/>
-                                </span>
-                              </SelectItem>
-                              <SelectItem value="qobuz-amazon-tidal">
-                                <span className="flex items-center gap-1.5">
-                                  <QobuzIcon className="fill-current"/>
-                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                                  <AmazonIcon className="fill-current"/>
-                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                                  <TidalIcon className="fill-current"/>
-                                </span>
-                              </SelectItem>
-                              <SelectItem value="amazon-tidal-qobuz">
-                                <span className="flex items-center gap-1.5">
-                                  <AmazonIcon className="fill-current"/>
-                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                                  <TidalIcon className="fill-current"/>
-                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                                  <QobuzIcon className="fill-current"/>
-                                </span>
-                              </SelectItem>
-                              <SelectItem value="amazon-qobuz-tidal">
-                                <span className="flex items-center gap-1.5">
-                                  <AmazonIcon className="fill-current"/>
-                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                                  <QobuzIcon className="fill-current"/>
-                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                                  <TidalIcon className="fill-current"/>
-                                </span>
-                              </SelectItem>
-                              <SelectItem value="tidal-qobuz">
-                                <span className="flex items-center gap-1.5">
-                                  <TidalIcon className="fill-current"/>
-                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                                  <QobuzIcon className="fill-current"/>
-                                </span>
-                              </SelectItem>
-                              <SelectItem value="tidal-amazon">
-                                <span className="flex items-center gap-1.5">
-                                  <TidalIcon className="fill-current"/>
-                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                                  <AmazonIcon className="fill-current"/>
-                                </span>
-                              </SelectItem>
-                              <SelectItem value="qobuz-tidal">
-                                <span className="flex items-center gap-1.5">
-                                  <QobuzIcon className="fill-current"/>
-                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                                  <TidalIcon className="fill-current"/>
-                                </span>
-                              </SelectItem>
-                              <SelectItem value="amazon-tidal">
-                                <span className="flex items-center gap-1.5">
-                                  <AmazonIcon className="fill-current"/>
-                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                                  <TidalIcon className="fill-current"/>
-                                </span>
-                              </SelectItem>
-                          <SelectItem value="qobuz-amazon">
-                            <span className="flex items-center gap-1.5">
-                              <QobuzIcon className="fill-current"/>
-                              <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                              <AmazonIcon className="fill-current"/>
-                            </span>
-                          </SelectItem>
-                          <SelectItem value="amazon-qobuz">
-                            <span className="flex items-center gap-1.5">
-                              <AmazonIcon className="fill-current"/>
-                              <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                              <QobuzIcon className="fill-current"/>
-                            </span>
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-
-                      <Select value={tempSettings.autoQuality || "16"} onValueChange={handleAutoQualityChange}>
-                        <SelectTrigger className="h-9 w-fit shrink-0 whitespace-nowrap">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="16">{t("literal.backend.value16BitValue441khz")}</SelectItem>
-                          <SelectItem value="24">{t("translation.migrated.SettingsPage.24Bit48kHz192kHz")}</SelectItem>
-                          {autoAtmosAvailable && (<SelectItem value="atmos">{t("literal.backend.dolbyAtmos")}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </>)}
-
-                  {effectiveDownloader === "tidal" && (<Select value={tempSettings.tidalQuality} onValueChange={handleTidalQualityChange}>
-                        <SelectTrigger className="h-9 w-fit">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="LOSSLESS">{t("literal.backend.value16BitValue441khz")}</SelectItem>
-                          <SelectItem value="HI_RES_LOSSLESS">{t("translation.migrated.SettingsPage.24Bit48kHz192kHz")}</SelectItem>
-                          <SelectItem value="ATMOS">{t("literal.backend.dolbyAtmos")}</SelectItem>
-                        </SelectContent>
-                      </Select>)}
-
-                  {effectiveDownloader === "qobuz" && (<Select value={tempSettings.qobuzQuality} onValueChange={handleQobuzQualityChange}>
-                      <SelectTrigger className="h-9 w-fit">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="6">{t("literal.backend.value16BitValue441khz")}</SelectItem>
-                        <SelectItem value="27">{t("translation.migrated.SettingsPage.24Bit48kHz192kHz")}</SelectItem>
-                      </SelectContent>
-                    </Select>)}
-
-                  {effectiveDownloader === "amazon" && (<Select value={tempSettings.amazonQuality} onValueChange={handleAmazonQualityChange}>
-                      <SelectTrigger className="h-9 w-fit">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="16">{t("literal.backend.value16BitValue441khz")}</SelectItem>
-                        <SelectItem value="24">{t("translation.migrated.SettingsPage.24Bit48kHz192kHz")}</SelectItem>
-                        <SelectItem value="atmos">{t("literal.backend.dolbyAtmos")}</SelectItem>
-                      </SelectContent>
-                    </Select>)}
-                </div>
-
-                {isAtmosSelected && (<div className="flex flex-wrap items-center gap-3 pt-2">
-                    <Switch id="allow-atmos-fallback" checked={tempSettings.allowAtmosFallback} onCheckedChange={(checked) => setTempSettings((prev) => ({
-                    ...prev,
-                    allowAtmosFallback: checked,
-                }))}/>
-                    <Label htmlFor="allow-atmos-fallback" className="text-sm font-normal cursor-pointer">
-                      {t("translation.sources.fallbackFlac")}
-                    </Label>
-                    {tempSettings.allowAtmosFallback && (<Select value={tempSettings.atmosFallbackQuality} onValueChange={(value: "16" | "24") => setTempSettings((prev) => ({
-                        ...prev,
-                        atmosFallbackQuality: value,
-                    }))}>
-                        <SelectTrigger className="h-8 w-fit">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="16">{t("literal.backend.value16BitValue441khz")}</SelectItem>
-                          <SelectItem value="24">{t("translation.migrated.SettingsPage.24Bit48kHz192kHz")}</SelectItem>
-                        </SelectContent>
-                      </Select>)}
-                  </div>)}
-
-                {((effectiveDownloader === "tidal" &&
-                tempSettings.tidalQuality === "HI_RES_LOSSLESS") ||
-                (effectiveDownloader === "qobuz" &&
-                    tempSettings.qobuzQuality === "27") ||
-                (effectiveDownloader === "amazon" &&
-                    tempSettings.amazonQuality === "24") ||
-                (effectiveDownloader === "auto" &&
-                    tempSettings.autoQuality === "24") ||
-                (isAtmosSelected && tempSettings.allowAtmosFallback && tempSettings.atmosFallbackQuality === "24")) && (<div className="flex items-center gap-3 pt-2">
-                      <Switch id="allow-fallback" checked={tempSettings.allowFallback} onCheckedChange={(checked) => setTempSettings((prev) => ({
-                    ...prev,
-                    allowFallback: checked,
-                }))}/>
-                      <Label htmlFor="allow-fallback" className="text-sm font-normal cursor-pointer">
-                        {t("translation.migrated.SettingsPage.allowQualityFallback16Bit")}
-                      </Label>
-                  </div>)}
-              </div>
-        </section>
-
-        <section className="max-w-2xl space-y-4">
-          <h2 className="border-b border-border pb-1.5 text-sm font-semibold tracking-tight">{t("translation.sources.custom")}</h2>
-
-              <div className="space-y-2">
-                <Label>{t("literal.common.tidal")}</Label>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Button type="button" variant="outline" onClick={() => setShowCustomTidalApiDialog(true)} className="gap-2">
-                    <TidalIcon />
-                    {tempSettings.customTidalApi ? t("translation.migrated.SettingsPage.changeInstance") : t("translation.migrated.SettingsPage.addInstance")}
-                  </Button>
-                  {tempSettings.customTidalApi && (<span className="max-w-65 truncate text-xs text-muted-foreground" title={tempSettings.customTidalApi}>
-                      {tempSettings.customTidalApi}
-                    </span>)}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>{t("literal.common.qobuz")}</Label>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Button type="button" variant="outline" onClick={() => setShowCustomQobuzApiDialog(true)} className="gap-2">
-                    <QobuzIcon />
-                    {tempSettings.customQobuzApi ? t("translation.migrated.SettingsPage.changeInstance") : t("translation.migrated.SettingsPage.addInstance")}
-                  </Button>
-                  {tempSettings.customQobuzApi && (<span className="max-w-65 truncate text-xs text-muted-foreground" title={tempSettings.customQobuzApi}>
-                      {tempSettings.customQobuzApi}
-                    </span>)}
-                </div>
-              </div>
+          <h2 className="border-b border-border pb-1.5 text-sm font-semibold tracking-tight">{t("translation.downloads.quality")}</h2>
+          <p className="text-sm text-muted-foreground">{t("translation.downloads.qualityHint")}</p>
+          <Select value={selectedQuality} onValueChange={(value: "16" | "24" | "atmos") => handleQualityChange(value)}>
+            <SelectTrigger className="h-9 w-fit" aria-label={t("translation.downloads.quality")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="16">{t("literal.backend.value16BitValue441khz")}</SelectItem>
+              <SelectItem value="24">{t("translation.migrated.SettingsPage.24Bit48kHz192kHz")}</SelectItem>
+              <SelectItem value="atmos">{t("literal.backend.dolbyAtmos")}</SelectItem>
+            </SelectContent>
+          </Select>
+          {isAtmosSelected && (<div className="flex flex-wrap items-center gap-3">
+            <Switch id="allow-atmos-fallback" checked={tempSettings.allowAtmosFallback} onCheckedChange={(checked) => setTempSettings((prev) => ({ ...prev, allowAtmosFallback: checked }))}/>
+            <Label htmlFor="allow-atmos-fallback" className="cursor-pointer text-sm font-normal">{t("translation.sources.fallbackFlac")}</Label>
+            {tempSettings.allowAtmosFallback && (<Select value={tempSettings.atmosFallbackQuality} onValueChange={(value: "16" | "24") => setTempSettings((prev) => ({ ...prev, atmosFallbackQuality: value }))}>
+              <SelectTrigger className="h-8 w-fit"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="16">{t("literal.backend.value16BitValue441khz")}</SelectItem>
+                <SelectItem value="24">{t("translation.migrated.SettingsPage.24Bit48kHz192kHz")}</SelectItem>
+              </SelectContent>
+            </Select>)}
+          </div>)}
+          {showCdFallback && (<div className="flex items-center gap-3">
+            <Switch id="allow-fallback" checked={tempSettings.allowFallback} onCheckedChange={(checked) => setTempSettings((prev) => ({ ...prev, allowFallback: checked }))}/>
+            <Label htmlFor="allow-fallback" className="cursor-pointer text-sm font-normal">{t("translation.migrated.SettingsPage.allowQualityFallback16Bit")}</Label>
+          </div>)}
         </section>
 
         <CommunitySourcesSettings ref={communitySourcesRef} onDirtyChange={setCommunitySourcesDirty} />

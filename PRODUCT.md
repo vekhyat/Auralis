@@ -6,7 +6,8 @@ Product truth for Auralis. Visual/interaction decisions in `DESIGN.md` defer to 
 
 Auralis is a **Windows desktop app** (Wails, frameless window) for fetching lossless audio.
 The user pastes a streaming link (Spotify URL/URI) or types a search, inspects the result,
-and sends tracks, albums, playlists, or artists to a download queue. Files are fetched in
+and downloads tracks, albums, playlists, or artist collections in one action. A persistent
+worker starts automatically and handles later requests in the background. Files are fetched in
 lossless quality from **Tidal, Qobuz, and Amazon Music**, with extra fallbacks from
 **Deezer, Apple Music, and JioSaavn** (community/mirror APIs; no user account inside this app).
 
@@ -21,7 +22,7 @@ lossless quality from **Tidal, Qobuz, and Amazon Music**, with extra fallbacks f
 
 1. **Find** — paste a Spotify link or search the catalog by text.
 2. **Inspect** — see metadata, track list, and per-provider availability before committing.
-3. **Queue** — add items to a persistent download queue; start/pause/retry; watch progress.
+3. **Download** — start immediately; monitor Downloads; pause/resume/retry/cancel.
 4. **Keep tidy** — naming templates, folder structures, embedded tags, lyrics, covers.
 
 ## What it is not
@@ -33,18 +34,20 @@ lossless quality from **Tidal, Qobuz, and Amazon Music**, with extra fallbacks f
 ## Audience & scene
 
 A single operator at a desk who wants files, not feeds. The app is a tool surface:
-dense rows, quiet chrome, keyboard-first entry (paste → Enter).
+artwork-led browsing, compact track rows, quiet chrome, keyboard-first entry (paste → Enter).
 
 ## Brand commitments
 
 - Name: **Auralis**
-- Visual world: **dawn catalog** — cool paper, iron ink, ruled rows, one Prussian-ink accent
-- Shell: **omnibar library** — search lives in the titlebar; text destinations; no nav rail
+- Visual world: **artwork library** — cool paper, iron ink, prominent record sleeves, one Prussian-ink accent
+- Shell: **download-first library** — titlebar search, a stable destination column, and persistent download controls
 - Identity: **locked** — light (default) and dark skins only
 
 ## Non-negotiables when changing code
 
 - Wails `App` binding method names do not change (frontend↔backend contract).
 - i18n key IDs stay stable; English copy changes only when a label's job changes.
-- Download/queue/provider behavior, community session encryption, provider hosts, and
-  User-Agents are product constants, not styling surfaces.
+- Provider protocols, community session encryption, provider hosts, and User-Agents
+  remain product constants. Download requests use the shared execution lease and persistent store.
+- Desktop runtime stays **Go + Wails v2 + Windows WebView2**. The user explicitly
+  excludes Electron. React is the UI, not a change of desktop framework.

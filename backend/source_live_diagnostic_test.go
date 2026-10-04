@@ -174,6 +174,10 @@ func TestLiveDownloadSources(t *testing.T) {
 				t.Error(r.Error)
 				return
 			}
+			if os.Getenv("AURALIS_LIVE_SEARCH_ONLY") == "1" {
+				r.Stage = "search_passed"
+				return
+			}
 			r.Stage = "download"
 			var path string
 			var downloadErr error

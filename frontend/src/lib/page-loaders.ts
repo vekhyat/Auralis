@@ -13,3 +13,7 @@ export function loadHistoryPage() {
 export function loadQueuePage() {
     return import("@/components/QueuePage").then((module) => ({ default: module.QueuePage }));
 }
+
+export function loadDevicesPage() {
+    return import("@/components/DevicesPage").then((module) => ({ default: module.DevicesPage }));
+}

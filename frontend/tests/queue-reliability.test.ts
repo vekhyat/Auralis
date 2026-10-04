@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DownloadExecutionCoordinator } from "../src/lib/download-execution.ts";
+
+test("adding downloads cannot resume a suspended worker after its lease is released", () => {
+    for (const activeKind of [null, "direct", "queue"] as const) {
+        assert.equal(planQueueEntry({ pendingOnly: true, queueBusy: false, queuePaused: true, queueStopped: false, activeKind }), "ignore");
+        assert.equal(planQueueEntry({ pendingOnly: true, queueBusy: false, queuePaused: false, queueStopped: true, activeKind }), "ignore");
+    }
+    assert.equal(planQueueEntry({ pendingOnly: false, queueBusy: false, queuePaused: true, queueStopped: false, activeKind: null }), "start");
+});
 import { expectedTrackDurationSeconds, isAutomaticallyRunnableQueueStatus, isManuallyRunnableQueueStatus, isMixedQueueRun, isProtectedQueueStatus, nextAutomaticQueueItem, nextManualQueueItem, planQueueEntry, queueControlApplies, queueItemStatusAfterAttempt, queueRunHaltsBeforeNextItem, retainProtectedQueueItems, showsTabQueueControls, singleTrackQueueOutcome, } from "../src/lib/queue-guards.ts";
 import { canRetryQueuePersistence, createQueuePersistenceController, decidePersistentQueueLoad, inspectStoredQueue, persistenceBackoffMs, queueLoadWritesStore, queuePersistenceNotice, storedQueueLoadPlan, } from "../src/lib/queue-persistence.ts";
 const QUEUE_ATTEMPTS = 4;
