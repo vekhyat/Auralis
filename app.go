@@ -21,6 +21,7 @@ import (
 
 	"github.com/vekhyat/Auralis/backend"
 	"github.com/vekhyat/Auralis/backend/devices/ipod"
+	"github.com/vekhyat/Auralis/backend/library"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -34,6 +35,10 @@ type App struct {
 	metadataStreamGeneration     uint64
 	ipods                        *ipod.Manager
 	ipodStop                     chan struct{}
+	libraryScanMu                sync.Mutex
+	libraryScanCancel            context.CancelFunc
+	libraryScanGeneration        uint64
+	libraryLast                  *libraryState
 }
 
 type CurrentIPInfo struct {
@@ -362,6 +367,12 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	a.libraryScanMu.Lock()
+	if a.libraryScanCancel != nil {
+		a.libraryScanCancel()
+		a.libraryScanCancel = nil
+	}
+	a.libraryScanMu.Unlock()
 	a.stopIPodWatch()
 	backend.StopAcceptingDownloadsAndDrain()
 	backend.CloseLibraryIndexDB()
@@ -3367,35 +3378,9 @@ func (a *App) CreateM3U8File(m3u8Name string, outputDir string, filePaths []stri
 
 	m3u8Path := filepath.Join(outputDir, safeName+".m3u8")
 
-	f, err := os.Create(m3u8Path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	if _, err := f.WriteString("#EXTM3U\n"); err != nil {
-		return err
-	}
-
-	for _, path := range filePaths {
-		if path == "" {
-			continue
-		}
-
-		relPath, err := filepath.Rel(outputDir, path)
-		if err != nil {
-
-			relPath = path
-		}
-
-		relPath = filepath.ToSlash(relPath)
-
-		if _, err := f.WriteString(relPath + "\n"); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	tracks := library.TracksFromPaths(filePaths)
+	_, err := library.WritePlaylist(m3u8Path, tracks, library.PlaylistLocal, "", "")
+	return err
 }
 
 func (a *App) CreateLogFile(fileName string, outputDir string, logs []string) error {

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
     ArrowLeft,
+    Activity,
     ArrowRight,
     Bug,
     Library,
@@ -66,10 +67,11 @@ export function TitleBar({ canGoBack = false, canGoForward = false, navigationDi
         main: t("translation.sidebar.library"),
         queue: t("translation.downloads.title"),
         history: t("translation.sidebar.history"),
+        "library-health": t("translation.libraryHealth.title"),
         devices: t("translation.devices.destination"),
         settings: t("translation.sidebar.settings"),
     };
-    const destinationIcons = { main: Library, queue: Download, history: History, devices: Usb, settings: Settings };
+    const destinationIcons = { main: Library, queue: Download, history: History, "library-health": Activity, devices: Usb, settings: Settings };
     const destinations = PRIMARY_DESTINATIONS.filter((page) => page !== "devices" || showDevices).map((page) => ({
         page,
         label: destinationLabel[page],

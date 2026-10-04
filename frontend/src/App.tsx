@@ -24,8 +24,8 @@ import { PlaylistInfo } from "@/components/PlaylistInfo";
 import { ArtistInfo } from "@/components/ArtistInfo";
 import { DownloadShelf } from "@/components/DownloadShelf";
 import { CooldownBanner } from "@/components/CooldownBanner";
-import { DebugLoggerPage, DevicesPage, HistoryPage, PageErrorBoundary, PageLoading, QueuePage, SettingsPage, } from "@/lazy-pages";
-import { loadDebugLoggerPage, loadDevicesPage, loadHistoryPage, loadQueuePage, loadSettingsPage, } from "@/lib/page-loaders";
+import { DebugLoggerPage, DevicesPage, HistoryPage, LibraryHealthPage, PageErrorBoundary, PageLoading, QueuePage, SettingsPage, } from "@/lazy-pages";
+import { loadDebugLoggerPage, loadDevicesPage, loadHistoryPage, loadLibraryHealthPage, loadQueuePage, loadSettingsPage, } from "@/lib/page-loaders";
 import { createLazyPage } from "@/lib/lazy-page";
 import { planLegacyHistoryMigration, shouldDiscardLegacyHistory } from "@/lib/fetch-history-migration";
 import type { HistoryItem } from "@/components/FetchHistory";
@@ -824,6 +824,7 @@ function App() {
         history: HistoryPage,
         queue: QueuePage,
         devices: DevicesPage,
+        libraryHealth: LibraryHealthPage,
     }));
     const retryCurrentPage = () => {
         setPageAttempt((attempt) => attempt + 1);
@@ -839,6 +840,8 @@ function App() {
                     return { ...current, queue: createLazyPage(loadQueuePage) };
                 case "devices":
                     return { ...current, devices: createLazyPage(loadDevicesPage) };
+                case "library-health":
+                    return { ...current, libraryHealth: createLazyPage(loadLibraryHealthPage) };
                 default:
                     return current;
             }
@@ -855,6 +858,8 @@ function App() {
                 return renderSecondary(<secondaryPages.debug />);
             case "devices":
                 return renderSecondary(<secondaryPages.devices />);
+            case "library-health":
+                return renderSecondary(<secondaryPages.libraryHealth />);
             case "history":
                 return renderSecondary(<secondaryPages.history onHistorySelect={(item) => {
                         setSmartSearchInput("");
@@ -943,6 +948,7 @@ function App() {
                   },
               }}
             />
+
 
             <main
               data-page={currentPage}
