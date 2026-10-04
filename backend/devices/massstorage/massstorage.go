@@ -5,12 +5,23 @@ package massstorage
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/vekhyat/Auralis/backend/syncengine"
 )
+
+// Drive describes an enumerated removable volume or mounted drive.
+type Drive struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Root       string `json:"root"`
+	FreeBytes  int64  `json:"free_bytes"`
+	TotalBytes int64  `json:"total_bytes"`
+}
 
 // Target is a sync destination backed by a local directory: a USB stick's
 // music root, a mounted drive, or a plain export folder.
@@ -35,6 +46,24 @@ var (
 	_ syncengine.Open       = (*Target)(nil)
 )
 
+// resolve validates and returns the absolute local path for targetPath,
+// ensuring that targetPath does not escape t.Root.
+func (t *Target) resolve(targetPath string) (string, error) {
+	if t.Root == "" {
+		return "", fmt.Errorf("target root is empty")
+	}
+	cleanRoot := filepath.Clean(t.Root)
+	cleanTarget := filepath.Clean(filepath.FromSlash(targetPath))
+	if !filepath.IsAbs(cleanTarget) {
+		cleanTarget = filepath.Clean(filepath.Join(cleanRoot, cleanTarget))
+	}
+	rel, err := filepath.Rel(cleanRoot, cleanTarget)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path %q escapes target root %q", targetPath, t.Root)
+	}
+	return cleanTarget, nil
+}
+
 // Info describes the target for the device picker.
 func (t *Target) Info() syncengine.DeviceInfo {
 	kind := "folder"
@@ -45,7 +74,7 @@ func (t *Target) Info() syncengine.DeviceInfo {
 		ID:   t.ID,
 		Name: t.Name,
 		Kind: kind,
-		Root: t.Root,
+		Root: filepath.ToSlash(t.Root),
 	}
 	if free, err := freeSpace(t.Root); err == nil {
 		info.FreeBytes = free
@@ -58,8 +87,16 @@ func (t *Target) Info() syncengine.DeviceInfo {
 
 // List walks root and returns every file below it.
 func (t *Target) List(ctx context.Context, root string) ([]syncengine.RemoteEntry, error) {
+	walkRoot := t.Root
+	if root != "" {
+		resolved, err := t.resolve(root)
+		if err != nil {
+			return nil, err
+		}
+		walkRoot = resolved
+	}
 	var out []syncengine.RemoteEntry
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+	err := filepath.WalkDir(walkRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -93,7 +130,14 @@ func (t *Target) Put(ctx context.Context, localPath, remotePath string, progress
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(remotePath), 0o755); err != nil {
+	dstPath, err := t.resolve(remotePath)
+	if err != nil {
+		return err
+	}
+	if dstPath == filepath.Clean(t.Root) {
+		return fmt.Errorf("cannot put file onto root directory %q", t.Root)
+	}
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
 		return err
 	}
 	src, err := os.Open(localPath)
@@ -101,7 +145,7 @@ func (t *Target) Put(ctx context.Context, localPath, remotePath string, progress
 		return err
 	}
 	defer src.Close()
-	dst, err := os.OpenFile(remotePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
 	}
@@ -140,17 +184,28 @@ func (t *Target) Move(ctx context.Context, from, to string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
-		return err
-	}
-	if err := os.Rename(from, to); err == nil {
-		return nil
-	}
-	src, err := os.Open(from)
+	fromPath, err := t.resolve(from)
 	if err != nil {
 		return err
 	}
-	dst, err := os.OpenFile(to, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	toPath, err := t.resolve(to)
+	if err != nil {
+		return err
+	}
+	if fromPath == filepath.Clean(t.Root) || toPath == filepath.Clean(t.Root) {
+		return fmt.Errorf("cannot move target root %q", t.Root)
+	}
+	if err := os.MkdirAll(filepath.Dir(toPath), 0o755); err != nil {
+		return err
+	}
+	if err := os.Rename(fromPath, toPath); err == nil {
+		return nil
+	}
+	src, err := os.Open(fromPath)
+	if err != nil {
+		return err
+	}
+	dst, err := os.OpenFile(toPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		src.Close()
 		return err
@@ -163,7 +218,7 @@ func (t *Target) Move(ctx context.Context, from, to string) error {
 	if cerr != nil {
 		return cerr
 	}
-	return os.Remove(from)
+	return os.Remove(fromPath)
 }
 
 // Delete removes remotePath.
@@ -171,7 +226,14 @@ func (t *Target) Delete(ctx context.Context, remotePath string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return os.Remove(remotePath)
+	dstPath, err := t.resolve(remotePath)
+	if err != nil {
+		return err
+	}
+	if dstPath == filepath.Clean(t.Root) {
+		return fmt.Errorf("cannot delete root directory %q", t.Root)
+	}
+	return os.Remove(dstPath)
 }
 
 // FreeSpace reports bytes available at the target root.
@@ -190,7 +252,11 @@ func (t *Target) StatSize(ctx context.Context, path string) (int64, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	info, err := os.Stat(path)
+	resolved, err := t.resolve(path)
+	if err != nil {
+		return 0, err
+	}
+	info, err := os.Stat(resolved)
 	if err != nil {
 		return 0, err
 	}
@@ -202,5 +268,9 @@ func (t *Target) Open(ctx context.Context, path string) (io.ReadCloser, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return os.Open(path)
+	resolved, err := t.resolve(path)
+	if err != nil {
+		return nil, err
+	}
+	return os.Open(resolved)
 }

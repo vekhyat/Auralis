@@ -45,7 +45,7 @@ type Executor struct {
 	Materialize func(ctx context.Context, tr *SourceTrack) (localPath string, err error)
 	OnProgress  ProgressFunc
 	now         func() time.Time
-	mu          sync.Mutex // guards manifest and journal writes
+	mu          sync.Mutex // guards manifest, journal writes, and doneSet
 }
 
 // --- journal ---
@@ -99,7 +99,6 @@ func (e *Executor) Run(ctx context.Context, plan *Plan, manifest *Manifest) erro
 			j.Ops = append(j.Ops, journalOp{Index: i, Status: "pending"})
 		}
 	}
-	var mu sync.Mutex
 	doneSet := map[int]bool{}
 	for _, op := range j.Ops {
 		if op.Status == "done" {
@@ -108,8 +107,8 @@ func (e *Executor) Run(ctx context.Context, plan *Plan, manifest *Manifest) erro
 	}
 
 	markDone := func(i int) {
-		mu.Lock()
-		defer mu.Unlock()
+		e.mu.Lock()
+		defer e.mu.Unlock()
 		doneSet[i] = true
 		for k := range j.Ops {
 			if j.Ops[k].Index == i {
