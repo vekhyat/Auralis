@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { t } from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -47,6 +47,19 @@ interface DoctorReport {
     changed: boolean;
 }
 
+interface DoctorView {
+    scope: string;
+    epoch: number;
+    reportScope: string;
+    reportEpoch: number;
+    report: DoctorReport | null;
+}
+
+function withDoctorReport(current: DoctorView, scope: string, epoch: number, report: DoctorReport | null): DoctorView {
+    if (current.scope !== scope || current.epoch !== epoch) return current;
+    return { ...current, reportScope: scope, reportEpoch: epoch, report };
+}
+
 const WARNINGS: Record<string, string> = {
     "no-drive": "translation.devices.warnNoDrive",
     unsupported: "translation.devices.warnUnsupported",
@@ -77,29 +90,52 @@ function errorText(error: unknown): string {
     return String(error ?? "");
 }
 
+// Stock 1st- and 2nd-generation shuffles cannot play ALAC. Rockbox keeps the original file on every model.
+function stockNeedsAac(mode: string, generation: string): boolean {
+    return mode === "stock" && (generation === "SHUFFLE_1" || generation === "SHUFFLE_2");
+}
+
 export function DevicesPage() {
     const [devices, setDevices] = useState<IPod[]>([]);
     const [selectedId, setSelectedId] = useState("");
     const [format, setFormat] = useState<"alac" | "aac">("alac");
-    const [picked, setPicked] = useState<number[]>([]);
+    const [pickedState, setPickedState] = useState<{ epoch: number; ids: number[] }>({ epoch: 0, ids: [] });
     const [busy, setBusy] = useState(false);
     const [progress, setProgress] = useState<ProgressEvent | null>(null);
-    const [doctor, setDoctor] = useState<DoctorReport | null>(null);
+    const [doctorState, setDoctorState] = useState<DoctorView>({ scope: "", epoch: 0, reportScope: "", reportEpoch: -1, report: null });
     const [confirm, setConfirm] = useState<"remove" | "rebuild" | null>(null);
-
-    const applyDevices = (result: unknown) => {
-        const list = (result || []) as IPod[];
-        setDevices(list);
-        setSelectedId((current) => (list.some((device) => device.id === current) ? current : list[0]?.id || ""));
-    };
-    const load = () => ListIPods().then(applyDevices).catch((error) => console.error(error));
+    const [scopeEpoch, setScopeEpoch] = useState<{ key: string; epoch: number }>({ key: "", epoch: 0 });
+    const listRequests = useRef<{ ticket: number; stopped: boolean; pull: () => Promise<void> }>({
+        ticket: 0,
+        stopped: false,
+        pull: async () => {},
+    });
 
     useEffect(() => {
-        ListIPods().then(applyDevices).catch((error) => console.error(error));
+        const requests = listRequests.current;
+        requests.stopped = false;
+        const pull = () => {
+            if (requests.stopped) return Promise.resolve();
+            const ticket = ++requests.ticket;
+            return ListIPods().then((list) => {
+                if (requests.stopped || ticket !== requests.ticket) return;
+                const next = (list || []) as IPod[];
+                setDevices(next);
+                setSelectedId((currentId) => (next.some((item) => item.id === currentId) ? currentId : next[0]?.id || ""));
+            }).catch((error) => {
+                if (requests.stopped || ticket !== requests.ticket) return;
+                console.error(error);
+            });
+        };
+        requests.pull = pull;
+        void pull();
         const timer = window.setInterval(() => {
-            ListIPods().then(applyDevices).catch((error) => console.error(error));
+            void pull();
         }, 2000);
-        return () => window.clearInterval(timer);
+        return () => {
+            requests.stopped = true;
+            window.clearInterval(timer);
+        };
     }, []);
 
     useEffect(() => {
@@ -115,41 +151,66 @@ export function DevicesPage() {
     }, []);
 
     const device = devices.find((item) => item.id === selectedId) || null;
-    const deviceId = device?.id;
-    const deviceMode = device?.mode;
-    const deviceKey = device ? `${device.id}:${device.trackCount}:${device.mode}` : "";
-    const [seenDeviceKey, setSeenDeviceKey] = useState(deviceKey);
-    if (deviceKey !== seenDeviceKey) {
-        setSeenDeviceKey(deviceKey);
-        setPicked([]);
-        if (deviceMode !== "stock") {
-            setDoctor(null);
-        }
+    const deviceId = device?.id ?? "";
+    const deviceMode = device?.mode ?? "";
+    const deviceTrackCount = device?.trackCount ?? 0;
+    const scopeKey = `${deviceId}:${deviceMode}:${deviceTrackCount}`;
+    // Each device, mode, or track-count change gets a new epoch. The previous visit's checks and report are discarded, so switching away and back cannot restore them before the next fetch.
+    if (scopeEpoch.key !== scopeKey) {
+        const epoch = scopeEpoch.epoch + 1;
+        setScopeEpoch({ key: scopeKey, epoch });
+        setPickedState({ epoch, ids: [] });
+        setDoctorState({ scope: scopeKey, epoch, reportScope: "", reportEpoch: -1, report: null });
     }
+    const selectionEpoch = scopeEpoch.epoch;
+    const selection = pickedState.epoch === selectionEpoch ? pickedState.ids : [];
+    const setSelection = (value: number[] | ((current: number[]) => number[])) => {
+        setPickedState((prev) => {
+            if (prev.epoch !== selectionEpoch) return prev;
+            const ids = typeof value === "function" ? value(prev.ids) : value;
+            return { epoch: selectionEpoch, ids };
+        });
+    };
+    const forceAac = device ? stockNeedsAac(device.mode, device.generation) : false;
+    const effectiveFormat = forceAac ? "aac" : format;
+    const doctor = deviceMode === "stock" && doctorState.reportEpoch === selectionEpoch && doctorState.reportScope === scopeKey
+        ? doctorState.report
+        : null;
 
     useEffect(() => {
-        if (!deviceId || deviceMode !== "stock") {
-            return;
-        }
+        if (!deviceId || deviceMode !== "stock") return;
         let cancel = false;
-        DoctorIPod(deviceId, "report").then((report) => {
-            if (!cancel) setDoctor(report as DoctorReport);
+        const requestedScope = scopeKey;
+        const requestedEpoch = selectionEpoch;
+        const accept = (report: DoctorReport | null) => {
+            if (cancel || listRequests.current.stopped) return;
+            setDoctorState((current) => withDoctorReport(current, requestedScope, requestedEpoch, report));
+        };
+        void DoctorIPod(deviceId, "report").then((report) => {
+            accept(report as DoctorReport);
         }).catch(() => {
-            if (!cancel) setDoctor(null);
+            accept(null);
         });
         return () => {
             cancel = true;
         };
-    }, [deviceId, deviceMode, deviceKey]);
+    }, [deviceId, deviceMode, deviceTrackCount, scopeKey, selectionEpoch]);
 
     const refreshDoctor = async (id: string) => {
+        const requestedScope = `${id}:${deviceMode}:${deviceTrackCount}`;
+        const requestedEpoch = selectionEpoch;
         try {
-            setDoctor((await DoctorIPod(id, "report")) as DoctorReport);
+            const report = (await DoctorIPod(id, "report")) as DoctorReport;
+            if (!listRequests.current.stopped) {
+                setDoctorState((current) => withDoctorReport(current, requestedScope, requestedEpoch, report));
+            }
         }
         catch {
-            setDoctor(null);
+            if (!listRequests.current.stopped) {
+                setDoctorState((current) => withDoctorReport(current, requestedScope, requestedEpoch, null));
+            }
         }
-        await load();
+        await listRequests.current.pull();
     };
 
     const send = async (paths: string[]) => {
@@ -157,7 +218,7 @@ export function DevicesPage() {
         setBusy(true);
         setProgress({ phase: "copy", current: 0, total: paths.length, name: "" });
         try {
-            const result = await SendToIPod(device.id, paths, format);
+            const result = await SendToIPod(device.id, paths, effectiveFormat);
             const sent = Number(result?.sent || 0);
             const skipped = Number(result?.skipped || 0);
             toast.success(`${t("translation.devices.sent", { count: sent })}${skipped ? ` · ${t("translation.devices.skipped", { count: skipped })}` : ""}`);
@@ -204,12 +265,12 @@ export function DevicesPage() {
     };
 
     const onRemove = async () => {
-        if (!device || picked.length === 0) return;
+        if (!device || selection.length === 0) return;
         setConfirm(null);
         setBusy(true);
         try {
-            await RemoveFromIPod(device.id, picked);
-            setPicked([]);
+            await RemoveFromIPod(device.id, selection);
+            setSelection([]);
             await refreshDoctor(device.id);
         }
         catch (error) {
@@ -288,7 +349,7 @@ export function DevicesPage() {
                                             {t("translation.devices.free", { free: formatBytes(device.freeBytes), total: formatBytes(device.totalBytes) })}
                                         </p>
                                         <div className="mt-2 h-px w-full max-w-sm bg-border">
-                                            <div className="h-px bg-primary" style={{ width: `${used}%` }} />
+                                            <div className="h-px bg-foreground" style={{ width: `${used}%` }} />
                                         </div>
                                     </>
                                 ) : null}
@@ -304,9 +365,9 @@ export function DevicesPage() {
                             <div className="flex flex-wrap items-center gap-2">
                                 <button
                                     type="button"
-                                    disabled={!device.canSend || busy}
+                                    disabled={!device.canSend || busy || forceAac}
                                     onClick={() => setFormat("alac")}
-                                    className={cn("cursor-pointer px-1 text-sm disabled:cursor-default disabled:opacity-40", format === "alac" ? "font-semibold text-primary underline decoration-1 underline-offset-4" : "text-muted-foreground")}
+                                    className={cn("cursor-pointer px-1 text-sm disabled:cursor-default disabled:opacity-40", effectiveFormat === "alac" ? "font-semibold text-primary underline decoration-1 underline-offset-4" : "text-muted-foreground")}
                                 >
                                     {t("translation.devices.alac")}
                                 </button>
@@ -314,7 +375,7 @@ export function DevicesPage() {
                                     type="button"
                                     disabled={!device.canSend || busy}
                                     onClick={() => setFormat("aac")}
-                                    className={cn("cursor-pointer px-1 text-sm disabled:cursor-default disabled:opacity-40", format === "aac" ? "font-semibold text-primary underline decoration-1 underline-offset-4" : "text-muted-foreground")}
+                                    className={cn("cursor-pointer px-1 text-sm disabled:cursor-default disabled:opacity-40", effectiveFormat === "aac" ? "font-semibold text-primary underline decoration-1 underline-offset-4" : "text-muted-foreground")}
                                 >
                                     {t("translation.devices.aac")}
                                 </button>
@@ -324,7 +385,7 @@ export function DevicesPage() {
                                 <Button type="button" size="sm" variant="outline" disabled={!device.canSend || busy} onClick={() => void onSendFolder()}>
                                     {t("translation.devices.sendFolder")}
                                 </Button>
-                                <Button type="button" size="sm" variant="outline" disabled={picked.length === 0 || busy || device.mode !== "stock"} onClick={() => setConfirm("remove")}>
+                                <Button type="button" size="sm" variant="outline" disabled={selection.length === 0 || busy || device.mode !== "stock"} onClick={() => setConfirm("remove")}>
                                     {t("translation.devices.remove")}
                                 </Button>
                                 <Button type="button" size="sm" variant="ghost" disabled={!device.mount || busy} onClick={() => void onEject()}>
@@ -355,14 +416,14 @@ export function DevicesPage() {
                                 ) : (
                                     <ul>
                                         {tracks.map((track) => {
-                                            const checked = picked.includes(track.id);
+                                            const checked = selection.includes(track.id);
                                             return (
                                                 <li key={`${track.id}-${track.path}`} className="flex items-center gap-3 border-b py-2">
                                                     {device.mode === "stock" && track.id ? (
                                                         <Checkbox
                                                             checked={checked}
                                                             onCheckedChange={(value) => {
-                                                                setPicked((current) => value === true ? [...current, track.id] : current.filter((id) => id !== track.id));
+                                                                setSelection((current) => value === true ? [...current, track.id] : current.filter((id) => id !== track.id));
                                                             }}
                                                             aria-label={track.title}
                                                         />

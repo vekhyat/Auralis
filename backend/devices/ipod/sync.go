@@ -134,9 +134,7 @@ func sendMount(ctx context.Context, dev Device, paths []string, format string, p
 	if dev.Mount == "" || !dev.CanSend {
 		return SendResult{}, sendBlocked(dev)
 	}
-	if format != "aac" {
-		format = "alac"
-	}
+	format = deviceFormat(dev.Generation, format)
 	files, err := expandAudio(paths)
 	if err != nil {
 		return SendResult{}, err
@@ -177,9 +175,12 @@ func sendMount(ctx context.Context, dev Device, paths []string, format string, p
 
 	for i, path := range files {
 		if err := ctx.Err(); err != nil {
-			return SendResult{}, errors.New("cancelled")
+			return SendResult{}, wrapCancel(err)
 		}
 		emit(progress, Progress{Phase: "copy", Current: i + 1, Total: len(files), Name: filepath.Base(path)})
+		if err := ctx.Err(); err != nil {
+			return SendResult{}, wrapCancel(err)
+		}
 		if underMount(dev.Mount, path) {
 			result.Skipped++
 			continue
@@ -189,13 +190,26 @@ func sendMount(ctx context.Context, dev Device, paths []string, format string, p
 			return SendResult{}, err
 		}
 		meta := readMeta(path, info.Size())
-		if dev.Mode == "stock" && duplicate(db, meta) {
-			result.Skipped++
-			continue
+		if err := ctx.Err(); err != nil {
+			return SendResult{}, wrapCancel(err)
 		}
-		dest, tr, err := placeTrack(dev, path, format, meta)
+		sourceHash := ""
+		if dev.Mode == "stock" {
+			sourceHash, err = hashSource(ctx, path)
+			if err != nil {
+				return SendResult{}, wrapCancel(err)
+			}
+			if err := ctx.Err(); err != nil {
+				return SendResult{}, wrapCancel(err)
+			}
+			if duplicate(db, meta, sourceHash) {
+				result.Skipped++
+				continue
+			}
+		}
+		dest, tr, err := placeTrack(ctx, dev, path, format, meta, sourceHash)
 		if err != nil {
-			return SendResult{}, err
+			return SendResult{}, wrapCancel(err)
 		}
 		if dev.Mode == "stock" {
 			if stat, err := os.Stat(dest); err == nil {
@@ -205,6 +219,10 @@ func sendMount(ctx context.Context, dev Device, paths []string, format string, p
 				}
 				tr.size = uint32(stat.Size())
 			}
+			if err := ctx.Err(); err != nil {
+				_ = os.Remove(dest)
+				return SendResult{}, wrapCancel(err)
+			}
 			if err := db.addTrack(tr); err != nil {
 				_ = os.Remove(dest)
 				return SendResult{}, err
@@ -213,6 +231,12 @@ func sendMount(ctx context.Context, dev Device, paths []string, format string, p
 		copied = append(copied, dest)
 		result.Sent++
 	}
+	// Cancellation stops before the database transaction starts. Commit is not
+	// interruptible, so iTunesDB and iTunesSD cannot be published one at a time
+	// because the context ended during the write.
+	if err := ctx.Err(); err != nil {
+		return SendResult{}, wrapCancel(err)
+	}
 	if result.Sent == 0 {
 		committed = true
 		emit(progress, Progress{Phase: "done", Current: len(files), Total: len(files)})
@@ -220,10 +244,16 @@ func sendMount(ctx context.Context, dev Device, paths []string, format string, p
 	}
 	if dev.Mode == "stock" {
 		emit(progress, Progress{Phase: "database", Current: len(files), Total: len(files)})
+		// The database callback can cancel. Stop before publish. The transaction
+		// itself does not observe the context, so it cannot stop between the
+		// two playback databases.
+		if err := ctx.Err(); err != nil {
+			return SendResult{}, wrapCancel(err)
+		}
 		if err := saveLibrary(dev, db); err != nil {
-			// The database commit restores the previous file on failure.
-			// Files copied in this send are deleted unless that commit
-			// already succeeded and a later shuffle or playlist step failed.
+			// A normal error means every playback database is back to its
+			// previous bytes, so files copied in this send are deleted.
+			// afterCommitError means a database may still name them.
 			var kept *afterCommitError
 			if errors.As(err, &kept) {
 				committed = true
@@ -236,9 +266,19 @@ func sendMount(ctx context.Context, dev Device, paths []string, format string, p
 	return result, nil
 }
 
-func placeTrack(dev Device, src, format string, meta audioMeta) (string, *track, error) {
+func placeTrack(ctx context.Context, dev Device, src, format string, meta audioMeta, sourceHash string) (string, *track, error) {
+	if err := ctx.Err(); err != nil {
+		return "", nil, err
+	}
+	var dest string
+	keep := false
+	defer func() {
+		if dest != "" && !keep {
+			_ = os.Remove(dest)
+		}
+	}()
 	if dev.Mode == "rockbox" {
-		dest := filepath.Join(dev.Mount, "Music", sanitize(meta.artist), sanitize(meta.album), sanitize(filepath.Base(src)))
+		dest = filepath.Join(dev.Mount, "Music", sanitize(meta.artist), sanitize(meta.album), sanitize(filepath.Base(src)))
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			return "", nil, err
 		}
@@ -248,13 +288,17 @@ func placeTrack(dev Device, src, format string, meta audioMeta) (string, *track,
 		if err := requireSpace(dev.Mount, meta.size); err != nil {
 			return "", nil, err
 		}
-		if err := copyFile(src, dest); err != nil {
+		if err := copyFileCtx(ctx, src, dest); err != nil {
 			return "", nil, err
 		}
+		if err := ctx.Err(); err != nil {
+			return "", nil, err
+		}
+		keep = true
 		return dest, nil, nil
 	}
 	ext := extOf(src)
-	transcode := needsTranscode(ext, meta)
+	transcode := needsTranscode(dev.Generation, ext, meta)
 	if !transcode {
 		if err := requireSpace(dev.Mount, meta.size); err != nil {
 			return "", nil, err
@@ -268,23 +312,52 @@ func placeTrack(dev Device, src, format string, meta audioMeta) (string, *track,
 		return "", nil, err
 	}
 	name := randomName(destExt)
-	dest := filepath.Join(buckets[bucketIndex(name, len(buckets))], name)
+	dest = filepath.Join(buckets[bucketIndex(name, len(buckets))], name)
 	for fileExists(dest) {
 		name = randomName(destExt)
 		dest = filepath.Join(buckets[bucketIndex(name, len(buckets))], name)
 	}
 	if transcode {
-		if err := transcodeFile(src, dest, format); err != nil {
+		if err := transcodeFileCtx(ctx, src, dest, format); err != nil {
 			return "", nil, err
 		}
-	} else if err := copyFile(src, dest); err != nil {
+	} else if err := copyFileCtx(ctx, src, dest); err != nil {
+		return "", nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return "", nil, err
+	}
+	info, err := os.Stat(dest)
+	if err != nil {
+		return "", nil, err
+	}
+	if info.Size() >= 4<<30 || info.Size() < 0 {
+		return "", nil, fmt.Errorf("%s is 4 GB or larger and cannot be stored on this iPod", filepath.Base(dest))
+	}
+	if transcode {
+		out := readMeta(dest, info.Size())
+		if out.sampleRate == 0 {
+			return "", nil, fmt.Errorf("%s was converted but its sample rate could not be read", filepath.Base(src))
+		}
+		meta.sampleRate = out.sampleRate
+		meta.bitrate = out.bitrate
+		meta.lengthMS = out.lengthMS
+	}
+	meta.size = info.Size()
+	if err := ctx.Err(); err != nil {
 		return "", nil, err
 	}
 	rel, err := filepath.Rel(dev.Mount, dest)
 	if err != nil {
 		return "", nil, err
 	}
-	tr := &track{
+	tr := newTrack(meta, kind, colonPath("/"+filepath.ToSlash(rel)), unk126, unk144, sourceHash)
+	keep = true
+	return dest, tr, nil
+}
+
+func newTrack(meta audioMeta, kind, path string, unk126, unk144 uint16, sourceHash string) *track {
+	return &track{
 		title:       meta.title,
 		artist:      meta.artist,
 		album:       meta.album,
@@ -292,7 +365,7 @@ func placeTrack(dev Device, src, format string, meta audioMeta) (string, *track,
 		genre:       meta.genre,
 		composer:    meta.composer,
 		kind:        kind,
-		path:        colonPath("/" + filepath.ToSlash(rel)),
+		path:        path,
 		size:        uint32(meta.size),
 		lengthMS:    meta.lengthMS,
 		trackNr:     meta.trackNr,
@@ -304,8 +377,8 @@ func placeTrack(dev Device, src, format string, meta audioMeta) (string, *track,
 		discs:       meta.discs,
 		unk126:      unk126,
 		unk144:      unk144,
+		sourceHash:  sourceHash,
 	}
-	return dest, tr, nil
 }
 
 func removeMount(dev Device, ids []int) error {
@@ -340,12 +413,15 @@ func removeMount(dev Device, ids []int) error {
 		}
 	}
 	if err := saveLibrary(dev, db); err != nil {
-		var kept *afterCommitError
-		if !errors.As(err, &kept) {
-			return err
-		}
-		if delErr := deleteCopied(files); delErr != nil {
-			return delErr
+		// A playback database failed or could not be restored. The selected
+		// audio may still be named by iTunesDB or iTunesSD, so it stays.
+		// Files are removed only after both playback databases commit, including
+		// when a later Rockbox playlist write is what failed.
+		var partial *afterCommitError
+		if errors.As(err, &partial) && partial.playbackCommitted {
+			if delErr := deleteCopied(files); delErr != nil {
+				return delErr
+			}
 		}
 		return err
 	}
@@ -422,23 +498,15 @@ func doctorMount(dev Device, action string) (DoctorReport, error) {
 			}
 			meta := readMeta(orphan.Path, info.Size())
 			ext := extOf(orphan.Path)
-			transcode := needsTranscode(ext, meta)
-			if transcode {
+			if needsTranscode(dev.Generation, ext, meta) {
 				continue
 			}
-			kind, _, unk126, unk144 := kindFor(ext, meta.codec, "alac", false)
+			kind, _, unk126, unk144 := kindFor(ext, meta.codec, deviceFormat(dev.Generation, "alac"), false)
 			rel, relErr := filepath.Rel(dev.Mount, orphan.Path)
 			if relErr != nil {
 				continue
 			}
-			if err := db.addTrack(&track{
-				title: meta.title, artist: meta.artist, album: meta.album, albumArtist: meta.albumArtist,
-				genre: meta.genre, composer: meta.composer, kind: kind,
-				path: colonPath("/" + filepath.ToSlash(rel)), size: uint32(info.Size()),
-				lengthMS: meta.lengthMS, trackNr: meta.trackNr, tracks: meta.tracks, year: meta.year,
-				bitrate: meta.bitrate, sampleRate: meta.sampleRate, disc: meta.disc, discs: meta.discs,
-				unk126: unk126, unk144: unk144,
-			}); err != nil {
+			if err := db.addTrack(newTrack(meta, kind, colonPath("/"+filepath.ToSlash(rel)), unk126, unk144, "")); err != nil {
 				return report, err
 			}
 		}
@@ -482,22 +550,15 @@ func doctorMount(dev Device, action string) (DoctorReport, error) {
 			}
 			meta := readMeta(path, info.Size())
 			ext := extOf(path)
-			if needsTranscode(ext, meta) {
+			if needsTranscode(dev.Generation, ext, meta) {
 				continue
 			}
-			kind, _, unk126, unk144 := kindFor(ext, meta.codec, "alac", false)
+			kind, _, unk126, unk144 := kindFor(ext, meta.codec, deviceFormat(dev.Generation, "alac"), false)
 			rel, relErr := filepath.Rel(dev.Mount, path)
 			if relErr != nil {
 				continue
 			}
-			if err := fresh.addTrack(&track{
-				title: meta.title, artist: meta.artist, album: meta.album, albumArtist: meta.albumArtist,
-				genre: meta.genre, composer: meta.composer, kind: kind,
-				path: colonPath("/" + filepath.ToSlash(rel)), size: uint32(info.Size()),
-				lengthMS: meta.lengthMS, trackNr: meta.trackNr, tracks: meta.tracks, year: meta.year,
-				bitrate: meta.bitrate, sampleRate: meta.sampleRate, disc: meta.disc, discs: meta.discs,
-				unk126: unk126, unk144: unk144,
-			}); err != nil {
+			if err := fresh.addTrack(newTrack(meta, kind, colonPath("/"+filepath.ToSlash(rel)), unk126, unk144, "")); err != nil {
 				return report, err
 			}
 		}
@@ -547,31 +608,50 @@ func saveLibrary(dev Device, db *Database) error {
 	if err != nil {
 		return err
 	}
-	if err := commitBytes(dbPath(dev.Mount), data, func(read []byte) error {
+	dbFile := dbPath(dev.Mount)
+	dbState, err := commitBytes(dbFile, data, func(read []byte) error {
 		_, err := parseDatabase(read)
 		return err
-	}); err != nil {
+	})
+	if err != nil {
+		if dbState.uncertain || dbState.published {
+			return &afterCommitError{err: err}
+		}
 		return err
 	}
 	if usesShuffleSD(dev.Generation) {
-		if err := commitBytes(sdPath(dev.Mount), writeShuffle(db.tracks), func(read []byte) error {
-			_, err := parseShuffle(read)
-			return err
-		}); err != nil {
-			return &afterCommitError{err: err}
+		sdState, sdErr := commitBytes(sdPath(dev.Mount), writeShuffle(db.tracks), func(read []byte) error {
+			_, parseErr := parseShuffle(read)
+			return parseErr
+		})
+		if sdErr != nil {
+			if sdState.uncertain || sdState.published {
+				return &afterCommitError{err: sdErr}
+			}
+			if rbErr := rollbackPublished(dbFile, dbState); rbErr != nil {
+				return &afterCommitError{err: fmt.Errorf("%w; iTunesDB rollback: %w", sdErr, rbErr)}
+			}
+			return fmt.Errorf("iTunesSD was not updated: %w", sdErr)
 		}
 	}
 	if dev.HasRockbox {
 		if err := writeRockboxPlaylist(dev.Mount, db.tracks); err != nil {
-			return &afterCommitError{err: err}
+			return &afterCommitError{err: err, playbackCommitted: true}
 		}
 	}
 	return nil
 }
 
-// afterCommitError means the iTunesDB was replaced and then a later file failed.
-// Audio copied for that database must be kept.
-type afterCommitError struct{ err error }
+// afterCommitError means a playback database was published and a later step
+// failed without a verified return to the previous bytes. Copied audio must
+// stay because that database may still name it. A shuffle write that fails
+// before publish, followed by a verified iTunesDB restore, is an ordinary error.
+// playbackCommitted is set only when iTunesDB and iTunesSD (when the model
+// uses it) both already contain the new library.
+type afterCommitError struct {
+	err               error
+	playbackCommitted bool
+}
 
 func (e *afterCommitError) Error() string { return e.err.Error() }
 func (e *afterCommitError) Unwrap() error { return e.err }
@@ -670,11 +750,28 @@ func expandAudio(paths []string) ([]string, error) {
 	return out, nil
 }
 
-func duplicate(db *Database, meta audioMeta) bool {
-	if strings.TrimSpace(meta.title) == "" {
+func duplicate(db *Database, meta audioMeta, sourceHash string) bool {
+	if db == nil {
+		return false
+	}
+	want := normalizeSourceHash(sourceHash)
+	if want != "" {
+		for _, tr := range db.tracks {
+			if normalizeSourceHash(tr.sourceHash) == want {
+				return true
+			}
+		}
+	}
+	// Tracks written before source hashes existed still match a straight copy,
+	// whose stored size is the source size. Transcoded output sizes differ,
+	// so they are identified only by sourceHash.
+	if strings.TrimSpace(meta.title) == "" || meta.size < 0 || meta.size > int64(^uint32(0)) {
 		return false
 	}
 	for _, tr := range db.tracks {
+		if normalizeSourceHash(tr.sourceHash) != "" {
+			continue
+		}
 		title := tr.title
 		if title == "" {
 			title = titleFromPath(tr.path)
@@ -684,6 +781,16 @@ func duplicate(db *Database, meta audioMeta) bool {
 		}
 	}
 	return false
+}
+
+func wrapCancel(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("cancelled: %w", err)
+	}
+	return err
 }
 
 func underMount(mount, path string) bool {

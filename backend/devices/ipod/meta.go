@@ -54,20 +54,75 @@ func readMeta(path string, size int64) audioMeta {
 	return meta
 }
 
-func needsTranscode(ext string, meta audioMeta) bool {
-	hiRes := meta.sampleRate > 44100 || meta.bitDepth > 16
-	switch strings.ToLower(ext) {
-	case ".mp3", ".wav", ".aif", ".aiff":
-		return hiRes
-	case ".m4a", ".mp4", ".m4b":
-		codec := strings.ToLower(meta.codec)
-		if codec != "" && codec != "aac" && codec != "alac" {
-			return true
-		}
-		return hiRes
+// SourceHashPrefix is the MHOD type-8 comment prefix. track.sourceHash stores
+// the 64-character lowercase hex digest. The database writer persists
+// SourceHashPrefix plus that digest and parses it back into the field.
+const SourceHashPrefix = "auralis:source-sha256:"
+
+func supportsALAC(gen string) bool {
+	switch gen {
+	case "SHUFFLE_1", "SHUFFLE_2":
+		return false
 	default:
 		return true
 	}
+}
+
+// supportsAIFF is conservative for the first-generation shuffle, which does
+// not play AIFF. The second generation does. Other writable models keep it.
+func supportsAIFF(gen string) bool {
+	return gen != "SHUFFLE_1"
+}
+
+func deviceFormat(gen, requested string) string {
+	if requested != "aac" {
+		requested = "alac"
+	}
+	if requested == "alac" && !supportsALAC(gen) {
+		return "aac"
+	}
+	return requested
+}
+
+func hiResAudio(meta audioMeta) bool {
+	return meta.sampleRate > 44100 || meta.bitDepth > 16
+}
+
+func needsTranscode(gen, ext string, meta audioMeta) bool {
+	switch strings.ToLower(ext) {
+	case ".mp3", ".wav":
+		return hiResAudio(meta)
+	case ".aif", ".aiff":
+		if !supportsAIFF(gen) {
+			return true
+		}
+		return hiResAudio(meta)
+	case ".m4a", ".mp4", ".m4b":
+		codec := strings.ToLower(meta.codec)
+		if codec == "alac" && !supportsALAC(gen) {
+			return true
+		}
+		if codec != "" && codec != "aac" && codec != "alac" {
+			return true
+		}
+		return hiResAudio(meta)
+	default:
+		return true
+	}
+}
+
+func normalizeSourceHash(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	value = strings.TrimPrefix(value, SourceHashPrefix)
+	if len(value) != 64 {
+		return ""
+	}
+	for _, c := range value {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return ""
+		}
+	}
+	return value
 }
 
 func kindFor(ext, codec, format string, transcode bool) (kind, destExt string, unk126, unk144 uint16) {

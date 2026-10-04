@@ -32,8 +32,9 @@ const (
 )
 
 var (
-	errUnreadableDB = errors.New("iTunesDB is unreadable")
-	errOpaqueMaster = errors.New("a playlist on the iPod could not be read, so nothing was changed")
+	errUnreadableDB      = errors.New("iTunesDB is unreadable")
+	errOpaqueMaster      = errors.New("a playlist on the iPod could not be read, so nothing was changed")
+	errUnsupportedLayout = errors.New("the iPod database uses a playlist layout this writer cannot update safely")
 )
 
 var macEpoch = time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -62,6 +63,16 @@ type track struct {
 	unk126      uint16
 	unk144      uint16
 	raw         []byte
+	// sourceHash is the lowercase hex SHA-256 of the file before conversion.
+	// Database persistence is the MHOD type-8 comment
+	// "auralis:source-sha256:" plus these 64 hex digits.
+	sourceHash      string
+	sortTitle       string
+	sortAlbum       string
+	sortArtist      string
+	sortAlbumArtist string
+	sortComposer    string
+	sortUnreadable  bool
 }
 
 type mhipRef struct {
@@ -71,18 +82,26 @@ type mhipRef struct {
 }
 
 type playlist struct {
-	raw    []byte
+	raw     []byte
+	header  []byte
+	mhods   [][]byte
+	mhips   []mhipRef
+	opaque  bool
+	grouped bool
+	master  bool
+	name    string
+}
+
+type playlistBlock struct {
 	header []byte
-	mhods  [][]byte
-	mhips  []mhipRef
-	opaque bool
-	master bool
-	name   string
+	lists  []*playlist
 }
 
 type section struct {
-	kind int // 1 tracks, 2 playlists, 0 raw mhsd
-	raw  []byte
+	kind     int // 1 tracks, 2 playlists, 3 playlists, 0 raw mhsd
+	raw      []byte
+	play     *playlistBlock
+	preserve bool
 }
 
 // Database is an in-memory iTunesDB. Existing chunks that this writer does
@@ -105,11 +124,12 @@ type Database struct {
 	checksum Checksum
 	firewire []byte
 
-	tracks     []*track
-	mhltHeader []byte
-	playlists  []*playlist
-	mhlpHeader []byte
-	sections   []section
+	tracks         []*track
+	mhltHeader     []byte
+	playlists      []*playlist
+	mhlpHeader     []byte
+	sections       []section
+	refuseMutation bool
 }
 
 func newDatabase(cs Checksum, firewire []byte) *Database {
@@ -121,22 +141,119 @@ func newDatabase(cs Checksum, firewire []byte) *Database {
 }
 
 func parseDatabase(data []byte) (*Database, error) {
-	if len(data) < 16 || string(data[0:4]) != "mhbd" {
+	if len(data) < 32 || string(data[0:4]) != "mhbd" {
 		return nil, errUnreadableDB
 	}
 	headerLen := int(u32(data[4:]))
-	if headerLen < 16 || headerLen > len(data) {
+	if headerLen < 32 || headerLen > len(data) {
 		return nil, errUnreadableDB
 	}
-	total := int(u32(data[8:]))
-	if total < headerLen || total > len(data) {
-		total = len(data)
+	if uint64(u32(data[8:])) != uint64(len(data)) {
+		return nil, errUnreadableDB
 	}
 	db := &Database{
 		rawHeader: append([]byte(nil), data[:headerLen]...),
 		headerLen: headerLen,
 	}
-	if headerLen >= 0x18 {
+	if err := readMHBDFields(db, data, headerLen); err != nil {
+		return nil, err
+	}
+
+	pos := headerLen
+	seenTracks := false
+	seenLists := false
+	seenType2 := false
+	chunks := 0
+	for len(data)-pos >= 12 {
+		if string(data[pos:pos+4]) != "mhsd" {
+			return nil, errUnreadableDB
+		}
+		chunk, next, ok := oneChunk(data, pos)
+		if !ok || len(chunk) < 16 {
+			return nil, errUnreadableDB
+		}
+		mhsdHeader := int(u32(chunk[4:]))
+		if mhsdHeader < 16 || mhsdHeader > len(chunk) {
+			return nil, errUnreadableDB
+		}
+		kind := u32(chunk[12:])
+		switch kind {
+		case 1:
+			if seenTracks {
+				return nil, errUnreadableDB
+			} else if err := db.parseTracks(chunk); err != nil {
+				return nil, err
+			} else {
+				db.sections = append(db.sections, section{kind: 1})
+				seenTracks = true
+			}
+		case 2, 3:
+			block, grouped, err := readPlaylistBlock(chunk)
+			if err != nil {
+				return nil, err
+			}
+			seenLists = true
+			if grouped {
+				db.sections = append(db.sections, section{raw: append([]byte(nil), chunk...), preserve: true})
+				db.refuseMutation = true
+				break
+			}
+			db.sections = append(db.sections, section{kind: int(kind), play: block})
+			if kind == 2 || !seenType2 {
+				db.playlists = block.lists
+				db.mhlpHeader = block.header
+			}
+			if kind == 2 {
+				seenType2 = true
+			}
+		default:
+			db.sections = append(db.sections, section{raw: append([]byte(nil), chunk...)})
+		}
+		chunks++
+		pos = next
+	}
+	if pos != len(data) {
+		return nil, errUnreadableDB
+	}
+	if headerLen >= 0x18 && int(u32(data[0x14:])) != chunks {
+		return nil, errUnreadableDB
+	}
+	// Missing sections mean an incomplete on-disk library, not a fresh device.
+	// Fresh libraries are created only when iTunesDB itself does not exist.
+	if !seenTracks || !seenLists {
+		return nil, errUnreadableDB
+	}
+	return db, nil
+}
+
+func readMHBDFields(db *Database, data []byte, headerLen int) error {
+	// dbID lives at 0x18 and is 8 bytes. A header that reaches that offset
+	// has to include the whole field; 24-byte headers used to panic here.
+	if headerLen >= 0x18 && headerLen < 0x20 {
+		return errUnreadableDB
+	}
+	if err := partialField(headerLen, 0x20, 2); err != nil {
+		return err
+	}
+	if err := partialField(headerLen, 0x24, 8); err != nil {
+		return err
+	}
+	if err := partialField(headerLen, 0x30, 2); err != nil {
+		return err
+	}
+	if err := partialField(headerLen, 0x46, 2); err != nil {
+		return err
+	}
+	if err := partialField(headerLen, 0x48, 8); err != nil {
+		return err
+	}
+	if err := partialField(headerLen, 0x50, 8); err != nil {
+		return err
+	}
+	if err := partialField(headerLen, 0x6c, 4); err != nil {
+		return err
+	}
+	if headerLen >= 0x20 {
 		db.dbID = u64(data[0x18:])
 	}
 	if headerLen >= 0x22 {
@@ -163,69 +280,35 @@ func parseDatabase(data []byte) (*Database, error) {
 		db.timezone = int32(u32(data[0x6c:]))
 		db.hasTZ = true
 	}
+	return nil
+}
 
-	pos := headerLen
-	seenTracks := false
-	seenLists := false
-	for pos+12 <= total {
-		if string(data[pos:pos+4]) != "mhsd" {
-			return nil, errUnreadableDB
-		}
-		chunk, next, ok := oneChunk(data[:total], pos)
-		if !ok {
-			return nil, errUnreadableDB
-		}
-		kind := u32(chunk[12:])
-		switch kind {
-		case 1:
-			if seenTracks {
-				db.sections = append(db.sections, section{raw: append([]byte(nil), chunk...)})
-			} else if err := db.parseTracks(chunk); err != nil {
-				return nil, err
-			} else {
-				db.sections = append(db.sections, section{kind: 1})
-				seenTracks = true
-			}
-		case 2:
-			if seenLists {
-				db.sections = append(db.sections, section{raw: append([]byte(nil), chunk...)})
-			} else if err := db.parsePlaylists(chunk); err != nil {
-				return nil, err
-			} else {
-				db.sections = append(db.sections, section{kind: 2})
-				seenLists = true
-			}
-		default:
-			db.sections = append(db.sections, section{raw: append([]byte(nil), chunk...)})
-		}
-		pos = next
+func partialField(headerLen, off, size int) error {
+	if headerLen > off && headerLen < off+size {
+		return errUnreadableDB
 	}
-	if pos != total {
-		return nil, errUnreadableDB
-	}
-	if !seenTracks {
-		db.sections = append(db.sections, section{kind: 1})
-	}
-	if !seenLists {
-		db.sections = append(db.sections, section{kind: 2})
-	}
-	return db, nil
+	return nil
 }
 
 func (db *Database) parseTracks(chunk []byte) error {
+	if len(chunk) < 16 {
+		return errUnreadableDB
+	}
 	headerLen := int(u32(chunk[4:]))
-	if headerLen < 16 || headerLen > len(chunk) {
+	if headerLen < 16 || headerLen > len(chunk) || int(u32(chunk[8:])) != len(chunk) {
 		return errUnreadableDB
 	}
 	payload := chunk[headerLen:]
-	list, pos, ok := fixedHeader(payload, "mhlt")
+	list, pos, ok := fixedHeader(payload, "mhlt", 12)
 	if !ok {
 		return errUnreadableDB
 	}
+	declared := int(u32(list[8:]))
 	db.mhltHeader = list
+	count := 0
 	for pos < len(payload) {
 		item, n, ok := oneChunk(payload, pos)
-		if !ok || string(item[0:4]) != "mhit" {
+		if !ok || len(item) < 4 || string(item[0:4]) != "mhit" {
 			return errUnreadableDB
 		}
 		tr, err := parseTrack(item)
@@ -233,18 +316,40 @@ func (db *Database) parseTracks(chunk []byte) error {
 			return err
 		}
 		db.tracks = append(db.tracks, tr)
+		count++
 		pos = n
 	}
-	if pos != len(payload) {
+	if pos != len(payload) || count != declared {
 		return errUnreadableDB
 	}
 	return nil
 }
 
 func parseTrack(chunk []byte) (*track, error) {
-	headerLen := int(u32(chunk[4:]))
-	if headerLen < 0x14 || headerLen > len(chunk) {
+	if len(chunk) < 0x14 || string(chunk[0:4]) != "mhit" {
 		return nil, errUnreadableDB
+	}
+	headerLen := int(u32(chunk[4:]))
+	if headerLen < 0x14 || headerLen > len(chunk) || int(u32(chunk[8:])) != len(chunk) {
+		return nil, errUnreadableDB
+	}
+	if err := partialField(headerLen, 0x10, 4); err != nil {
+		return nil, err
+	}
+	if err := partialField(headerLen, 0x24, 4); err != nil {
+		return nil, err
+	}
+	if err := partialField(headerLen, 0x2c, 4); err != nil {
+		return nil, err
+	}
+	if err := partialField(headerLen, 0x30, 4); err != nil {
+		return nil, err
+	}
+	if err := partialField(headerLen, 0x5c, 4); err != nil {
+		return nil, err
+	}
+	if err := partialField(headerLen, 0x60, 4); err != nil {
+		return nil, err
 	}
 	tr := &track{
 		id:  u32(chunk[0x10:]),
@@ -253,123 +358,227 @@ func parseTrack(chunk []byte) (*track, error) {
 	if headerLen >= 0x28 {
 		tr.size = u32(chunk[0x24:])
 	}
+	if headerLen >= 0x30 {
+		tr.trackNr = u32(chunk[0x2c:])
+	}
+	if headerLen >= 0x34 {
+		tr.tracks = u32(chunk[0x30:])
+	}
+	if headerLen >= 0x60 {
+		tr.disc = u32(chunk[0x5c:])
+	}
+	if headerLen >= 0x64 {
+		tr.discs = u32(chunk[0x60:])
+	}
+	declared := int(u32(chunk[12:]))
 	pos := headerLen
-	for pos+12 <= len(chunk) {
+	actual := 0
+	for pos < len(chunk) {
+		if len(chunk)-pos < 12 {
+			return nil, errUnreadableDB
+		}
 		item, n, ok := oneChunk(chunk, pos)
 		if !ok {
 			return nil, errUnreadableDB
 		}
-		applyString(tr, item)
+		if err := applyString(tr, item); err != nil {
+			return nil, err
+		}
+		actual++
 		pos = n
 	}
-	if pos != len(chunk) {
+	if pos != len(chunk) || actual != declared {
 		return nil, errUnreadableDB
 	}
 	return tr, nil
 }
 
-func applyString(tr *track, mhod []byte) {
+func applyString(tr *track, mhod []byte) error {
 	if len(mhod) < 16 || string(mhod[0:4]) != "mhod" {
-		return
+		return errUnreadableDB
 	}
 	headerLen := int(u32(mhod[4:]))
+	if headerLen < 16 || headerLen > len(mhod) || int(u32(mhod[8:])) != len(mhod) {
+		return errUnreadableDB
+	}
 	kind := u32(mhod[12:])
-	text := mhodString(mhod, headerLen)
 	switch kind {
-	case mhodTitle:
-		tr.title = text
-	case mhodPath:
-		tr.path = text
-	case mhodAlbum:
-		tr.album = text
-	case mhodArtist:
-		tr.artist = text
-	case mhodGenre:
-		tr.genre = text
-	case mhodKind:
-		tr.kind = text
-	case mhodComposer:
-		tr.composer = text
-	case mhodAlbumArtist:
-		tr.albumArtist = text
-	}
-}
-
-func mhodString(mhod []byte, headerLen int) string {
-	start := headerLen + 16
-	if headerLen < 24 || start+4 > len(mhod) {
-		return ""
-	}
-	enc := u32(mhod[headerLen:])
-	n := int(u32(mhod[headerLen+4:]))
-	if n < 0 || start+n > len(mhod) {
-		return ""
-	}
-	body := mhod[start : start+n]
-	if enc == 1 {
-		return decodeUTF16(body)
-	}
-	return string(body)
-}
-
-func (db *Database) parsePlaylists(chunk []byte) error {
-	headerLen := int(u32(chunk[4:]))
-	if headerLen < 16 || headerLen > len(chunk) {
-		return errUnreadableDB
-	}
-	payload := chunk[headerLen:]
-	list, pos, ok := fixedHeader(payload, "mhlp")
-	if !ok {
-		return errUnreadableDB
-	}
-	db.mhlpHeader = list
-	for pos < len(payload) {
-		item, n, ok := oneChunk(payload, pos)
-		if !ok || string(item[0:4]) != "mhyp" {
+	case mhodTitle, mhodPath, mhodAlbum, mhodArtist, mhodGenre, mhodKind, mhodComposer, mhodAlbumArtist, mhodComment, mhodSortArtist, mhodSortTitle, mhodSortAlbum, mhodSortAlbumArtist, mhodSortComposer:
+		text, ok := mhodText(mhod)
+		if !ok {
+			if isSortOverride(kind) {
+				tr.sortUnreadable = true
+				return nil
+			}
 			return errUnreadableDB
 		}
-		db.playlists = append(db.playlists, parsePlaylist(item))
-		pos = n
-	}
-	if pos != len(payload) {
-		return errUnreadableDB
+		switch kind {
+		case mhodTitle:
+			tr.title = text
+		case mhodPath:
+			tr.path = text
+		case mhodAlbum:
+			tr.album = text
+		case mhodArtist:
+			tr.artist = text
+		case mhodGenre:
+			tr.genre = text
+		case mhodKind:
+			tr.kind = text
+		case mhodComposer:
+			tr.composer = text
+		case mhodAlbumArtist:
+			tr.albumArtist = text
+		case mhodComment:
+			if hash := sourceHashFromComment(text); hash != "" {
+				tr.sourceHash = hash
+			}
+		case mhodSortTitle:
+			tr.sortTitle = text
+		case mhodSortAlbum:
+			tr.sortAlbum = text
+		case mhodSortArtist:
+			tr.sortArtist = text
+		case mhodSortAlbumArtist:
+			tr.sortAlbumArtist = text
+		case mhodSortComposer:
+			tr.sortComposer = text
+		}
 	}
 	return nil
 }
 
-func parsePlaylist(chunk []byte) *playlist {
-	pl := &playlist{raw: append([]byte(nil), chunk...)}
-	if len(chunk) < 24 {
-		pl.opaque = true
-		return pl
+func mhodText(mhod []byte) (string, bool) {
+	if len(mhod) < 16 || string(mhod[0:4]) != "mhod" {
+		return "", false
+	}
+	headerLen := int(u32(mhod[4:]))
+	if headerLen < 24 || headerLen > len(mhod)-16 || int(u32(mhod[8:])) != len(mhod) {
+		return "", false
+	}
+	enc := u32(mhod[headerLen:])
+	n := int(u32(mhod[headerLen+4:]))
+	start := headerLen + 16
+	if n < 0 || n > len(mhod)-start {
+		return "", false
+	}
+	body := mhod[start : start+n]
+	switch enc {
+	case 1:
+		if n%2 != 0 {
+			return "", false
+		}
+		return decodeUTF16(body), true
+	case 0, 2:
+		return string(body), true
+	default:
+		return "", false
+	}
+}
+
+func mhodString(mhod []byte, headerLen int) string {
+	text, ok := mhodText(mhod)
+	if !ok || headerLen < 24 {
+		return ""
+	}
+	return text
+}
+
+func (db *Database) parsePlaylists(chunk []byte) error {
+	block, _, err := readPlaylistBlock(chunk)
+	if err != nil {
+		return err
+	}
+	db.mhlpHeader = block.header
+	db.playlists = block.lists
+	return nil
+}
+
+func readPlaylistBlock(chunk []byte) (*playlistBlock, bool, error) {
+	if len(chunk) < 16 {
+		return nil, false, errUnreadableDB
 	}
 	headerLen := int(u32(chunk[4:]))
-	if headerLen < 24 || headerLen > len(chunk) {
-		pl.opaque = true
-		return pl
+	if headerLen < 16 || headerLen > len(chunk) || int(u32(chunk[8:])) != len(chunk) {
+		return nil, false, errUnreadableDB
 	}
-	pl.header = append([]byte(nil), chunk[:headerLen]...)
-	pl.master = chunk[20] == 1
+	payload := chunk[headerLen:]
+	list, pos, ok := fixedHeader(payload, "mhlp", 12)
+	if !ok {
+		return nil, false, errUnreadableDB
+	}
+	declared := int(u32(list[8:]))
+	var lists []*playlist
+	grouped := false
+	for pos < len(payload) {
+		item, n, ok := oneChunk(payload, pos)
+		if !ok || len(item) < 4 || string(item[0:4]) != "mhyp" {
+			return nil, false, errUnreadableDB
+		}
+		pl, err := parsePlaylist(item)
+		if err != nil {
+			return nil, false, err
+		}
+		if pl.grouped {
+			grouped = true
+		}
+		lists = append(lists, pl)
+		pos = n
+	}
+	if pos != len(payload) || len(lists) != declared {
+		return nil, false, errUnreadableDB
+	}
+	return &playlistBlock{header: list, lists: lists}, grouped, nil
+}
+
+func parsePlaylist(chunk []byte) (*playlist, error) {
+	if len(chunk) < 24 || string(chunk[0:4]) != "mhyp" {
+		return nil, errUnreadableDB
+	}
+	headerLen := int(u32(chunk[4:]))
+	if headerLen < 24 || headerLen > len(chunk) || int(u32(chunk[8:])) != len(chunk) {
+		return nil, errUnreadableDB
+	}
+	if err := partialField(headerLen, 42, 2); err != nil {
+		return nil, err
+	}
+	pl := &playlist{
+		raw:    append([]byte(nil), chunk...),
+		header: append([]byte(nil), chunk[:headerLen]...),
+		master: chunk[20] == 1,
+	}
 	mhods := int(u32(chunk[12:]))
 	mhips := int(u32(chunk[16:]))
+	if mhods < 0 || mhips < 0 {
+		return nil, errUnreadableDB
+	}
 	pos := headerLen
 	for i := 0; i < mhods; i++ {
 		item, n, ok := oneChunk(chunk, pos)
-		if !ok || string(item[0:4]) != "mhod" {
-			pl.opaque = true
-			return pl
+		if !ok || len(item) < 16 || string(item[0:4]) != "mhod" {
+			return nil, errUnreadableDB
 		}
 		pl.mhods = append(pl.mhods, append([]byte(nil), item...))
 		if u32(item[12:]) == mhodTitle {
-			pl.name = mhodString(item, int(u32(item[4:])))
+			text, ok := mhodText(item)
+			if !ok {
+				return nil, errUnreadableDB
+			}
+			pl.name = text
 		}
 		pos = n
 	}
 	for i := 0; i < mhips; i++ {
 		item, n, ok := oneChunk(chunk, pos)
-		if !ok || string(item[0:4]) != "mhip" {
-			pl.opaque = true
-			return pl
+		if !ok || len(item) < 28 || string(item[0:4]) != "mhip" {
+			return nil, errUnreadableDB
+		}
+		hipHeader := int(u32(item[4:]))
+		if hipHeader < 28 || hipHeader > len(item) {
+			return nil, errUnreadableDB
+		}
+		if mhipGrouped(item) {
+			pl.grouped = true
 		}
 		pl.mhips = append(pl.mhips, mhipRef{
 			raw:      append([]byte(nil), item...),
@@ -379,11 +588,9 @@ func parsePlaylist(chunk []byte) *playlist {
 		pos = n
 	}
 	if pos != len(chunk) {
-		pl.opaque = true
-		pl.mhods = nil
-		pl.mhips = nil
+		return nil, errUnreadableDB
 	}
-	return pl
+	return pl, nil
 }
 
 func mhipID(raw []byte) uint32 {
@@ -394,11 +601,14 @@ func mhipID(raw []byte) uint32 {
 }
 
 func mhipPosition(raw []byte) uint32 {
-	if len(raw) < 8 {
+	if len(raw) < 16 {
 		return 0
 	}
 	headerLen := int(u32(raw[4:]))
-	if headerLen < 0 || headerLen+28 > len(raw) || string(raw[headerLen:headerLen+4]) != "mhod" {
+	if headerLen < 16 || headerLen > len(raw) || len(raw)-headerLen < 28 {
+		return 0
+	}
+	if string(raw[headerLen:headerLen+4]) != "mhod" || u32(raw[headerLen+12:]) != mhodPosition {
 		return 0
 	}
 	return u32(raw[headerLen+24:])
@@ -406,14 +616,70 @@ func mhipPosition(raw []byte) uint32 {
 
 func (db *Database) master() *playlist {
 	for _, pl := range db.playlists {
-		if pl.master {
+		if pl != nil && pl.master {
 			return pl
 		}
 	}
 	return nil
 }
 
+func (db *Database) layoutError() error {
+	if db == nil {
+		return errUnreadableDB
+	}
+	if db.refuseMutation {
+		return errUnsupportedLayout
+	}
+	for _, tr := range db.tracks {
+		if tr != nil && tr.sortUnreadable {
+			return errUnsupportedLayout
+		}
+	}
+	var problem error
+	db.eachPlaylist(func(pl *playlist) {
+		if problem != nil || pl == nil {
+			return
+		}
+		if pl.grouped {
+			problem = errUnsupportedLayout
+			return
+		}
+		for _, mhod := range pl.mhods {
+			if err := indexMhodProblem(mhod); err != nil {
+				problem = err
+				return
+			}
+		}
+	})
+	return problem
+}
+
+func (db *Database) eachPlaylist(fn func(*playlist)) {
+	seen := map[*playlist]struct{}{}
+	walk := func(lists []*playlist) {
+		for _, pl := range lists {
+			if pl == nil {
+				continue
+			}
+			if _, ok := seen[pl]; ok {
+				continue
+			}
+			seen[pl] = struct{}{}
+			fn(pl)
+		}
+	}
+	walk(db.playlists)
+	for _, sec := range db.sections {
+		if sec.play != nil {
+			walk(sec.play.lists)
+		}
+	}
+}
+
 func (db *Database) addTrack(tr *track) error {
+	if err := db.layoutError(); err != nil {
+		return err
+	}
 	if pl := db.master(); pl != nil && pl.opaque {
 		return errOpaqueMaster
 	}
@@ -431,10 +697,17 @@ func (db *Database) addTrack(tr *track) error {
 }
 
 func (db *Database) removeTrack(id uint32) error {
-	for _, pl := range db.playlists {
+	if err := db.layoutError(); err != nil {
+		return err
+	}
+	var opaque bool
+	db.eachPlaylist(func(pl *playlist) {
 		if pl.opaque {
-			return errOpaqueMaster
+			opaque = true
 		}
+	})
+	if opaque {
+		return errOpaqueMaster
 	}
 	next := db.tracks[:0]
 	found := false
@@ -463,6 +736,9 @@ func (db *Database) allocID() uint32 {
 }
 
 func (db *Database) Marshal() ([]byte, error) {
+	if err := db.layoutError(); err != nil {
+		return nil, err
+	}
 	if pl := db.master(); pl != nil && pl.opaque {
 		return nil, errOpaqueMaster
 	}
@@ -480,8 +756,11 @@ func (db *Database) Marshal() ([]byte, error) {
 			body = append(body, part...)
 			wroteTracks = true
 			children++
-		case 2:
-			part, err := db.writePlaylists()
+		case 2, 3:
+			if sec.preserve {
+				return nil, errUnsupportedLayout
+			}
+			part, err := db.writePlaylistBlock(uint32(sec.kind), sec.play)
 			if err != nil {
 				return nil, err
 			}
@@ -489,6 +768,9 @@ func (db *Database) Marshal() ([]byte, error) {
 			wroteLists = true
 			children++
 		default:
+			if sec.preserve {
+				return nil, errUnsupportedLayout
+			}
 			body = append(body, sec.raw...)
 			children++
 		}
@@ -742,6 +1024,9 @@ func (db *Database) encodeTrack(tr *track) ([]byte, error) {
 	add(mhodGenre, tr.genre)
 	add(mhodComposer, tr.composer)
 	add(mhodAlbumArtist, tr.albumArtist)
+	if hash := normalizeSourceHash(tr.sourceHash); hash != "" {
+		add(mhodComment, SourceHashPrefix+hash)
+	}
 	binary.LittleEndian.PutUint32(w.b[8:], uint32(len(w.b)))
 	binary.LittleEndian.PutUint32(w.b[12:], uint32(mhods))
 	return w.b, nil
@@ -755,20 +1040,30 @@ func (db *Database) libraryID() uint64 {
 }
 
 func (db *Database) writePlaylists() ([]byte, error) {
-	lists := db.playlists
-	if db.master() == nil {
+	return db.writePlaylistBlock(2, nil)
+}
+
+func (db *Database) writePlaylistBlock(kind uint32, block *playlistBlock) ([]byte, error) {
+	if block == nil {
+		block = &playlistBlock{header: db.mhlpHeader, lists: db.playlists}
+	}
+	lists := block.lists
+	if !playlistMaster(lists) {
 		master, err := db.freshMaster()
 		if err != nil {
 			return nil, err
 		}
-		lists = append(lists, master)
+		lists = append(append([]*playlist{}, lists...), master)
 	}
-	payload := append([]byte(nil), mhlCount(db.mhlpHeader, "mhlp", len(lists))...)
+	payload := append([]byte(nil), mhlCount(block.header, "mhlp", len(lists))...)
 	kept := map[uint32]struct{}{}
 	for _, tr := range db.tracks {
 		kept[tr.id] = struct{}{}
 	}
 	for _, pl := range lists {
+		if pl.grouped {
+			return nil, errUnsupportedLayout
+		}
 		var encoded []byte
 		var err error
 		if pl.master {
@@ -776,14 +1071,23 @@ func (db *Database) writePlaylists() ([]byte, error) {
 		} else if pl.opaque {
 			encoded = pl.raw
 		} else {
-			encoded, err = encodePlaylist(pl, kept)
+			encoded, err = db.encodePlaylist(pl, kept)
 		}
 		if err != nil {
 			return nil, err
 		}
 		payload = append(payload, encoded...)
 	}
-	return wrapMHSD(2, payload), nil
+	return wrapMHSD(kind, payload), nil
+}
+
+func playlistMaster(lists []*playlist) bool {
+	for _, pl := range lists {
+		if pl != nil && pl.master {
+			return true
+		}
+	}
+	return false
 }
 
 func (db *Database) freshMaster() (*playlist, error) {
@@ -802,6 +1106,11 @@ func (db *Database) encodeMaster(pl *playlist, kept map[uint32]struct{}) ([]byte
 			name = "iPod"
 		}
 		mhods = [][]byte{stringMhod(mhodTitle, name), longPlaylistMhod()}
+	}
+	var err error
+	mhods, err = rebuildLibraryIndexes(mhods, db.tracks)
+	if err != nil {
+		return nil, err
 	}
 	var hips []mhipRef
 	present := map[uint32]struct{}{}
@@ -829,9 +1138,9 @@ func (db *Database) encodeMaster(pl *playlist, kept map[uint32]struct{}) ([]byte
 	return joinPlaylist(pl.header, true, mhods, hips), nil
 }
 
-func encodePlaylist(pl *playlist, kept map[uint32]struct{}) ([]byte, error) {
-	if pl.opaque {
-		return nil, errOpaqueMaster
+func (db *Database) encodePlaylist(pl *playlist, kept map[uint32]struct{}) ([]byte, error) {
+	if pl.opaque || pl.grouped {
+		return nil, errUnsupportedLayout
 	}
 	var hips []mhipRef
 	for _, hip := range pl.mhips {
@@ -839,7 +1148,11 @@ func encodePlaylist(pl *playlist, kept map[uint32]struct{}) ([]byte, error) {
 			hips = append(hips, hip)
 		}
 	}
-	return joinPlaylist(pl.header, pl.master, pl.mhods, hips), nil
+	mhods, err := rebuildLibraryIndexes(pl.mhods, db.tracks)
+	if err != nil {
+		return nil, err
+	}
+	return joinPlaylist(pl.header, pl.master, mhods, hips), nil
 }
 
 func joinPlaylist(header []byte, master bool, mhods [][]byte, hips []mhipRef) []byte {
@@ -1094,27 +1407,31 @@ func applyHash58(data, firewire []byte) error {
 	return nil
 }
 
-func fixedHeader(data []byte, magic string) ([]byte, int, bool) {
+func fixedHeader(data []byte, magic string, min int) ([]byte, int, bool) {
+	if min < 8 {
+		min = 8
+	}
 	if len(data) < 8 || string(data[0:4]) != magic {
 		return nil, 0, false
 	}
 	n := int(u32(data[4:]))
-	if n < 8 || n > len(data) {
+	if n < min || n > len(data) {
 		return nil, 0, false
 	}
 	return append([]byte(nil), data[:n]...), n, true
 }
 
 func oneChunk(data []byte, pos int) ([]byte, int, bool) {
-	if pos < 0 || pos+12 > len(data) {
+	if pos < 0 || pos > len(data) || len(data)-pos < 12 {
 		return nil, pos, false
 	}
-	total := int(u32(data[pos+8:]))
-	header := int(u32(data[pos+4:]))
-	if header < 12 || total < header || pos+total > len(data) {
+	header := uint64(u32(data[pos+4:]))
+	total := uint64(u32(data[pos+8:]))
+	if header < 12 || total < header || uint64(len(data)-pos) < total {
 		return nil, pos, false
 	}
-	return data[pos : pos+total], pos + total, true
+	end := pos + int(total)
+	return data[pos:end], end, true
 }
 
 func macTime(t time.Time) uint32 {
