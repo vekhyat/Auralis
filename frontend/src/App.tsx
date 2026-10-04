@@ -3,10 +3,10 @@ import { useTranslation } from "react-i18next";
 import i18n, { translateMessage } from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, } from "@/components/ui/dialog";
-import { X } from "lucide-react";
+import { Activity, X } from "lucide-react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { getSettings, getSettingsWithDefaults, loadSettings, saveSettings, applyThemeMode } from "@/lib/settings";
-import { openExternal } from "@/lib/utils";
+import { cn, openExternal } from "@/lib/utils";
 import { fetchSpotifyMetadata } from "@/lib/api";
 import { OpenFolder, CheckFFmpegInstalled, DownloadFFmpeg, GetRecentFetches, SaveRecentFetches, ListIPods } from "../wailsjs/go/main/App";
 import { EventsOn, EventsOff, Quit } from "../wailsjs/runtime/runtime";
@@ -24,8 +24,8 @@ import { PlaylistInfo } from "@/components/PlaylistInfo";
 import { ArtistInfo } from "@/components/ArtistInfo";
 import { DownloadShelf } from "@/components/DownloadShelf";
 import { CooldownBanner } from "@/components/CooldownBanner";
-import { DebugLoggerPage, DevicesPage, HistoryPage, PageErrorBoundary, PageLoading, QueuePage, SettingsPage, } from "@/lazy-pages";
-import { loadDebugLoggerPage, loadDevicesPage, loadHistoryPage, loadQueuePage, loadSettingsPage, } from "@/lib/page-loaders";
+import { DebugLoggerPage, DevicesPage, HistoryPage, LibraryHealthPage, PageErrorBoundary, PageLoading, QueuePage, SettingsPage, } from "@/lazy-pages";
+import { loadDebugLoggerPage, loadDevicesPage, loadHistoryPage, loadLibraryHealthPage, loadQueuePage, loadSettingsPage, } from "@/lib/page-loaders";
 import { createLazyPage } from "@/lib/lazy-page";
 import { planLegacyHistoryMigration, shouldDiscardLegacyHistory } from "@/lib/fetch-history-migration";
 import type { HistoryItem } from "@/components/FetchHistory";
@@ -818,12 +818,22 @@ function App() {
         setShowUnsavedChangesDialog(false);
         setPendingPageChange(null);
     };
+    useEffect(() => {
+        EventsOn("library:open-health", () => {
+            setCurrentPage("library-health");
+        });
+        return () => {
+            EventsOff("library:open-health");
+        };
+    }, []);
+
     const [secondaryPages, setSecondaryPages] = useState(() => ({
         settings: SettingsPage,
         debug: DebugLoggerPage,
         history: HistoryPage,
         queue: QueuePage,
         devices: DevicesPage,
+        libraryHealth: LibraryHealthPage,
     }));
     const retryCurrentPage = () => {
         setPageAttempt((attempt) => attempt + 1);
@@ -839,6 +849,8 @@ function App() {
                     return { ...current, queue: createLazyPage(loadQueuePage) };
                 case "devices":
                     return { ...current, devices: createLazyPage(loadDevicesPage) };
+                case "library-health":
+                    return { ...current, libraryHealth: createLazyPage(loadLibraryHealthPage) };
                 default:
                     return current;
             }
@@ -855,6 +867,8 @@ function App() {
                 return renderSecondary(<secondaryPages.debug />);
             case "devices":
                 return renderSecondary(<secondaryPages.devices />);
+            case "library-health":
+                return renderSecondary(<secondaryPages.libraryHealth />);
             case "history":
                 return renderSecondary(<secondaryPages.history onHistorySelect={(item) => {
                         setSmartSearchInput("");
@@ -943,6 +957,24 @@ function App() {
                   },
               }}
             />
+
+            <div className="fixed bottom-[116px] left-0 w-[184px] p-3 z-40 pointer-events-auto" style={{ "--wails-draggable": "no-drag" } as React.CSSProperties}>
+              <button
+                type="button"
+                aria-current={currentPage === "library-health" ? "page" : undefined}
+                aria-label={t("translation.libraryHealth.title")}
+                onClick={() => handlePageChange("library-health")}
+                className={cn(
+                  "relative flex h-11 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-sm transition-colors",
+                  currentPage === "library-health"
+                    ? "bg-primary/10 font-semibold text-primary"
+                    : "font-medium text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <Activity className="size-[18px] shrink-0" />
+                <span className="whitespace-nowrap truncate">{t("translation.libraryHealth.title")}</span>
+              </button>
+            </div>
 
             <main
               data-page={currentPage}
