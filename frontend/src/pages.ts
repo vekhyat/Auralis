@@ -21,7 +21,7 @@ export type ShellPage = Extract<PageType, "main" | "settings" | "debug" | "histo
 /** Destinations shown as words in the titlebar. Debug stays in the overflow menu. */
 export type DestinationPage = Extract<ShellPage, "main" | "queue" | "history" | "devices" | "settings">;
 
-/** Devices only appears while an iPod is connected. */
+/** Devices appears while an iPod, Android device, removable drive, or sync folder target is connected. */
 export const PRIMARY_DESTINATIONS = ["main", "queue", "history", "devices", "settings"] as const satisfies readonly DestinationPage[];
 
 const SHELL_PAGES = new Set<PageType>(["main", "settings", "debug", "history", "queue", "devices"]);

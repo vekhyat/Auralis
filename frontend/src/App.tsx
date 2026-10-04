@@ -8,7 +8,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { getSettings, getSettingsWithDefaults, loadSettings, saveSettings, applyThemeMode } from "@/lib/settings";
 import { openExternal } from "@/lib/utils";
 import { fetchSpotifyMetadata } from "@/lib/api";
-import { OpenFolder, CheckFFmpegInstalled, DownloadFFmpeg, GetRecentFetches, SaveRecentFetches, ListIPods } from "../wailsjs/go/main/App";
+import { OpenFolder, CheckFFmpegInstalled, DownloadFFmpeg, GetRecentFetches, SaveRecentFetches, ListIPods, ListSyncTargets } from "../wailsjs/go/main/App";
 import { EventsOn, EventsOff, Quit } from "../wailsjs/runtime/runtime";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { TitleBar } from "@/components/TitleBar";
@@ -210,6 +210,7 @@ function App() {
     const [currentPage, setCurrentPage] = useState<ShellPage>("main");
     const [pageAttempt, setPageAttempt] = useState(0);
     const [ipodConnected, setIpodConnected] = useState(false);
+    const [syncTargetsCount, setSyncTargetsCount] = useState(0);
     const [spotifyUrl, setSpotifyUrl] = useState("");
     const [smartSearchInput, setSmartSearchInput] = useState("");
     const [selectedTracks, setSelectedTracks] = useState<string[]>([]);
@@ -297,7 +298,24 @@ function App() {
             EventsOff("ipod:devices");
         };
     }, []);
-    if (!ipodConnected && currentPage === "devices") {
+    useEffect(() => {
+        let mounted = true;
+        const fetchSyncTargets = () => {
+            void ListSyncTargets().then((targets) => {
+                if (mounted) {
+                    setSyncTargetsCount((targets || []).length);
+                }
+            }).catch(() => {});
+        };
+        fetchSyncTargets();
+        EventsOn("devices:changed", fetchSyncTargets);
+        return () => {
+            mounted = false;
+            EventsOff("devices:changed");
+        };
+    }, []);
+    const hasDevices = ipodConnected || syncTargetsCount > 0;
+    if (!hasDevices && currentPage === "devices") {
         setCurrentPage("main");
     }
     const [isFFmpegInstalled, setIsFFmpegInstalled] = useState<boolean | null>(null);
@@ -926,7 +944,7 @@ function App() {
               onForward={handleTitleBarForward}
               currentPage={currentPage}
               onPageChange={handlePageChange}
-              showDevices={ipodConnected}
+              showDevices={hasDevices}
               queueCount={queue.items.filter((item) => item.status === "pending" || item.status === "running").length}
               omnibar={{
                   value: smartSearchInput,
