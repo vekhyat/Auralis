@@ -83,13 +83,16 @@ func copyDownloadBodyLimit(dst io.Writer, body io.ReadCloser, limit int64) (int6
 	ctx := ActiveDownloadContext()
 	activity := make(chan struct{}, 1)
 	stopped := make(chan struct{})
+	watchdogDone := make(chan struct{})
+	idleTimeout := downloadIdleTimeout
 	var reason atomic.Int32
 	var closeOnce sync.Once
 	closeBody := func() {
 		closeOnce.Do(func() { _ = body.Close() })
 	}
 	go func() {
-		timer := time.NewTimer(downloadIdleTimeout)
+		defer close(watchdogDone)
+		timer := time.NewTimer(idleTimeout)
 		defer timer.Stop()
 		for {
 			select {
@@ -106,7 +109,7 @@ func copyDownloadBodyLimit(dst io.Writer, body io.ReadCloser, limit int64) (int6
 					default:
 					}
 				}
-				timer.Reset(downloadIdleTimeout)
+				timer.Reset(idleTimeout)
 			case <-timer.C:
 				reason.Store(2)
 				closeBody()
@@ -114,7 +117,7 @@ func copyDownloadBodyLimit(dst io.Writer, body io.ReadCloser, limit int64) (int6
 			}
 		}
 	}()
-	defer close(stopped)
+	defer func() { close(stopped); <-watchdogDone }()
 	defer closeBody()
 
 	src := io.Reader(body)

@@ -197,9 +197,10 @@ func VerifyCommunitySource(id string) (result CommunitySourceCheck, resultErr er
 		}
 	}
 	readyStop := make(chan struct{})
-	defer close(readyStop)
+	readyDone := make(chan struct{})
+	defer func() { close(readyStop); <-readyDone }()
 	windowErr := openCommunityVerification(session, target)
-	go watchCommunityVerification(session, host, previousRun, readyStop)
+	go func() { defer close(readyDone); watchCommunityVerification(session, host, previousRun, readyStop) }()
 
 	timer := time.NewTimer(communityManualTimeout())
 	defer timer.Stop()
