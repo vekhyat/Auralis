@@ -187,7 +187,7 @@ func ensureCommunitySession() (*communitySessionRecord, error) {
 	if communitySessionValid(record) {
 		return record, nil
 	}
-	fmt.Println("Community (SpotBye) API requires a one-time verification in your browser...")
+	fmt.Println("Community (SpotBye) API requires a one-time verification...")
 	grant, err := runCommunityVerification(record)
 	if err != nil {
 		return nil, err
@@ -247,7 +247,7 @@ func runCommunityVerification(record *communitySessionRecord) (string, error) {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
-		_, _ = io.WriteString(w, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Verified</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px;background:#000;background-image:radial-gradient(circle,rgba(255,255,255,.2) 1.5px,transparent 1.5px);background-size:30px 30px;color:#f5f5f5;font:14px/1.5 Inter,sans-serif}main{text-align:center}.icon{width:48px;height:48px;margin:0 auto 20px;display:grid;place-items:center;border-radius:50%;background:#fff;color:#000;font-size:22px}h1{margin:0 0 6px;font-size:24px;letter-spacing:-.035em}p{margin:0;color:#888}</style></head><body><main><div class="icon">&#10003;</div><h1>Verified</h1><p>Returning to Auralis...</p></main><script>setTimeout(()=>window.close(),700)</script></body></html>`)
+		_, _ = io.WriteString(w, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Auralis</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:16px;background:#f1f2f4;color:#262b33;font:13px/1.45 "Segoe UI",system-ui,sans-serif}main{text-align:center;border:1px solid #d4d7dc;background:#f7f8fa;padding:20px 24px;max-width:280px}h1{margin:0 0 6px;font-size:15px;font-weight:600}p{margin:0;color:#5c6370;font-size:12px}</style></head><body><main><h1>Verified</h1><p>Returning to Auralis</p></main><script>setTimeout(()=>window.close(),700)</script></body></html>`)
 		select {
 		case grantCh <- grant:
 		default:
@@ -304,44 +304,19 @@ func runCommunityVerification(record *communitySessionRecord) (string, error) {
 	challengeQuery := challengeURL.Query()
 	challengeQuery.Set("cb", callbackURL)
 	challengeURL.RawQuery = challengeQuery.Encode()
-	communityBrowserMu.RLock()
-	openBrowser := communityBrowserOpen
-	communityBrowserMu.RUnlock()
 
-	// Embedded window first; system browser only as a fallback. The local
-	// HTTP listener receives the grant regardless of which surface shows the
-	// challenge, since the callback URL is an absolute 127.0.0.1 address.
-	windowDone := make(chan struct{})
-	go func() {
-		defer close(windowDone)
-		defer func() {
-			if recovered := recover(); recovered != nil {
-				fmt.Printf("Verification window panic (%v); falling back to the system browser\n", recovered)
-				if openBrowser != nil {
-					openBrowser(challengeURL.String())
-				}
-			}
-		}()
-		if err := OpenVerificationWindow(challengeURL.String()); err != nil {
-			fmt.Printf("Embedded verification window unavailable (%v); falling back to the system browser\n", err)
-			if openBrowser == nil {
-				return
-			}
-			openBrowser(challengeURL.String())
-		}
-	}()
-
-	select {
-	case grant := <-grantCh:
-		CloseVerificationWindow()
-		<-windowDone
-		foregroundAuralisWindow()
-		return grant, nil
-	case <-time.After(communityVerifyTimeout):
-		CloseVerificationWindow()
-		<-windowDone
-		return "", fmt.Errorf("verification timed out")
+	// Isolated Edge window first. On Windows a failed window is a download
+	// error, not a full browser. The local listener still receives the grant
+	// because the callback is an absolute 127.0.0.1 URL.
+	windowErr := startVerificationWindow(challengeURL.String())
+	grant, err := selectVerificationGrant(grantCh, watchVerificationWindow(windowErr), communityVerifyTimeout)
+	CloseVerificationWindow()
+	drainVerificationWindow(windowErr)
+	if err != nil {
+		return "", err
 	}
+	foregroundAuralisWindow()
+	return grant, nil
 }
 
 func exchangeCommunityGrant(record *communitySessionRecord, grant string) (*communitySessionExchange, error) {

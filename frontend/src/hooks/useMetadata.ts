@@ -1,11 +1,35 @@
 import { useEffect, useRef, useState } from "react";
 import { t, translateMessage } from "@/i18n";
 import { fetchSpotifyMetadata } from "@/lib/api";
+import { adoptCorrelatedStreamBegin, allowsRequestOutcome, armRequestStream, bindRequestId, claimRequest, createRequestClock, releaseRequest, retireRequest, streamChunkBelongs, type RequestOutcome, } from "@/lib/request-generation";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { logger } from "@/lib/logger";
 import { AddFetchHistory, SearchSpotifyByType } from "../../wailsjs/go/main/App";
 import { EventsOff, EventsOn } from "../../wailsjs/runtime/runtime";
-import type { SpotifyMetadataResponse } from "@/types/api";
+import type { SpotifyMetadataResponse, TrackMetadata } from "@/types/api";
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return !!value && typeof value === "object" && !Array.isArray(value);
+}
+function nestedName(value: unknown): string {
+    return isRecord(value) && typeof value.name === "string" ? value.name : "";
+}
+function streamBaseName(payload: Record<string, unknown>): string {
+    const artistName = nestedName(payload.artist_info);
+    if (artistName)
+        return artistName;
+    const albumName = nestedName(payload.album_info);
+    if (albumName)
+        return albumName;
+    if (!isRecord(payload.playlist_info))
+        return "";
+    return nestedName(payload.playlist_info) || nestedName(payload.playlist_info.owner);
+}
+function asMetadataBase(payload: Record<string, unknown>): SpotifyMetadataResponse {
+    if ("track_list" in payload) {
+        return payload as unknown as SpotifyMetadataResponse;
+    }
+    return { ...payload, track_list: [] } as unknown as SpotifyMetadataResponse;
+}
 export function useMetadata() {
     const [loading, setLoading] = useState(false);
     const [metadata, setMetadata] = useState<SpotifyMetadataResponse | null>(null);
@@ -20,8 +44,25 @@ export function useMetadata() {
     const loadingToastId = useRef<string | number | null>(null);
     const fetchedCount = useRef(0);
     const currentName = useRef("");
-    const fetchGeneration = useRef(0);
-    const streamGeneration = useRef(0);
+    const clock = useRef(createRequestClock());
+    const allows = (generation: number, outcome: RequestOutcome, streamId?: number) => allowsRequestOutcome(clock.current, generation, outcome, streamId);
+    const beginRequest = () => {
+        const claimed = claimRequest(clock.current);
+        clock.current = bindRequestId(claimed.clock, claimed.generation, crypto.randomUUID());
+        setLoading(true);
+        return claimed.generation;
+    };
+    const retireInFlight = () => {
+        clock.current = retireRequest(clock.current);
+        setLoading(false);
+    };
+    const finishOwnedRequest = (generation: number) => {
+        if (!allows(generation, "finally")) {
+            return;
+        }
+        clock.current = releaseRequest(clock.current, generation);
+        setLoading(false);
+    };
     const updateNavigationState = () => {
         setNavigationState({
             canGoBack: navigationIndex.current > 0,
@@ -44,6 +85,7 @@ export function useMetadata() {
         const nextIndex = navigationIndex.current + offset;
         if (nextIndex < 0 || nextIndex >= navigationHistory.current.length)
             return null;
+        retireInFlight();
         navigationIndex.current = nextIndex;
         const entry = navigationHistory.current[nextIndex];
         setMetadata(entry.metadata);
@@ -92,62 +134,54 @@ export function useMetadata() {
         }
     }, [loading]);
     useEffect(() => {
-        const beginHandler = (id: number) => {
-            streamGeneration.current = id;
+        const beginHandler = (event: unknown) => {
+            clock.current = adoptCorrelatedStreamBegin(clock.current, event);
         };
         EventsOn("metadata-stream-begin", beginHandler);
-        const handler = (data: any) => {
-            if (!data) {
+        const handler = (event: unknown) => {
+            const chunk = streamChunkBelongs(clock.current, clock.current.current, event);
+            if (!chunk) {
                 return;
             }
-            const streamId = typeof data === "object" && data !== null && "id" in data ? Number(data.id) : NaN;
-            const payload = typeof data === "object" && data !== null && "payload" in data ? data.payload : null;
-            if (!Number.isFinite(streamId) || streamId !== streamGeneration.current || payload == null) {
-                return;
-            }
-            data = payload;
-            if (Array.isArray(data)) {
-                fetchedCount.current += data.length;
+            const payload = chunk.payload;
+            if (Array.isArray(payload)) {
+                const tracks = payload as TrackMetadata[];
+                fetchedCount.current += tracks.length;
                 if (loadingToastId.current && currentName.current) {
-                    toast.silentInfo(t("translation.migrated.useMetadata.fetchingTracksFor", { value1: currentName.current.toLowerCase() }), {
+                    toast.silentInfo(t("translation.migrated.useMetadata.fetchingTracksFor", { value1: currentName.current }), {
                         id: loadingToastId.current,
                         description: t("translation.metadata.fetched", { count: fetchedCount.current, formattedCount: fetchedCount.current.toLocaleString() })
                     });
                 }
-            }
-            else {
-                const baseInfo = data;
-                const name = "artist_info" in baseInfo ? baseInfo.artist_info.name :
-                    "album_info" in baseInfo ? baseInfo.album_info.name :
-                        "playlist_info" in baseInfo ? (baseInfo.playlist_info.name || baseInfo.playlist_info.owner.name) : "";
-                if (name) {
-                    currentName.current = name;
-                    if (loadingToastId.current) {
-                        toast.silentInfo(t("translation.migrated.useMetadata.fetchingTracksFor", { value1: name.toLowerCase() }), {
-                            id: loadingToastId.current,
-                            description: t("translation.metadata.fetched", { count: fetchedCount.current, formattedCount: fetchedCount.current.toLocaleString() })
-                        });
-                    }
-                }
-            }
-            setMetadata(prev => {
-                if (Array.isArray(data)) {
+                setMetadata(prev => {
                     if (!prev || !("track_list" in prev)) {
                         return prev;
                     }
                     return {
                         ...prev,
-                        track_list: [...prev.track_list, ...data]
+                        track_list: [...prev.track_list, ...tracks]
                     };
+                });
+                return;
+            }
+            if (!isRecord(payload)) {
+                return;
+            }
+            const name = streamBaseName(payload);
+            if (name) {
+                currentName.current = name;
+                if (loadingToastId.current) {
+                    toast.silentInfo(t("translation.migrated.useMetadata.fetchingTracksFor", { value1: name }), {
+                        id: loadingToastId.current,
+                        description: t("translation.metadata.fetched", { count: fetchedCount.current, formattedCount: fetchedCount.current.toLocaleString() })
+                    });
                 }
+            }
+            setMetadata(prev => {
                 if (prev && "track_list" in prev && prev.track_list.length > 0) {
                     return prev;
                 }
-                const baseInfo = data;
-                if (!("track_list" in baseInfo)) {
-                    baseInfo.track_list = [];
-                }
-                return baseInfo;
+                return asMetadataBase(payload);
             });
         };
         EventsOn("metadata-stream", handler);
@@ -219,19 +253,25 @@ export function useMetadata() {
             console.error("Failed to save fetch history:", err);
         }
     };
-    const fetchMetadataDirectly = async (url: string, originUrl?: string) => {
+    const fetchMetadataDirectly = async (url: string, originUrl?: string, ownedGeneration?: number) => {
+        const generation = ownedGeneration ?? beginRequest();
+        if (!allows(generation, "finally")) {
+            return null;
+        }
+        // Artist search claims before the URL exists, so a late begin from the
+        // previous read can attach. Drop it when this read actually starts.
+        clock.current = armRequestStream(clock.current, generation);
         rememberOrigin(originUrl);
         const urlType = getUrlType(url);
         logger.info(`fetching ${urlType} metadata...`);
         logger.debug(`url: ${url}`);
-        const generation = ++fetchGeneration.current;
         setLoading(true);
         setMetadata(null);
         try {
             const startTime = Date.now();
             const timeout = urlType === "artist" ? 60 : 300;
-            const data = await fetchSpotifyMetadata(url, true, 1.0, timeout);
-            if (generation !== fetchGeneration.current) {
+            const data = await fetchSpotifyMetadata(url, true, 1.0, timeout, undefined, clock.current.requestId || undefined);
+            if (!allows(generation, "success")) {
                 return;
             }
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
@@ -241,7 +281,7 @@ export function useMetadata() {
                     logger.warning("playlist appears to be empty or private");
                     toast.error(t("translation.download.playlistNotFoundMayBe"));
                     setMetadata(null);
-                    return;
+                    return null;
                 }
             }
             else if ("album_info" in data) {
@@ -250,7 +290,7 @@ export function useMetadata() {
                     logger.warning("album appears to be empty or not found");
                     toast.error(t("translation.download.albumNotFoundMayBe"));
                     setMetadata(null);
-                    return;
+                    return null;
                 }
             }
             commitNavigation(url, data);
@@ -273,10 +313,11 @@ export function useMetadata() {
             }
             logger.info(`fetch completed in ${elapsed}s`);
             toast.success(t("translation.download.metadataFetchedSuccessfully"));
+            return data;
         }
         catch (err) {
-            if (generation !== fetchGeneration.current) {
-                return;
+            if (!allows(generation, "error")) {
+                return null;
             }
             const rawError = err instanceof Error ? err.message : t("translation.app.fetchFailed");
             const errorMsg = translateMessage(rawError);
@@ -285,18 +326,16 @@ export function useMetadata() {
             showFetchFailureAdvice(rawError);
             const current = navigationHistory.current[navigationIndex.current];
             setMetadata(current?.metadata ?? null);
+            return null;
         }
         finally {
-            if (generation === fetchGeneration.current) {
-                setLoading(false);
-            }
+            finishOwnedRequest(generation);
         }
     };
     const loadFromCache = (cachedData: string, url = "", originUrl?: string) => {
         try {
             const data = JSON.parse(cachedData);
-            fetchGeneration.current += 1;
-            streamGeneration.current += 1;
+            retireInFlight();
             rememberOrigin(originUrl);
             commitNavigation(url, data);
             toast.success(t("translation.download.loadedCache"));
@@ -321,12 +360,9 @@ export function useMetadata() {
         if (isArtistUrl) {
             logger.info("artist url detected");
             setPendingArtistName(null);
-            await fetchMetadataDirectly(urlToFetch, originUrl);
         }
-        else {
-            await fetchMetadataDirectly(urlToFetch, originUrl);
-        }
-        return urlToFetch;
+        const data = await fetchMetadataDirectly(urlToFetch, originUrl);
+        return data ? { url: urlToFetch, data } : null;
     };
     const handleAlbumClick = (album: {
         id: string;
@@ -343,34 +379,61 @@ export function useMetadata() {
         external_urls: string;
     }, originUrl?: string) => {
         logger.debug(`artist clicked: ${artist.name}`);
+        const generation = beginRequest();
         const artistID = artist.id.trim();
         const artistUrlFromID = /^[a-zA-Z0-9]{22}$/.test(artistID)
             ? `https://open.spotify.com/artist/${artistID}`
             : "";
-        const resolvedArtistUrl = artist.external_urls.trim() || artistUrlFromID || (await resolveArtistUrlBySearch(artist.name)) || "";
+        let resolvedArtistUrl = artist.external_urls.trim() || artistUrlFromID;
+        try {
+            if (!resolvedArtistUrl) {
+                resolvedArtistUrl = (await resolveArtistUrlBySearch(artist.name)) || "";
+            }
+        }
+        catch (err) {
+            if (!allows(generation, "error")) {
+                return "";
+            }
+            const rawError = err instanceof Error ? err.message : t("translation.app.fetchFailed");
+            logger.error(`artist search failed: ${rawError}`);
+            toast.error(translateMessage(rawError));
+            finishOwnedRequest(generation);
+            return "";
+        }
+        if (!allows(generation, "finally")) {
+            return "";
+        }
         if (!resolvedArtistUrl) {
             toast.error(t("translation.migrated.useMetadata.artistNotFound", { value1: artist.name }));
+            finishOwnedRequest(generation);
             return "";
         }
         const artistUrl = resolvedArtistUrl.includes("/discography")
             ? resolvedArtistUrl
             : resolvedArtistUrl.replace(/\/$/, "") + "/discography/all";
         setPendingArtistName(artist.name);
-        await fetchMetadataDirectly(artistUrl, originUrl);
+        await fetchMetadataDirectly(artistUrl, originUrl, generation);
+        if (!allows(generation, "success")) {
+            return "";
+        }
         return resolvedArtistUrl;
     };
     const handleConfirmAlbumFetch = async (originUrl?: string) => {
         if (!selectedAlbum)
             return;
         const albumUrl = selectedAlbum.external_urls;
-        logger.info(`fetching album: ${selectedAlbum.name}...`);
+        const albumName = selectedAlbum.name;
+        logger.info(`fetching album: ${albumName}...`);
         logger.debug(`url: ${albumUrl}`);
+        const generation = beginRequest();
         setShowAlbumDialog(false);
-        setLoading(true);
         setMetadata(null);
         try {
             const startTime = Date.now();
-            const data = await fetchSpotifyMetadata(albumUrl);
+            const data = await fetchSpotifyMetadata(albumUrl, true, 1.0, 300, undefined, clock.current.requestId || undefined);
+            if (!allows(generation, "success")) {
+                return;
+            }
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
             if ("album_info" in data) {
                 const albumInfo = data.album_info;
@@ -394,14 +457,20 @@ export function useMetadata() {
             return albumUrl;
         }
         catch (err) {
-            const errorMsg = translateMessage(err instanceof Error ? err.message : t("translation.app.fetchFailed"));
+            if (!allows(generation, "error")) {
+                return;
+            }
+            const rawError = err instanceof Error ? err.message : t("translation.app.fetchFailed");
+            const errorMsg = translateMessage(rawError);
             logger.error(`fetch failed: ${errorMsg}`);
             toast.error(errorMsg);
             showFetchFailureAdvice(errorMsg);
         }
         finally {
-            setLoading(false);
-            setSelectedAlbum(null);
+            if (allows(generation, "finally")) {
+                finishOwnedRequest(generation);
+                setSelectedAlbum(null);
+            }
         }
     };
     return {
@@ -420,12 +489,14 @@ export function useMetadata() {
         goBack: () => moveNavigation(-1),
         goForward: () => moveNavigation(1),
         handleFetchMetadata,
+        saveToHistory,
         handleAlbumClick,
         handleConfirmAlbumFetch,
         handleArtistClick,
         loadFromCache,
         resetMetadata: () => moveNavigation(-1),
         clearMetadata: (url = "") => {
+            retireInFlight();
             rememberOrigin(url);
             navigationHistory.current = [...navigationHistory.current.slice(0, navigationIndex.current + 1), { url: "", metadata: null }];
             navigationIndex.current += 1;

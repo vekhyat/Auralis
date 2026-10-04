@@ -18,7 +18,8 @@
       "week_one": "{{count}} semana",
       "week_other": "{{count}} semanas",
       "year_one": "{{count}} año",
-      "year_other": "{{count}} años"
+      "year_other": "{{count}} años",
+      "ago": "hace {{value}}"
     },
     "album": {
       "fetchMetadataConfirm": "¿Quieres obtener metadatos de este álbum?"
@@ -35,6 +36,7 @@
       "downloadNow": "Descargar ahora",
       "downloadPathNotSet": "Ruta de descarga no configurada",
       "fetchFailed": "Error al obtener",
+      "pageLoadFailed": "No se pudo cargar esta página.",
       "finalizingSetup": "Finalizando configuración",
       "newVersion": "Una nueva versión",
       "noChangelogProvidedRelease": "No se proporcionó registro de cambios para esta versión.",
@@ -207,6 +209,8 @@
       "albumName": "Nombre del álbum",
       "artistZ": "Artista (A-Z)",
       "artistZ2": "Artista (Z-A)",
+      "more": "Más",
+      "back": "Atrás",
       "audioConverter": "Convertidor de audio",
       "audioQualityAnalyzer": "Analizador de calidad de audio",
       "bpmKeyAnalyzer": "Analizador de BPM y tonalidad",
@@ -413,6 +417,26 @@
     "header": {
       "tagline": "Obtenga pistas de Spotify en FLAC real de Tidal, Qobuz y Amazon Music, no se requiere cuenta.",
       "reload": "Recargar Auralis"
+    },
+    "omnibar": {
+      "placeholder": "Pegue un enlace o busque pistas, álbumes, artistas y playlists"
+    },
+    "catalog": {
+      "emptyHint": "Pegue un enlace de streaming arriba o escriba para buscar. Los resultados se abren como un catálogo; seleccione una entrada para inspeccionarla.",
+      "recentFetches": "Consultas recientes",
+      "recentSearches": "Búsquedas recientes",
+      "remove": "Quitar",
+      "resultsFor": "Resultados",
+      "selectToInspect": "Seleccione una entrada para inspeccionarla aquí.",
+      "fetchLossless": "Obtener sin pérdida",
+      "owner": "Propietario",
+      "followers": "Seguidores",
+      "listeners": "Oyentes",
+      "rank": "Puesto",
+      "genres": "Géneros",
+      "verified": "Verificado",
+      "discography": "Discografía",
+      "chooseTracks": "Choose tracks"
     },
     "history": {
       "clearDownloadHistory": "¿Borrar historial de descargas?",
@@ -631,6 +655,7 @@
     "sidebar": {
       "reportBugsRequestFeatures": "Reportar errores o pedir funciones",
       "home": "Inicio",
+      "library": "Biblioteca",
       "important": "Importante",
       "tools": "Herramientas",
       "settings": "Configuración",
@@ -797,7 +822,15 @@
       "minimize": "Minimizar",
       "network": "Red",
       "website": "Sitio web",
+      "primaryNavigation": "Navegación principal",
       "blockedBySpotify": "(Bloqueado por Spotify)"
+    },
+    "apiStatus": {
+      "online": "En línea",
+      "offline": "Sin conexión",
+      "checking": "Comprobando",
+      "idle": "Inactivo",
+      "extendedSources": "Fuentes ampliadas"
     },
     "trackInfo": {
       "recordLabel": "Discográfica",
@@ -1217,6 +1250,46 @@
       "allFailed_one": "No se pudo convertir ningún archivo {{count}}",
       "allFailed_other": "Todos los archivos {{count}} no pudieron convertirse"
     },
+    "downloads": {
+      "title": "Downloads",
+      "download": "Download",
+      "downloadSelected": "Download selected ({{value1}})",
+      "requested": "In downloads",
+      "added": "{{name}} added to downloads",
+      "addedPaused": "{{name}} added · downloads are paused",
+      "trackCount": "{{count}} tracks",
+      "trackCount_one": "{{count}} track",
+      "ready": "Ready when you are",
+      "autoHint": "Downloads start automatically. Keep exploring while we take care of the files.",
+      "downloading": "Downloading",
+      "waitingResume": "Waiting for you to resume",
+      "cancelCurrent": "Cancel current download",
+      "pausedHint": "Downloads are paused. New requests will wait until you resume.",
+      "empty": "Your next download starts here",
+      "emptyHint": "Find a track, album, or playlist in your library and choose Download.",
+      "findMusic": "Find music",
+      "libraryTitle": "Your music, ready to keep.",
+      "libraryHint": "Find a favorite. Explore the artwork and track list. Download it in one click.",
+      "emptyLibrary": "Start with something you love",
+      "emptyLibraryHint": "Paste a Spotify link or search for an artist, album, or track above. Your recently explored music will appear here.",
+      "checkSources": "Check download sources",
+      "cancelRequest": "Remove from downloads",
+      "saved": "Saved to your music folder",
+      "needsAttention": "Open Downloads to review this request",
+      "selectAll": "Select all displayed tracks",
+      "selectTrack": "Select {{name}} by {{artist}}",
+      "waitingCount": "{{count}} requests waiting",
+      "waitingCount_one": "{{count}} request waiting",
+      "quality": "Quality",
+      "qualityHint": "Choose the file for new downloads. If that quality is not available, the next best file is saved.",
+      "couldntGet": "Couldn't save this",
+      "couldntSave": "This one did not save. Try again in a moment.",
+      "tryAgain": "Try again",
+      "settingUp": "Setting up",
+      "ffmpegNeed": "Auralis needs an audio tool before it can save files.",
+      "couldntOpen": "No se pudo abrir",
+      "couldntOpenHint": "Este enlace no se cargó. Inténtalo de nuevo en un momento."
+    },
     "devices": {
       "destination": "Dispositivos",
       "title": "Dispositivos",
@@ -1295,6 +1368,8 @@
       "mb": "MB",
       "aiff": "AIFF",
       "amazonMusic": "Amazon Music",
+      "appleMusic": "Apple Music",
+      "jiosaavn": "JioSaavn",
       "deezer": "Deezer",
       "isrc": "ISRC",
       "lrclib": "LRCLIB",
@@ -1383,7 +1458,6 @@
     "fileManager": {
       "titleArtist": "{title} - {artist}"
     },
-
     "platformIcons": {
       "songstats": "Songstats"
     }

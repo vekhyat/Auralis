@@ -1,10 +1,10 @@
 package backend
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -53,6 +53,10 @@ type SpotifyTrackIdentifiers struct {
 }
 
 func GetSpotifyTrackIdentifiersDirect(spotifyTrackID string) (SpotifyTrackIdentifiers, error) {
+	return GetSpotifyTrackIdentifiersWithContext(context.Background(), spotifyTrackID)
+}
+
+func GetSpotifyTrackIdentifiersWithContext(ctx context.Context, spotifyTrackID string) (SpotifyTrackIdentifiers, error) {
 	normalizedTrackID, err := extractSpotifyTrackID(spotifyTrackID)
 	if err != nil {
 		return SpotifyTrackIdentifiers{}, err
@@ -70,9 +74,9 @@ func GetSpotifyTrackIdentifiersDirect(spotifyTrackID string) (SpotifyTrackIdenti
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 
-	payload, metadataErr := fetchSpotifyTrackRawData(httpClient, normalizedTrackID)
+	payload, metadataErr := fetchSpotifyTrackRawData(ctx, httpClient, normalizedTrackID)
 	if metadataErr == nil {
-		metadataIdentifiers, extractErr := extractSpotifyTrackIdentifiers(httpClient, payload)
+		metadataIdentifiers, extractErr := extractSpotifyTrackIdentifiers(ctx, httpClient, payload)
 		if extractErr == nil {
 			mergeSpotifyTrackIdentifiers(&identifiers, metadataIdentifiers)
 			if identifiers.ISRC != "" {
@@ -94,7 +98,7 @@ func GetSpotifyTrackIdentifiersDirect(spotifyTrackID string) (SpotifyTrackIdenti
 }
 
 func (s *SongLinkClient) lookupSpotifyISRC(spotifyTrackID string) (string, error) {
-	identifiers, err := GetSpotifyTrackIdentifiersDirect(spotifyTrackID)
+	identifiers, err := GetSpotifyTrackIdentifiersWithContext(s.operationContext(), spotifyTrackID)
 	if err != nil {
 		return "", err
 	}
@@ -126,13 +130,14 @@ func mergeSpotifyTrackIdentifiers(target *SpotifyTrackIdentifiers, incoming Spot
 }
 
 func lookupSpotifyAlbumUPC(albumID string) (string, error) {
+	ctx := context.Background()
 	normalizedAlbumID := strings.TrimSpace(albumID)
 	if normalizedAlbumID == "" {
 		return "", fmt.Errorf("spotify album ID is required")
 	}
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	payload, err := fetchSpotifyAlbumRawData(httpClient, normalizedAlbumID)
+	payload, err := fetchSpotifyAlbumRawData(ctx, httpClient, normalizedAlbumID)
 	if err != nil {
 		return "", err
 	}
@@ -140,8 +145,8 @@ func lookupSpotifyAlbumUPC(albumID string) (string, error) {
 	return extractSpotifyAlbumUPC(payload)
 }
 
-func requestSpotifyBytes(client *http.Client, targetURL string, headers map[string]string) ([]byte, error) {
-	req, err := http.NewRequest(http.MethodGet, targetURL, nil)
+func requestSpotifyBytes(ctx context.Context, client *http.Client, targetURL string, headers map[string]string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +161,7 @@ func requestSpotifyBytes(client *http.Client, targetURL string, headers map[stri
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readBoundedBody(resp.Body, maxProviderJSONBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -192,8 +197,8 @@ func isSpotifyAuthFailure(err error) bool {
 		statusErr.statusCode == http.StatusForbidden
 }
 
-func requestSpotifyJSON(client *http.Client, targetURL string, headers map[string]string, target interface{}) error {
-	body, err := requestSpotifyBytes(client, targetURL, headers)
+func requestSpotifyJSON(ctx context.Context, client *http.Client, targetURL string, headers map[string]string, target interface{}) error {
+	body, err := requestSpotifyBytes(ctx, client, targetURL, headers)
 	if err != nil {
 		return err
 	}
@@ -266,7 +271,7 @@ func spotifyTokenIsValid(token *spotifyAnonymousToken) bool {
 	return time.Now().UnixMilli() < token.AccessTokenExpirationTimestampMs-30_000
 }
 
-func requestSpotifyAnonymousAccessToken(client *http.Client, forceRefresh ...bool) (string, error) {
+func requestSpotifyAnonymousAccessToken(ctx context.Context, client *http.Client, forceRefresh ...bool) (string, error) {
 	spotifyAnonymousTokenMu.Lock()
 	defer spotifyAnonymousTokenMu.Unlock()
 
@@ -297,7 +302,7 @@ func requestSpotifyAnonymousAccessToken(client *http.Client, forceRefresh ...boo
 	}
 
 	var token spotifyAnonymousToken
-	if err := requestSpotifyJSON(client, spotifySessionTokenURL+"?"+query.Encode(), nil, &token); err != nil {
+	if err := requestSpotifyJSON(ctx, client, spotifySessionTokenURL+"?"+query.Encode(), nil, &token); err != nil {
 		return "", err
 	}
 
@@ -364,31 +369,31 @@ func spotifyEntityIDToGID(entityID string) (string, error) {
 	return hexValue, nil
 }
 
-func fetchSpotifyTrackRawData(client *http.Client, trackID string) ([]byte, error) {
+func fetchSpotifyTrackRawData(ctx context.Context, client *http.Client, trackID string) ([]byte, error) {
 	gid, err := spotifyTrackIDToGID(trackID)
 	if err != nil {
 		return nil, err
 	}
 
-	return fetchSpotifyRawMetadataByGID(client, "track", gid)
+	return fetchSpotifyRawMetadataByGID(ctx, client, "track", gid)
 }
 
-func fetchSpotifyAlbumRawData(client *http.Client, albumID string) ([]byte, error) {
+func fetchSpotifyAlbumRawData(ctx context.Context, client *http.Client, albumID string) ([]byte, error) {
 	gid, err := spotifyEntityIDToGID(albumID)
 	if err != nil {
 		return nil, err
 	}
 
-	return fetchSpotifyRawMetadataByGID(client, "album", gid)
+	return fetchSpotifyRawMetadataByGID(ctx, client, "album", gid)
 }
 
-func fetchSpotifyRawMetadataByGID(client *http.Client, entityType string, gid string) ([]byte, error) {
-	accessToken, err := requestSpotifyAnonymousAccessToken(client)
+func fetchSpotifyRawMetadataByGID(ctx context.Context, client *http.Client, entityType string, gid string) ([]byte, error) {
+	accessToken, err := requestSpotifyAnonymousAccessToken(ctx, client)
 	if err != nil {
 		return nil, err
 	}
 
-	body, err := requestSpotifyBytes(
+	body, err := requestSpotifyBytes(ctx,
 		client,
 		fmt.Sprintf(spotifyGIDMetadataURL, entityType, gid),
 		map[string]string{
@@ -405,12 +410,12 @@ func fetchSpotifyRawMetadataByGID(client *http.Client, entityType string, gid st
 		return nil, err
 	}
 
-	refreshedToken, refreshErr := requestSpotifyAnonymousAccessToken(client, true)
+	refreshedToken, refreshErr := requestSpotifyAnonymousAccessToken(ctx, client, true)
 	if refreshErr != nil {
 		return nil, refreshErr
 	}
 
-	return requestSpotifyBytes(
+	return requestSpotifyBytes(ctx,
 		client,
 		fmt.Sprintf(spotifyGIDMetadataURL, entityType, gid),
 		map[string]string{
@@ -421,7 +426,7 @@ func fetchSpotifyRawMetadataByGID(client *http.Client, entityType string, gid st
 	)
 }
 
-func extractSpotifyTrackIdentifiers(client *http.Client, payload []byte) (SpotifyTrackIdentifiers, error) {
+func extractSpotifyTrackIdentifiers(ctx context.Context, client *http.Client, payload []byte) (SpotifyTrackIdentifiers, error) {
 	var track spotifyTrackRawData
 	if err := json.Unmarshal(payload, &track); err != nil {
 		return SpotifyTrackIdentifiers{}, fmt.Errorf("failed to decode Spotify track metadata: %w", err)
@@ -443,7 +448,7 @@ func extractSpotifyTrackIdentifiers(client *http.Client, payload []byte) (Spotif
 
 	albumGID := strings.TrimSpace(track.Album.GID)
 	if client != nil && albumGID != "" {
-		albumPayload, err := fetchSpotifyRawMetadataByGID(client, "album", albumGID)
+		albumPayload, err := fetchSpotifyRawMetadataByGID(ctx, client, "album", albumGID)
 		if err == nil {
 			if upc, upcErr := extractSpotifyAlbumUPC(albumPayload); upcErr == nil {
 				identifiers.UPC = upc
@@ -455,7 +460,8 @@ func extractSpotifyTrackIdentifiers(client *http.Client, payload []byte) (Spotif
 }
 
 func extractSpotifyTrackISRC(payload []byte) (string, error) {
-	identifiers, err := extractSpotifyTrackIdentifiers(nil, payload)
+	ctx := context.Background()
+	identifiers, err := extractSpotifyTrackIdentifiers(ctx, nil, payload)
 	if err != nil {
 		return "", err
 	}

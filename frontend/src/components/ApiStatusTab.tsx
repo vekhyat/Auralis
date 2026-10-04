@@ -1,7 +1,7 @@
 import { t } from "@/i18n";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { PlugZap, CircleCheckBig, Loader2, Wrench, Server, Clock3 } from "lucide-react";
+import { PlugZap, Loader2, Server, Clock3 } from "lucide-react";
 import { TidalIcon, QobuzIcon, AmazonIcon, DeezerIcon, AppleIcon, JioSaavnIcon } from "./PlatformIcons";
 import { useApiStatus } from "@/hooks/useApiStatus";
 import { SPOTIFLAC_NEXT_SOURCES } from "@/lib/api-status";
@@ -14,7 +14,22 @@ type CommunityBreakStatus = {
     error?: string;
 };
 type CommunityBreakStatuses = Record<string, CommunityBreakStatus>;
-const GetCommunityBreakStatuses = (): Promise<CommunityBreakStatuses> => (window as any)["go"]["main"]["App"]["GetCommunityBreakStatuses"]();
+type CommunityBreakWindow = Window & {
+    go?: {
+        main?: {
+            App?: {
+                GetCommunityBreakStatuses?: () => Promise<CommunityBreakStatuses>;
+            };
+        };
+    };
+};
+function GetCommunityBreakStatuses(): Promise<CommunityBreakStatuses> {
+    const method = (window as CommunityBreakWindow).go?.main?.App?.GetCommunityBreakStatuses;
+    if (!method) {
+        return Promise.reject(new Error("GetCommunityBreakStatuses is unavailable"));
+    }
+    return method();
+}
 function renderBreakInfo(status: CommunityBreakStatus | undefined, loading: boolean) {
     if (loading && !status) {
         return <span className="text-xs text-muted-foreground">{t("translation.migrated.ApiStatusTab.loadingSchedule")}</span>;
@@ -29,14 +44,24 @@ function renderBreakInfo(status: CommunityBreakStatus | undefined, loading: bool
       {status.is_break ? t("translation.migrated.ApiStatusTab.breakEndsInMin", { value1: status.remaining_minutes }) : t("translation.migrated.ApiStatusTab.breakStartsInMin", { value1: status.remaining_minutes })}
     </span>);
 }
+function statusWord(status: "checking" | "online" | "offline" | "idle"): string {
+    switch (status) {
+        case "online":
+            return t("translation.apiStatus.online");
+        case "offline":
+            return t("translation.apiStatus.offline");
+        case "checking":
+            return t("translation.apiStatus.checking");
+        default:
+            return t("translation.apiStatus.idle");
+    }
+}
 function renderStatusIndicator(status: "checking" | "online" | "offline" | "idle") {
-    if (status === "online") {
-        return <CircleCheckBig className="h-5 w-5 text-emerald-500"/>;
-    }
-    if (status === "offline") {
-        return <Wrench className="h-4 w-4 text-amber-600 dark:text-amber-400"/>;
-    }
-    return null;
+    const label = statusWord(status);
+    return (<span aria-live="polite" className="inline-flex items-center gap-1.5 font-mono text-[11px] tracking-wide text-muted-foreground uppercase">
+      {status === "checking" ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true"/> : null}
+      <span>{label}</span>
+    </span>);
 }
 function renderPlatformIcon(type: string) {
     if (type === "tidal") {
@@ -62,7 +87,7 @@ export function ApiStatusTab() {
     const isCheckingNext = SPOTIFLAC_NEXT_SOURCES.some((source) => nextStatuses[source.id] === "checking");
     const isChecking = isCheckingCurrent || isCheckingNext;
     const [breakStatuses, setBreakStatuses] = useState<CommunityBreakStatuses>({});
-    const [isCheckingBreaks, setIsCheckingBreaks] = useState(false);
+    const [isCheckingBreaks, setIsCheckingBreaks] = useState(true);
     const checkBreaks = useCallback(async () => {
         setIsCheckingBreaks(true);
         try {
@@ -76,8 +101,22 @@ export function ApiStatusTab() {
         }
     }, []);
     useEffect(() => {
-        void checkBreaks();
-    }, [checkBreaks]);
+        let cancelled = false;
+        GetCommunityBreakStatuses().then((statuses) => {
+            if (cancelled)
+                return;
+            setBreakStatuses(statuses);
+            setIsCheckingBreaks(false);
+        }, () => {
+            if (cancelled)
+                return;
+            setBreakStatuses({});
+            setIsCheckingBreaks(false);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
     const checkAll = () => {
         void checkAllCurrent();
         void checkAllNext();
@@ -125,7 +164,7 @@ export function ApiStatusTab() {
       <div className="border-t"/>
 
       <div className="space-y-4">
-        <h3 className="text-sm font-semibold tracking-tight">Extended sources</h3>
+        <h3 className="text-sm font-semibold tracking-tight">{t("translation.apiStatus.extendedSources")}</h3>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {SPOTIFLAC_NEXT_SOURCES.map((source) => {

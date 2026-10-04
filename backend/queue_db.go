@@ -22,6 +22,7 @@ const (
 )
 
 type persistentQueueStore struct {
+	mu sync.RWMutex
 	db *bolt.DB
 }
 
@@ -33,6 +34,7 @@ type persistentQueueItem struct {
 var (
 	persistentQueueStoreMu sync.Mutex
 	globalQueueStore       *persistentQueueStore
+	persistentQueueClosed  bool
 )
 
 func openPersistentQueueStore(dbPath string) (*persistentQueueStore, error) {
@@ -61,10 +63,17 @@ func openPersistentQueueStore(dbPath string) (*persistentQueueStore, error) {
 }
 
 func (s *persistentQueueStore) close() error {
-	if s == nil || s.db == nil {
+	if s == nil {
 		return nil
 	}
-	return s.db.Close()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return nil
+	}
+	err := s.db.Close()
+	s.db = nil
+	return err
 }
 
 func parsePersistentQueueItems(raw string) ([]persistentQueueItem, error) {
@@ -145,6 +154,12 @@ func marshalPersistentQueueOrder(order []string) ([]byte, error) {
 }
 
 func (s *persistentQueueStore) load() (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return "", errors.New("queue database is closed")
+	}
+
 	var payload string
 	err := s.db.View(func(tx *bolt.Tx) error {
 		itemsBucket := tx.Bucket([]byte(persistentQueueItemsBucket))
@@ -188,6 +203,12 @@ func (s *persistentQueueStore) load() (string, error) {
 }
 
 func (s *persistentQueueStore) replace(raw string) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return errors.New("queue database is closed")
+	}
+
 	items, err := parsePersistentQueueItems(raw)
 	if err != nil {
 		return err
@@ -223,6 +244,12 @@ func (s *persistentQueueStore) replace(raw string) error {
 }
 
 func (s *persistentQueueStore) apply(upsertsRaw string, removedIDs []string, orderRaw string) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return errors.New("queue database is closed")
+	}
+
 	upserts, err := parsePersistentQueueItems(upsertsRaw)
 	if err != nil {
 		return err
@@ -298,6 +325,9 @@ func (s *persistentQueueStore) apply(upsertsRaw string, removedIDs []string, ord
 func InitPersistentQueueDB() error {
 	persistentQueueStoreMu.Lock()
 	defer persistentQueueStoreMu.Unlock()
+	if persistentQueueClosed {
+		return errors.New("queue database is closed")
+	}
 	if globalQueueStore != nil {
 		return nil
 	}
@@ -315,7 +345,7 @@ func InitPersistentQueueDB() error {
 }
 
 func getPersistentQueueDBPath() (string, error) {
-	appDir, err := GetFFmpegDir()
+	appDir, err := EnsureAppDataDir()
 	if err != nil {
 		return "", err
 	}
@@ -334,14 +364,26 @@ func getPersistentQueueStore() (*persistentQueueStore, error) {
 	return globalQueueStore, nil
 }
 
-func ClosePersistentQueueDB() {
+func ClosePersistentQueueDB() error {
 	persistentQueueStoreMu.Lock()
 	defer persistentQueueStoreMu.Unlock()
+	persistentQueueClosed = true
 	if globalQueueStore == nil {
-		return
+		return nil
 	}
-	_ = globalQueueStore.close()
+	err := globalQueueStore.close()
 	globalQueueStore = nil
+	return err
+}
+
+func resetPersistentQueueForTest() {
+	persistentQueueStoreMu.Lock()
+	defer persistentQueueStoreMu.Unlock()
+	persistentQueueClosed = false
+	if globalQueueStore != nil {
+		_ = globalQueueStore.close()
+		globalQueueStore = nil
+	}
 }
 
 func LoadPersistentDownloadQueue() (string, error) {

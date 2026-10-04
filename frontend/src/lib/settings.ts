@@ -394,7 +394,6 @@ export const FONT_OPTIONS: FontOption[] = [
     },
 ];
 const BUILT_IN_FONT_VALUES = new Set(FONT_OPTIONS.map((font) => font.value));
-const GOOGLE_FONT_LINK_ID_PREFIX = "auralis-custom-font-";
 const GOOGLE_FONTS_CSS_HOST = "fonts.googleapis.com";
 const GOOGLE_FONTS_SPECIMEN_HOST = "fonts.google.com";
 const SETTINGS_KEY = "auralis-settings";
@@ -528,40 +527,6 @@ function normalizeFontFamily(fontFamily: unknown, customFonts: CustomFontOption[
     }
     const customFont = customFonts.find((font) => font.value === fontFamily);
     return customFont ? customFont.value : DEFAULT_SETTINGS.fontFamily;
-}
-export function getFontOptions(customFonts: CustomFontOption[] = []): FontOption[] {
-    return [...FONT_OPTIONS, ...normalizeCustomFonts(customFonts)];
-}
-export function loadGoogleFontUrl(url: string, id = `${GOOGLE_FONT_LINK_ID_PREFIX}preview`): void {
-    const normalizedUrl = normalizeGoogleFontCssUrl(url);
-    if (!normalizedUrl) {
-        return;
-    }
-    let link = document.getElementById(id) as HTMLLinkElement | null;
-    if (!link) {
-        link = document.createElement("link");
-        link.id = id;
-        link.rel = "stylesheet";
-        document.head.appendChild(link);
-    }
-    if (link.href !== normalizedUrl) {
-        link.href = normalizedUrl;
-    }
-}
-function loadCustomFontStylesheets(customFonts: CustomFontOption[]): void {
-    for (const font of normalizeCustomFonts(customFonts)) {
-        loadGoogleFontUrl(font.url, `${GOOGLE_FONT_LINK_ID_PREFIX}${font.value}`);
-    }
-}
-export function applyFont(fontFamily: FontFamily, customFonts: CustomFontOption[] = []): void {
-    const fontOptions = getFontOptions(customFonts);
-    loadCustomFontStylesheets(customFonts);
-    const font = fontOptions.find((option) => option.value === fontFamily) ||
-        FONT_OPTIONS.find((option) => option.value === DEFAULT_SETTINGS.fontFamily);
-    if (font) {
-        document.documentElement.style.setProperty("--font-sans", font.fontFamily);
-        document.body.style.fontFamily = font.fontFamily;
-    }
 }
 async function persistCustomFontsInternal(customFonts: CustomFontOption[]): Promise<CustomFontOption[]> {
     const normalizedFonts = normalizeCustomFonts(customFonts);

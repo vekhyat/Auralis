@@ -59,5 +59,6 @@ export function saveAudioAnalysisPreferences(preferences: AudioAnalysisPreferenc
         }));
     }
     catch {
+        // The analyzer remains usable when local storage is unavailable.
     }
 }

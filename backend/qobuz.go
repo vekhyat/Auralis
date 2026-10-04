@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -278,6 +279,34 @@ func parseQobuzTrackID(raw string) (int64, error) {
 	return id, nil
 }
 
+func qobuzTrackFromAntraISRC(isrc, title, artist, album string) (*QobuzTrack, error) {
+	hit, err := antraSearchByISRC("qobuz", isrc)
+	if err != nil {
+		return nil, err
+	}
+	id, err := strconv.ParseInt(strings.TrimSpace(hit.TrackID), 10, 64)
+	if err != nil || id <= 0 {
+		return nil, fmt.Errorf("qobuz antra returned no track id")
+	}
+	resolvedTitle := strings.TrimSpace(hit.Title)
+	if resolvedTitle == "" {
+		resolvedTitle = title
+	}
+	resolvedArtist := strings.TrimSpace(hit.Artist)
+	if resolvedArtist == "" {
+		resolvedArtist = artist
+	}
+	resolvedAlbum := strings.TrimSpace(hit.Album)
+	if resolvedAlbum == "" {
+		resolvedAlbum = album
+	}
+	resolvedISRC := strings.TrimSpace(hit.ISRC)
+	if resolvedISRC == "" {
+		resolvedISRC = isrc
+	}
+	return qobuzTrackFromID(id, resolvedTitle, resolvedArtist, resolvedAlbum, resolvedISRC), nil
+}
+
 func qobuzTrackFromID(id int64, title, artist, album, isrc string) *QobuzTrack {
 	track := &QobuzTrack{
 		ID:    id,
@@ -291,11 +320,15 @@ func qobuzTrackFromID(id int64, title, artist, album, isrc string) *QobuzTrack {
 }
 
 func lookupQobuzTrackFromExternalLinks(isrc, spotifyURL string) (int64, error) {
+	return lookupQobuzTrackFromExternalLinksWithContext(context.Background(), isrc, spotifyURL)
+}
+
+func lookupQobuzTrackFromExternalLinksWithContext(ctx context.Context, isrc, spotifyURL string) (int64, error) {
 	if id, err := parseQobuzTrackID(spotifyURL); err == nil {
 		return id, nil
 	}
 	if spotifyID, err := extractSpotifyTrackID(spotifyURL); err == nil && spotifyID != "" {
-		if resolved, resolveErr := lookupZarzResolveLinks(spotifyID); resolveErr == nil {
+		if resolved, resolveErr := lookupZarzResolveLinksWithContext(ctx, spotifyID); resolveErr == nil {
 			if id, parseErr := parseQobuzTrackID(resolved.QobuzURL); parseErr == nil {
 				fmt.Printf("Found Qobuz track via Zarz resolve: %d\n", id)
 				return id, nil
@@ -303,7 +336,7 @@ func lookupQobuzTrackFromExternalLinks(isrc, spotifyURL string) (int64, error) {
 		}
 	}
 
-	client := NewSongLinkClient()
+	client := NewSongLinkClientWithContext(ctx)
 	pages := make([]string, 0, 2)
 	if trimmedISRC := strings.TrimSpace(isrc); trimmedISRC != "" && !strings.HasPrefix(trimmedISRC, "qobuz_") {
 		pages = append(pages, "https://song.link/isrc/"+url.PathEscape(strings.ToUpper(trimmedISRC)))
@@ -523,23 +556,16 @@ func extractQobuzStreamingURL(body []byte) string {
 func (q *QobuzDownloader) searchByISRC(isrc string, spotifyTrackName string, spotifyArtistName string, spotifyAlbumName string, spotifyURL string) (*QobuzTrack, error) {
 	if strings.HasPrefix(isrc, "qobuz_") {
 		trackID := strings.TrimSpace(strings.TrimPrefix(isrc, "qobuz_"))
-		resp, err := doQobuzSignedRequest(http.MethodGet, "track/get", url.Values{"track_id": {trackID}}, q.client)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch track from Qobuz public API: %w", err)
+		id, err := strconv.ParseInt(trackID, 10, 64)
+		if err != nil || id <= 0 {
+			return nil, fmt.Errorf("invalid qobuz track id")
 		}
-		defer resp.Body.Close()
+		return qobuzTrackFromID(id, spotifyTrackName, spotifyArtistName, spotifyAlbumName, ""), nil
+	}
 
-		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-			return nil, fmt.Errorf("Qobuz public API track/get returned status %d: %s", resp.StatusCode, previewQobuzResponseBody(body, 256))
-		}
-
-		var trackResp QobuzTrack
-		if err := json.NewDecoder(resp.Body).Decode(&trackResp); err != nil {
-			return nil, fmt.Errorf("failed to decode Qobuz public track/get response: %w", err)
-		}
-
-		return &trackResp, nil
+	if track, err := qobuzTrackFromAntraISRC(isrc, spotifyTrackName, spotifyArtistName, spotifyAlbumName); err == nil {
+		fmt.Printf("Found Qobuz track via Antra ISRC: %d\n", track.ID)
+		return track, nil
 	}
 
 	queries := qobuzSearchQueries(isrc, spotifyTrackName, spotifyArtistName, spotifyAlbumName)
@@ -575,7 +601,7 @@ func (q *QobuzDownloader) searchByISRC(isrc string, spotifyTrackName string, spo
 		return &selected, nil
 	}
 
-	if id, lookupErr := lookupQobuzTrackFromExternalLinks(isrc, spotifyURL); lookupErr == nil {
+	if id, lookupErr := lookupQobuzTrackFromExternalLinksWithContext(ActiveDownloadContext(), isrc, spotifyURL); lookupErr == nil {
 		fmt.Println("Official Qobuz catalog search returned no matches; using song.link Qobuz track id")
 		return qobuzTrackFromID(id, spotifyTrackName, spotifyArtistName, spotifyAlbumName, isrc), nil
 	}
@@ -611,6 +637,14 @@ func (q *QobuzDownloader) GetDownloadURL(trackID int64, quality string, allowFal
 
 	}
 
+	return q.downloadQobuzViaGateways(trackID, qualityCode, allowFallback)
+}
+
+var fetchQobuzGatewayURL = func(q *QobuzDownloader, trackID int64, qualityCode string, allowFallback bool) (string, error) {
+	return q.downloadQobuzViaGateways(trackID, qualityCode, allowFallback)
+}
+
+func (q *QobuzDownloader) downloadQobuzViaGateways(trackID int64, qualityCode string, allowFallback bool) (string, error) {
 	downloadFunc := func(qual string) (string, error) {
 		url, err := q.getQobuzCommunityDownloadURL(trackID, qual)
 		if err == nil {
@@ -677,28 +711,54 @@ func (q *QobuzDownloader) GetDownloadURL(trackID int64, quality string, allowFal
 	return "", fmt.Errorf("all APIs and fallbacks failed. Last error: %v", err)
 }
 
+func (q *QobuzDownloader) downloadQobuzTrackFile(trackID int64, quality, dest string, allowFallback bool) (string, error) {
+	qualityCode := strings.TrimSpace(quality)
+	if qualityCode == "" || qualityCode == "5" {
+		qualityCode = "6"
+	}
+	customConfigured := strings.TrimSpace(q.customURL) != ""
+	if customConfigured {
+		downloadURL, customErr := q.getQobuzCustomDownloadURL(trackID, qualityCode)
+		if IsDownloadCancelledError(customErr) {
+			return "", customErr
+		}
+		if customErr == nil {
+			if err := q.DownloadFile(downloadURL, dest); err == nil {
+				return dest, nil
+			} else if IsDownloadCancelledError(err) {
+				return "", err
+			} else {
+				fmt.Printf("Custom Qobuz download failed, trying Antra mirror: %v\n", err)
+			}
+		} else {
+			fmt.Printf("Custom Qobuz instance failed, trying Antra mirror: %v\n", customErr)
+		}
+	}
+
+	fmt.Println("Trying Antra Qobuz mirror...")
+	antraPath, antraErr := antraStreamToFile("qobuz", strconv.FormatInt(trackID, 10), dest, antraQualityQuery("qobuz", qualityCode))
+	if antraErr == nil {
+		return antraPath, nil
+	}
+	if IsDownloadCancelledError(antraErr) {
+		return "", antraErr
+	}
+	if customConfigured && !allowFallback {
+		return "", antraErr
+	}
+	fmt.Printf("Antra Qobuz mirror failed, trying community/Zarz: %v\n", antraErr)
+	downloadURL, err := fetchQobuzGatewayURL(q, trackID, qualityCode, allowFallback)
+	if err != nil {
+		return "", err
+	}
+	if err := q.DownloadFile(downloadURL, dest); err != nil {
+		return "", err
+	}
+	return dest, nil
+}
+
 func (q *QobuzDownloader) DownloadFile(url, filepath string) (err error) {
 	fmt.Println("Starting file download...")
-
-	downloadClient := &http.Client{
-		Timeout: 5 * time.Minute,
-	}
-
-	req, err := NewRequestWithDefaultHeaders(http.MethodGet, url, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create download request: %w", err)
-	}
-	req = req.WithContext(ActiveDownloadContext())
-
-	resp, err := downloadClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to download file: %w", WrapDownloadCancelled(err))
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("download failed with status %d", resp.StatusCode)
-	}
 
 	fmt.Printf("Creating file: %s\n", filepath)
 	out, err := os.Create(filepath)
@@ -715,9 +775,17 @@ func (q *QobuzDownloader) DownloadFile(url, filepath string) (err error) {
 	fmt.Println("Downloading...")
 
 	pw := NewProgressWriter(out)
-	_, err = io.Copy(pw, resp.Body)
+	client := newMediaHTTPClient()
+	err = copyResponseWithRetry(pw, func() (*http.Response, error) {
+		req, reqErr := NewRequestWithDefaultHeaders(http.MethodGet, url, nil)
+		if reqErr != nil {
+			return nil, reqErr
+		}
+		req = WithDownloadContext(req)
+		return client.Do(req)
+	})
 	if err != nil {
-		return fmt.Errorf("failed to write file: %w", WrapDownloadCancelled(err))
+		return fmt.Errorf("failed to download file: %w", WrapDownloadCancelled(err))
 	}
 
 	fmt.Printf("\rDownloaded: %.2f MB (Complete)\n", float64(pw.GetTotal())/(1024*1024))
@@ -817,7 +885,7 @@ func buildQobuzFilename(title, artist, album, albumArtist, releaseDate string, t
 func (q *QobuzDownloader) DownloadTrack(spotifyID, outputDir, quality, filenameFormat string, includeTrackNumber bool, position int, spotifyTrackName, spotifyArtistName, spotifyAlbumName, spotifyAlbumArtist, spotifyReleaseDate string, useAlbumTrackNumber bool, spotifyCoverURL string, embedMaxQualityCover bool, spotifyTrackNumber, spotifyDiscNumber, spotifyTotalTracks int, spotifyTotalDiscs int, spotifyCopyright, spotifyPublisher, spotifyComposer, metadataSeparator, spotifyURL string, allowFallback bool, useFirstArtistOnly bool, useSingleGenre bool, embedGenre bool) (string, error) {
 	var isrc string
 	if spotifyID != "" {
-		linkClient := NewSongLinkClient()
+		linkClient := NewSongLinkClientWithContext(ActiveDownloadContext())
 		resolvedISRC, err := linkClient.GetISRCDirect(spotifyID)
 		if err != nil {
 			return "", fmt.Errorf("failed to get ISRC: %v", err)
@@ -891,29 +959,6 @@ func (q *QobuzDownloader) DownloadTrackWithISRC(isrc, outputDir, quality, filena
 	}
 	fmt.Printf("Quality: %s\n", qualityInfo)
 
-	fmt.Println("Getting download URL...")
-	downloadURL, err := q.GetDownloadURL(track.ID, quality, allowFallback)
-	useAntraStream := false
-	if err != nil {
-		if IsDownloadCancelledError(err) {
-			return "", err
-		}
-		fmt.Printf("Qobuz community/Zarz failed, trying Antra mirror: %v\n", err)
-		useAntraStream = true
-	}
-
-	if !useAntraStream && downloadURL == "" {
-		return "", fmt.Errorf("received empty download URL")
-	}
-
-	if !useAntraStream {
-		urlPreview := downloadURL
-		if len(downloadURL) > 60 {
-			urlPreview = downloadURL[:60] + "..."
-		}
-		fmt.Printf("Download URL obtained: %s\n", urlPreview)
-	}
-
 	safeArtist := sanitizeFilename(artists)
 	safeAlbumArtist := sanitizeFilename(spotifyAlbumArtist)
 
@@ -934,20 +979,11 @@ func (q *QobuzDownloader) DownloadTrackWithISRC(isrc, outputDir, quality, filena
 	}
 
 	fmt.Printf("Downloading FLAC file to: %s\n", filepath)
-	if useAntraStream {
-		antraPath, antraErr := antraStreamToFile("qobuz", fmt.Sprintf("%d", track.ID), filepath, antraQualityQuery("qobuz", quality))
-		if antraErr != nil {
-			return "", fmt.Errorf("failed to get download URL: %w", err)
-		}
-		filepath = antraPath
-	} else if err := q.DownloadFile(downloadURL, filepath); err != nil {
-		fmt.Printf("Qobuz file download failed, trying Antra mirror: %v\n", err)
-		antraPath, antraErr := antraStreamToFile("qobuz", fmt.Sprintf("%d", track.ID), filepath, antraQualityQuery("qobuz", quality))
-		if antraErr != nil {
-			return "", fmt.Errorf("failed to download file: %w", err)
-		}
-		filepath = antraPath
+	downloadedPath, err := q.downloadQobuzTrackFile(track.ID, quality, filepath, allowFallback)
+	if err != nil {
+		return "", err
 	}
+	filepath = downloadedPath
 
 	fmt.Printf("Downloaded: %s\n", filepath)
 
@@ -978,7 +1014,7 @@ func (q *QobuzDownloader) DownloadTrackWithISRC(isrc, outputDir, quality, filena
 	}
 
 	upc := ""
-	if identifiers, err := GetSpotifyTrackIdentifiersDirect(spotifyURL); err == nil || identifiers.ISRC != "" || identifiers.UPC != "" {
+	if identifiers, err := GetSpotifyTrackIdentifiersWithContext(ActiveDownloadContext(), spotifyURL); err == nil || identifiers.ISRC != "" || identifiers.UPC != "" {
 		if strings.TrimSpace(isrc) == "" && strings.TrimSpace(identifiers.ISRC) != "" {
 			isrc = strings.TrimSpace(identifiers.ISRC)
 		}

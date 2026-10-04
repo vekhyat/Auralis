@@ -346,6 +346,9 @@ func CloseLibraryIndexDB() {
 func collectLibraryIndexEntries(root, rootKey string, includeMetadata bool) ([]libraryIndexEntry, error) {
 	entries := make([]libraryIndexEntry, 0)
 	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if info != nil && info.IsDir() && strings.HasPrefix(info.Name(), ".auralis-incoming-") {
+			return filepath.SkipDir
+		}
 		if walkErr != nil || info == nil || info.IsDir() || !isLibraryIndexAudioFile(path) || info.Size() <= libraryIndexMinimumAudioSize {
 			return nil
 		}

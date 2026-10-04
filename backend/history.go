@@ -2,9 +2,11 @@ package backend
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -25,7 +27,11 @@ type HistoryItem struct {
 	Timestamp   int64  `json:"timestamp"`
 }
 
-var historyDB *bolt.DB
+var (
+	historyMu     sync.Mutex
+	historyDB     *bolt.DB
+	historyClosed bool
+)
 
 const (
 	historyBucket = "DownloadHistory"
@@ -33,8 +39,20 @@ const (
 )
 
 func InitHistoryDB(appName string) error {
+	historyMu.Lock()
+	defer historyMu.Unlock()
+	return openHistoryDBLocked()
+}
 
-	appDir, err := EnsureAppDir()
+func openHistoryDBLocked() error {
+	if historyDB != nil {
+		return nil
+	}
+	if historyClosed {
+		return errors.New("history database is closed")
+	}
+
+	appDir, err := EnsureAppDataDir()
 	if err != nil {
 		return err
 	}
@@ -49,9 +67,8 @@ func InitHistoryDB(appName string) error {
 		_, err := tx.CreateBucketIfNotExists([]byte(historyBucket))
 		return err
 	})
-
 	if err != nil {
-		db.Close()
+		_ = db.Close()
 		return err
 	}
 
@@ -59,75 +76,99 @@ func InitHistoryDB(appName string) error {
 	return nil
 }
 
-func CloseHistoryDB() {
-	if historyDB != nil {
-		historyDB.Close()
+func CloseHistoryDB() error {
+	historyMu.Lock()
+	defer historyMu.Unlock()
+	historyClosed = true
+	return closeHistoryDBLocked()
+}
+
+func closeHistoryDBLocked() error {
+	if historyDB == nil {
+		return nil
 	}
+	err := historyDB.Close()
+	historyDB = nil
+	return err
+}
+
+func ResetHistoryStoreForTest() {
+	historyMu.Lock()
+	defer historyMu.Unlock()
+	_ = closeHistoryDBLocked()
+	historyClosed = false
+}
+
+func withHistoryDB(fn func(*bolt.DB) error) error {
+	historyMu.Lock()
+	defer historyMu.Unlock()
+	if err := openHistoryDBLocked(); err != nil {
+		return err
+	}
+	return fn(historyDB)
 }
 
 func AddHistoryItem(item HistoryItem, appName string) error {
-	if historyDB == nil {
-		if err := InitHistoryDB(appName); err != nil {
-			return err
-		}
-	}
-	return historyDB.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte(historyBucket))
-		if err != nil {
-			return err
-		}
-		id, _ := b.NextSequence()
+	err := withHistoryDB(func(db *bolt.DB) error {
+		return db.Update(func(tx *bolt.Tx) error {
+			b, err := tx.CreateBucketIfNotExists([]byte(historyBucket))
+			if err != nil {
+				return err
+			}
+			id, _ := b.NextSequence()
 
-		item.ID = fmt.Sprintf("%d-%d", time.Now().UnixNano(), id)
-		item.Timestamp = time.Now().Unix()
+			item.ID = fmt.Sprintf("%d-%d", time.Now().UnixNano(), id)
+			item.Timestamp = time.Now().Unix()
 
-		buf, err := json.Marshal(item)
-		if err != nil {
-			return err
-		}
-
-		if b.Stats().KeyN >= maxHistory {
-			c := b.Cursor()
-
-			toDelete := maxHistory / 20
-			if toDelete < 1 {
-				toDelete = 1
+			buf, err := json.Marshal(item)
+			if err != nil {
+				return err
 			}
 
-			count := 0
-			for k, _ := c.First(); k != nil && count < toDelete; k, _ = c.Next() {
-				if err := b.Delete(k); err != nil {
-					return err
+			if b.Stats().KeyN >= maxHistory {
+				c := b.Cursor()
+
+				toDelete := maxHistory / 20
+				if toDelete < 1 {
+					toDelete = 1
 				}
-				count++
-			}
-		}
 
-		return b.Put([]byte(item.ID), buf)
+				count := 0
+				for k, _ := c.First(); k != nil && count < toDelete; k, _ = c.Next() {
+					if err := b.Delete(k); err != nil {
+						return err
+					}
+					count++
+				}
+			}
+
+			return b.Put([]byte(item.ID), buf)
+		})
 	})
+	if err != nil {
+		return fmt.Errorf("write download history: %w", err)
+	}
+	return nil
 }
 
 func GetHistoryItems(appName string) ([]HistoryItem, error) {
-	if historyDB == nil {
-		if err := InitHistoryDB(appName); err != nil {
-			return nil, err
-		}
-	}
 	var items []HistoryItem
-	err := historyDB.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(historyBucket))
-		if b == nil {
-			return nil
-		}
-		c := b.Cursor()
-
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			var item HistoryItem
-			if err := json.Unmarshal(v, &item); err == nil {
-				items = append(items, item)
+	err := withHistoryDB(func(db *bolt.DB) error {
+		return db.View(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte(historyBucket))
+			if b == nil {
+				return nil
 			}
-		}
-		return nil
+			c := b.Cursor()
+
+			for k, v := c.First(); k != nil; k, v = c.Next() {
+				var item HistoryItem
+				if err := json.Unmarshal(v, &item); err == nil {
+					items = append(items, item)
+				}
+			}
+			return nil
+		})
 	})
 
 	sort.Slice(items, func(i, j int) bool {
@@ -138,13 +179,10 @@ func GetHistoryItems(appName string) ([]HistoryItem, error) {
 }
 
 func ClearHistory(appName string) error {
-	if historyDB == nil {
-		if err := InitHistoryDB(appName); err != nil {
-			return err
-		}
-	}
-	return historyDB.Update(func(tx *bolt.Tx) error {
-		return tx.DeleteBucket([]byte(historyBucket))
+	return withHistoryDB(func(db *bolt.DB) error {
+		return db.Update(func(tx *bolt.Tx) error {
+			return tx.DeleteBucket([]byte(historyBucket))
+		})
 	})
 }
 
@@ -165,80 +203,74 @@ const (
 )
 
 func AddFetchHistoryItem(item FetchHistoryItem, appName string) error {
-	if historyDB == nil {
-		if err := InitHistoryDB(appName); err != nil {
-			return err
-		}
-	}
-	return historyDB.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte(fetchHistoryBucket))
-		if err != nil {
-			return err
-		}
-		id, _ := b.NextSequence()
+	return withHistoryDB(func(db *bolt.DB) error {
+		return db.Update(func(tx *bolt.Tx) error {
+			b, err := tx.CreateBucketIfNotExists([]byte(fetchHistoryBucket))
+			if err != nil {
+				return err
+			}
+			id, _ := b.NextSequence()
 
-		if item.URL != "" {
-			c := b.Cursor()
-			for k, v := c.First(); k != nil; k, v = c.Next() {
-				var existing FetchHistoryItem
-				if err := json.Unmarshal(v, &existing); err == nil {
-					if existing.URL == item.URL && existing.Type == item.Type {
-						if err := b.Delete(k); err != nil {
-							return err
+			if item.URL != "" {
+				c := b.Cursor()
+				for k, v := c.First(); k != nil; k, v = c.Next() {
+					var existing FetchHistoryItem
+					if err := json.Unmarshal(v, &existing); err == nil {
+						if existing.URL == item.URL && existing.Type == item.Type {
+							if err := b.Delete(k); err != nil {
+								return err
+							}
 						}
 					}
 				}
 			}
-		}
 
-		item.ID = fmt.Sprintf("%d-%d", time.Now().UnixNano(), id)
-		item.Timestamp = time.Now().Unix()
+			item.ID = fmt.Sprintf("%d-%d", time.Now().UnixNano(), id)
+			item.Timestamp = time.Now().Unix()
 
-		buf, err := json.Marshal(item)
-		if err != nil {
-			return err
-		}
-
-		if b.Stats().KeyN >= maxHistory {
-			c := b.Cursor()
-			toDelete := maxHistory / 20
-			if toDelete < 1 {
-				toDelete = 1
+			buf, err := json.Marshal(item)
+			if err != nil {
+				return err
 			}
-			count := 0
-			for k, _ := c.First(); k != nil && count < toDelete; k, _ = c.Next() {
-				if err := b.Delete(k); err != nil {
-					return err
+
+			if b.Stats().KeyN >= maxHistory {
+				c := b.Cursor()
+				toDelete := maxHistory / 20
+				if toDelete < 1 {
+					toDelete = 1
 				}
-				count++
+				count := 0
+				for k, _ := c.First(); k != nil && count < toDelete; k, _ = c.Next() {
+					if err := b.Delete(k); err != nil {
+						return err
+					}
+					count++
+				}
 			}
-		}
 
-		return b.Put([]byte(item.ID), buf)
+			return b.Put([]byte(item.ID), buf)
+		})
 	})
 }
 
 func GetFetchHistoryItems(appName string) ([]FetchHistoryItem, error) {
-	if historyDB == nil {
-		if err := InitHistoryDB(appName); err != nil {
-			return nil, err
-		}
-	}
 	var items []FetchHistoryItem
-	err := historyDB.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(fetchHistoryBucket))
-		if b == nil {
-			return nil
-		}
-		c := b.Cursor()
-
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			var item FetchHistoryItem
-			if err := json.Unmarshal(v, &item); err == nil {
-				items = append(items, item)
+	err := withHistoryDB(func(db *bolt.DB) error {
+		return db.View(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte(fetchHistoryBucket))
+			if b == nil {
+				return nil
 			}
-		}
-		return nil
+			c := b.Cursor()
+
+			for k, v := c.First(); k != nil; k, v = c.Next() {
+				var item FetchHistoryItem
+				if err := json.Unmarshal(v, &item); err == nil {
+					items = append(items, item)
+				}
+			}
+			return nil
+		})
 	})
 
 	sort.Slice(items, func(i, j int) bool {
@@ -249,76 +281,64 @@ func GetFetchHistoryItems(appName string) ([]FetchHistoryItem, error) {
 }
 
 func ClearFetchHistory(appName string) error {
-	if historyDB == nil {
-		if err := InitHistoryDB(appName); err != nil {
-			return err
-		}
-	}
-	return historyDB.Update(func(tx *bolt.Tx) error {
-		return tx.DeleteBucket([]byte(fetchHistoryBucket))
+	return withHistoryDB(func(db *bolt.DB) error {
+		return db.Update(func(tx *bolt.Tx) error {
+			return tx.DeleteBucket([]byte(fetchHistoryBucket))
+		})
 	})
 }
 
 func ClearFetchHistoryByType(itemType string, appName string) error {
-	if historyDB == nil {
-		if err := InitHistoryDB(appName); err != nil {
-			return err
-		}
-	}
-	return historyDB.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(fetchHistoryBucket))
-		if b == nil {
-			return nil
-		}
+	return withHistoryDB(func(db *bolt.DB) error {
+		return db.Update(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte(fetchHistoryBucket))
+			if b == nil {
+				return nil
+			}
 
-		var keysToDelete [][]byte
+			var keysToDelete [][]byte
 
-		c := b.Cursor()
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			var item FetchHistoryItem
-			if err := json.Unmarshal(v, &item); err == nil {
-				if item.Type == itemType {
-					keysToDelete = append(keysToDelete, append([]byte(nil), k...))
+			c := b.Cursor()
+			for k, v := c.First(); k != nil; k, v = c.Next() {
+				var item FetchHistoryItem
+				if err := json.Unmarshal(v, &item); err == nil {
+					if item.Type == itemType {
+						keysToDelete = append(keysToDelete, append([]byte(nil), k...))
+					}
 				}
 			}
-		}
 
-		for _, k := range keysToDelete {
-			if err := b.Delete(k); err != nil {
-				return err
+			for _, k := range keysToDelete {
+				if err := b.Delete(k); err != nil {
+					return err
+				}
 			}
-		}
-		return nil
+			return nil
+		})
 	})
 }
 
 func DeleteHistoryItem(id string, appName string) error {
-	if historyDB == nil {
-		if err := InitHistoryDB(appName); err != nil {
-			return err
-		}
-	}
-	return historyDB.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(historyBucket))
-		if b == nil {
-			return nil
-		}
+	return withHistoryDB(func(db *bolt.DB) error {
+		return db.Update(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte(historyBucket))
+			if b == nil {
+				return nil
+			}
 
-		return b.Delete([]byte(id))
+			return b.Delete([]byte(id))
+		})
 	})
 }
 
 func DeleteFetchHistoryItem(id string, appName string) error {
-	if historyDB == nil {
-		if err := InitHistoryDB(appName); err != nil {
-			return err
-		}
-	}
-	return historyDB.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(fetchHistoryBucket))
-		if b == nil {
-			return nil
-		}
-		return b.Delete([]byte(id))
+	return withHistoryDB(func(db *bolt.DB) error {
+		return db.Update(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte(fetchHistoryBucket))
+			if b == nil {
+				return nil
+			}
+			return b.Delete([]byte(id))
+		})
 	})
 }

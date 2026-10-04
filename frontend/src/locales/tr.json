@@ -18,7 +18,8 @@
       "week_one": "{{count}} hafta",
       "week_other": "{{count}} hafta",
       "year_one": "{{count}} yıl",
-      "year_other": "{{count}} yıl"
+      "year_other": "{{count}} yıl",
+      "ago": "{{value}} önce"
     },
     "album": {
       "fetchMetadataConfirm": "Bu albüm için meta verileri almak ister misiniz?"
@@ -35,6 +36,7 @@
       "downloadNow": "Hemen İndir",
       "downloadPathNotSet": "İndirme yolu ayarlanmadı",
       "fetchFailed": "Veriler alınamadı",
+      "pageLoadFailed": "Bu sayfa yüklenemedi.",
       "finalizingSetup": "Kurulum tamamlanıyor",
       "newVersion": "Yeni sürüm",
       "noChangelogProvidedRelease": "Bu sürüm için değişiklik listesi verilmedi.",
@@ -207,6 +209,8 @@
       "albumName": "Albüm adı",
       "artistZ": "Sanatçı (A-Z)",
       "artistZ2": "Sanatçı (Z-A)",
+      "more": "Diğer",
+      "back": "Geri",
       "audioConverter": "Ses Dönüştürücü",
       "audioQualityAnalyzer": "Ses Kalite Analizörü",
       "bpmKeyAnalyzer": "BPM ve Tonalite Analizörü",
@@ -413,6 +417,26 @@
     "header": {
       "reload": "Auralis'ı yeniden yükle",
       "tagline": "Spotify parçalarını Tidal, Qobuz ve Amazon Music'ten gerçek FLAC formatında alın; hesap gerekmez."
+    },
+    "omnibar": {
+      "placeholder": "Bir bağlantı yapıştırın veya parça, albüm, sanatçı ve çalma listesi arayın"
+    },
+    "catalog": {
+      "emptyHint": "Yukarıya bir akış bağlantısı yapıştırın veya aramak için yazın. Sonuçlar bir katalog olarak açılır; incelemek için bir kayıt seçin.",
+      "recentFetches": "Son getirmeler",
+      "recentSearches": "Son aramalar",
+      "remove": "Kaldır",
+      "resultsFor": "Sonuçlar",
+      "selectToInspect": "Burada incelemek için bir kayıt seçin.",
+      "fetchLossless": "Kayıpsız getir",
+      "owner": "Sahip",
+      "followers": "Takipçi",
+      "listeners": "Dinleyici",
+      "rank": "Sıra",
+      "genres": "Türler",
+      "verified": "Doğrulandı",
+      "discography": "Diskografi",
+      "chooseTracks": "Choose tracks"
     },
     "history": {
       "clearDownloadHistory": "İndirme geçmişi temizlensin mi?",
@@ -631,6 +655,7 @@
     "sidebar": {
       "reportBugsRequestFeatures": "Hata Bildir veya Özellik Talep Et",
       "home": "Ana Sayfa",
+      "library": "Kitaplık",
       "important": "Önemli",
       "tools": "Araçlar",
       "debugLogs": "Hata Ayıklama Günlükleri",
@@ -797,7 +822,15 @@
       "minimize": "Küçült",
       "network": "Ağ",
       "website": "Web Sitesi",
+      "primaryNavigation": "Birincil gezinme",
       "blockedBySpotify": "(Spotify tarafından engellendi)"
+    },
+    "apiStatus": {
+      "online": "Çevrimiçi",
+      "offline": "Çevrimdışı",
+      "checking": "Kontrol ediliyor",
+      "idle": "Boşta",
+      "extendedSources": "Ek kaynaklar"
     },
     "trackInfo": {
       "recordLabel": "Plak Şirketi",
@@ -1217,6 +1250,46 @@
       "exported_one": "Dışa aktarılan {{count}} spektrogram PNG dosyası{{failures}}",
       "batchFailed": "Toplu Analiz Başarısız"
     },
+    "downloads": {
+      "title": "Downloads",
+      "download": "Download",
+      "downloadSelected": "Download selected ({{value1}})",
+      "requested": "In downloads",
+      "added": "{{name}} added to downloads",
+      "addedPaused": "{{name}} added · downloads are paused",
+      "trackCount": "{{count}} tracks",
+      "trackCount_one": "{{count}} track",
+      "ready": "Ready when you are",
+      "autoHint": "Downloads start automatically. Keep exploring while we take care of the files.",
+      "downloading": "Downloading",
+      "waitingResume": "Waiting for you to resume",
+      "cancelCurrent": "Cancel current download",
+      "pausedHint": "Downloads are paused. New requests will wait until you resume.",
+      "empty": "Your next download starts here",
+      "emptyHint": "Find a track, album, or playlist in your library and choose Download.",
+      "findMusic": "Find music",
+      "libraryTitle": "Your music, ready to keep.",
+      "libraryHint": "Find a favorite. Explore the artwork and track list. Download it in one click.",
+      "emptyLibrary": "Start with something you love",
+      "emptyLibraryHint": "Paste a Spotify link or search for an artist, album, or track above. Your recently explored music will appear here.",
+      "checkSources": "Check download sources",
+      "cancelRequest": "Remove from downloads",
+      "saved": "Saved to your music folder",
+      "needsAttention": "Open Downloads to review this request",
+      "selectAll": "Select all displayed tracks",
+      "selectTrack": "Select {{name}} by {{artist}}",
+      "waitingCount": "{{count}} requests waiting",
+      "waitingCount_one": "{{count}} request waiting",
+      "quality": "Quality",
+      "qualityHint": "Choose the file for new downloads. If that quality is not available, the next best file is saved.",
+      "couldntGet": "Couldn't save this",
+      "couldntSave": "This one did not save. Try again in a moment.",
+      "tryAgain": "Try again",
+      "settingUp": "Setting up",
+      "ffmpegNeed": "Auralis needs an audio tool before it can save files.",
+      "couldntOpen": "Açılamadı",
+      "couldntOpenHint": "Bu bağlantı yüklenemedi. Birazdan tekrar deneyin."
+    },
     "devices": {
       "destination": "Aygıtlar",
       "title": "Aygıtlar",
@@ -1295,6 +1368,8 @@
       "mb": "MB",
       "aiff": "AIFF",
       "amazonMusic": "Amazon Music",
+      "appleMusic": "Apple Music",
+      "jiosaavn": "JioSaavn",
       "deezer": "Deezer",
       "isrc": "ISRC",
       "lrclib": "LRCLIB",
@@ -1383,7 +1458,6 @@
     "fileManager": {
       "titleArtist": "{title} - {artist}"
     },
-
     "platformIcons": {
       "songstats": "Songstats"
     }

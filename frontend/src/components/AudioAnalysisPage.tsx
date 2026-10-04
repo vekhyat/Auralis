@@ -7,7 +7,8 @@ import { Progress } from "@/components/ui/progress";
 import { Spinner } from "@/components/ui/spinner";
 import { Upload, ArrowLeft, Trash2, Download, FolderOpen, X, AlertCircle, CircleCheckBig, FileMusic, ChevronDown, Activity, StopCircle } from "lucide-react";
 import { AudioAnalysis } from "@/components/AudioAnalysis";
-import { SpectrumVisualization, createSpectrogramDataURL, type SpectrumVisualizationHandle } from "@/components/SpectrumVisualization";
+import { SpectrumVisualization, type SpectrumVisualizationHandle } from "@/components/SpectrumVisualization";
+import { createSpectrogramDataURL } from "@/lib/spectrogram-renderer";
 import { useAudioAnalysis } from "@/hooks/useAudioAnalysis";
 import type { AnalysisResult } from "@/types/api";
 import { loadAudioAnalysisPreferences } from "@/lib/audio-analysis-preferences";
@@ -792,28 +793,30 @@ export function AudioAnalysisPage({ onBack }: AudioAnalysisPageProps) {
                             <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1 custom-scrollbar">
                                 {items.map((item) => {
                 const isActive = item.id === activeItemId;
-                return (<div key={item.id} role="button" tabIndex={0} className={`flex w-full cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors ${isActive ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"}`} onClick={() => handleSelectItem(item.id)} onKeyDown={(event) => {
+                return (<div key={item.id} className={`flex w-full items-start gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors ${isActive ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"}`}>
+                                        <div role="button" tabIndex={0} className="flex min-w-0 flex-1 cursor-pointer items-start gap-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => handleSelectItem(item.id)} onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault();
                             handleSelectItem(item.id);
                         }
                     }}>
-                                        <div className="mt-0.5 shrink-0">{statusIcon(item.status)}</div>
-                                        <div className="min-w-0 flex-1">
-                                            <p className="truncate text-sm font-medium">{item.name}</p>
-                                            <p className={`truncate text-xs ${item.status === "error" ? "text-destructive" : "text-muted-foreground"}`}>
-                                                {itemMetaLine(item)}
-                                            </p>
-                                            <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-                                                <span>{formatFileSize(item.size)}</span>
-                                                <span>{fileNameFromPath(item.path).split(".").pop()?.toUpperCase() || t("translation.audioAnalysis.audio")}</span>
+                                            <div className="mt-0.5 shrink-0">{statusIcon(item.status)}</div>
+                                            <div className="min-w-0 flex-1">
+                                                <p className="truncate text-sm font-medium">{item.name}</p>
+                                                <p className={`truncate text-xs ${item.status === "error" ? "text-destructive" : "text-muted-foreground"}`}>
+                                                    {itemMetaLine(item)}
+                                                </p>
+                                                <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+                                                    <span>{formatFileSize(item.size)}</span>
+                                                    <span>{fileNameFromPath(item.path).split(".").pop()?.toUpperCase() || t("translation.audioAnalysis.audio")}</span>
+                                                </div>
                                             </div>
                                         </div>
-                                        <Button type="button" variant="ghost" size="icon" className="shrink-0" onClick={(event) => {
+                                        <Button type="button" variant="ghost" size="icon" className="shrink-0" aria-label={t("translation.replayGain.removeFile")} onClick={(event) => {
                         event.stopPropagation();
                         handleRemoveItem(item.id);
                     }} disabled={isBatchRunning || isExportingBatch || isExportingSelected || spectrumLoading}>
-                                            <X className="h-4 w-4"/>
+                                            <X className="h-4 w-4" aria-hidden="true"/>
                                         </Button>
                                     </div>);
             })}

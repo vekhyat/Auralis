@@ -1,5 +1,8 @@
 name: Build Multi-Platform
 
+permissions:
+  contents: read
+
 on:
   push:
     tags:
@@ -7,13 +10,17 @@ on:
   workflow_dispatch:
 
 env:
-  GO_VERSION: '1.26'
-  NODE_VERSION: '24'
+  GO_VERSION: '1.26.7'
+  NODE_VERSION: '24.16.0'
 
 jobs:
+  validate:
+    uses: ./.github/workflows/validate.yml
+
   build-windows:
     name: Build Windows
     runs-on: windows-latest
+    needs: validate
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -22,12 +29,15 @@ jobs:
         id: version
         shell: bash
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             VERSION=${GITHUB_REF#refs/tags/}
           else
             VERSION="dev"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          if [[ "$VERSION" != "dev" ]]; then
+            node frontend/scripts/set-release-version.mjs "$VERSION"
+          fi
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -42,7 +52,7 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: '11.23.0'
 
       - name: Get pnpm store directory
         shell: bash
@@ -59,7 +69,7 @@ jobs:
             ${{ runner.os }}-pnpm-store-
 
       - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
 
       - name: Install frontend dependencies
         working-directory: frontend
@@ -67,16 +77,8 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm run generate-icon
 
-      - name: Install UPX
-        run: |
-          choco install upx -y
-
       - name: Build application
         run: wails build -platform windows/amd64
-
-      - name: Compress with UPX
-        run: |
-          upx --best --lzma "build\bin\Auralis.exe"
 
       - name: Prepare artifacts
         run: |
@@ -93,6 +95,7 @@ jobs:
   build-macos:
     name: Build macOS
     runs-on: macos-latest
+    needs: validate
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -100,12 +103,15 @@ jobs:
       - name: Get version from tag
         id: version
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             VERSION=${GITHUB_REF#refs/tags/}
           else
             VERSION="dev"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          if [[ "$VERSION" != "dev" ]]; then
+            node frontend/scripts/set-release-version.mjs "$VERSION"
+          fi
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -120,7 +126,7 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: '11.23.0'
 
       - name: Get pnpm store directory
         run: |
@@ -136,7 +142,7 @@ jobs:
             ${{ runner.os }}-pnpm-store-
 
       - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
 
       - name: Install frontend dependencies
         working-directory: frontend
@@ -177,6 +183,8 @@ jobs:
   build-linux:
     name: Build Linux (${{ matrix.display_name }})
     runs-on: ${{ matrix.runner }}
+    needs: validate
+    needs: validate
     strategy:
       fail-fast: false
       matrix:
@@ -204,12 +212,15 @@ jobs:
       - name: Get version from tag
         id: version
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             VERSION=${GITHUB_REF#refs/tags/}
           else
             VERSION="dev"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          if [[ "$VERSION" != "dev" ]]; then
+            node frontend/scripts/set-release-version.mjs "$VERSION"
+          fi
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -224,7 +235,7 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: '11.23.0'
 
       - name: Get pnpm store directory
         run: |
@@ -244,11 +255,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libfuse2 imagemagick upx-ucl
 
-          # Create symlink for webkit2gtk-4.0 -> webkit2gtk-4.1 (Ubuntu 24.04 compatibility)
-          sudo ln -sf "${{ matrix.pkgconfig_dir }}/webkit2gtk-4.1.pc" "${{ matrix.pkgconfig_dir }}/webkit2gtk-4.0.pc"
 
       - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
 
       - name: Install frontend dependencies
         working-directory: frontend
@@ -257,7 +266,7 @@ jobs:
           pnpm run generate-icon
 
       - name: Build application
-        run: wails build -platform ${{ matrix.wails_platform }}
+        run: wails build -platform ${{ matrix.wails_platform }} -tags webkit2_41
 
       - name: Compress with UPX
         run: |
@@ -354,6 +363,9 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          if [[ "$VERSION" != "dev" ]]; then
+            node frontend/scripts/set-release-version.mjs "$VERSION"
+          fi
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4

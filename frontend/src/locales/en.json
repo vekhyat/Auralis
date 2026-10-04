@@ -18,7 +18,8 @@
       "week_one": "{{count}} week",
       "week_other": "{{count}} weeks",
       "year_one": "{{count}} year",
-      "year_other": "{{count}} years"
+      "year_other": "{{count}} years",
+      "ago": "{{value}} ago"
     },
     "album": {
       "fetchMetadataConfirm": "Do you want to fetch metadata for this album?"
@@ -35,6 +36,7 @@
       "downloadNow": "Download Now",
       "downloadPathNotSet": "Download path not set",
       "fetchFailed": "Fetch Failed",
+      "pageLoadFailed": "This page could not be loaded.",
       "finalizingSetup": "Finalizing setup",
       "newVersion": "A new version",
       "noChangelogProvidedRelease": "No changelog provided for this release.",
@@ -426,14 +428,15 @@
       "remove": "Remove",
       "resultsFor": "Results",
       "selectToInspect": "Select an entry to inspect it here.",
-      "fetchLossless": "Fetch lossless",
+      "fetchLossless": "View tracks & details",
       "owner": "Owner",
       "followers": "Followers",
       "listeners": "Listeners",
       "rank": "Rank",
       "genres": "Genres",
       "verified": "Verified",
-      "discography": "Discography"
+      "discography": "Discography",
+      "chooseTracks": "Choose tracks"
     },
     "history": {
       "clearDownloadHistory": "Clear Download History?",
@@ -497,7 +500,7 @@
       "queue": "Queue",
       "status": "Status",
       "preparing": "Preparing...",
-      "pending": "Pending",
+      "pending": "Waiting",
       "running": "Running",
       "pausing": "Pausing...",
       "paused": "Paused",
@@ -506,7 +509,7 @@
       "partial": "Completed with Issues",
       "skipped": "Skipped",
       "allStatuses": "All Statuses",
-      "openQueue": "Open Queue",
+      "openQueue": "Open downloads",
       "retry": "Retry",
       "startAll": "Start All",
       "pause": "Pause",
@@ -518,7 +521,7 @@
       "all": "All",
       "clearQueue": "Clear Queue?",
       "clearFinished": "Clear Finished",
-      "searchQueue": "Search queue...",
+      "searchQueue": "Search downloads…",
       "emptyQueue": "Queue is empty",
       "removeFromQueue": "Remove from queue",
       "addToQueue": "Add to Queue",
@@ -819,7 +822,15 @@
       "minimize": "Minimize",
       "network": "Network",
       "website": "Website",
+      "primaryNavigation": "Primary navigation",
       "blockedBySpotify": "(Blocked by Spotify)"
+    },
+    "apiStatus": {
+      "online": "Online",
+      "offline": "Offline",
+      "checking": "Checking",
+      "idle": "Idle",
+      "extendedSources": "Extended sources"
     },
     "trackInfo": {
       "recordLabel": "Record Label",
@@ -1032,8 +1043,8 @@
         "preparingDownload": "Preparing download..."
       },
       "FetchHistory": {
-        "recentFetch": "Recent Fetch",
-        "recentFetches": "Recent Fetches"
+        "recentFetch": "Recently explored",
+        "recentFetches": "Recently explored"
       },
       "FileManagerPage": {
         "failedToReadMetadata": "Failed to read metadata",
@@ -1239,6 +1250,46 @@
       "fetched_one": "{{formattedCount}} track fetched",
       "fetched_other": "{{formattedCount}} tracks fetched"
     },
+    "downloads": {
+      "title": "Downloads",
+      "download": "Download",
+      "downloadSelected": "Download selected ({{value1}})",
+      "requested": "In downloads",
+      "added": "{{name}} added to downloads",
+      "addedPaused": "{{name}} added · downloads are paused",
+      "trackCount": "{{count}} tracks",
+      "trackCount_one": "{{count}} track",
+      "ready": "Ready when you are",
+      "autoHint": "Downloads start automatically. Keep exploring while we take care of the files.",
+      "downloading": "Downloading",
+      "waitingResume": "Waiting for you to resume",
+      "cancelCurrent": "Cancel current download",
+      "pausedHint": "Downloads are paused. New requests will wait until you resume.",
+      "empty": "Your next download starts here",
+      "emptyHint": "Find a track, album, or playlist in your library and choose Download.",
+      "findMusic": "Find music",
+      "libraryTitle": "Your music, ready to keep.",
+      "libraryHint": "Find a favorite. Explore the artwork and track list. Download it in one click.",
+      "emptyLibrary": "Start with something you love",
+      "emptyLibraryHint": "Paste a Spotify link or search for an artist, album, or track above. Your recently explored music will appear here.",
+      "checkSources": "Check download sources",
+      "cancelRequest": "Remove from downloads",
+      "saved": "Saved to your music folder",
+      "needsAttention": "Open Downloads to review this request",
+      "selectAll": "Select all displayed tracks",
+      "selectTrack": "Select {{name}} by {{artist}}",
+      "waitingCount": "{{count}} requests waiting",
+      "waitingCount_one": "{{count}} request waiting",
+      "quality": "Quality",
+      "qualityHint": "Choose the file for new downloads. If that quality is not available, the next best file is saved.",
+      "couldntGet": "Couldn't save this",
+      "couldntSave": "This one did not save. Try again in a moment.",
+      "tryAgain": "Try again",
+      "settingUp": "Setting up",
+      "ffmpegNeed": "Auralis needs an audio tool before it can save files.",
+      "couldntOpen": "Couldn't open this",
+      "couldntOpenHint": "This link didn't load. Try again in a moment."
+    },
     "devices": {
       "destination": "Devices",
       "title": "Devices",
@@ -1407,7 +1458,6 @@
     "fileManager": {
       "titleArtist": "{title} - {artist}"
     },
-
     "platformIcons": {
       "songstats": "Songstats"
     }

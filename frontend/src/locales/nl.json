@@ -18,7 +18,8 @@
       "week_one": "{{count}} week",
       "week_other": "{{count}} weken",
       "year_one": "{{count}} jaar",
-      "year_other": "{{count}} jaren"
+      "year_other": "{{count}} jaren",
+      "ago": "{{value}} geleden"
     },
     "album": {
       "fetchMetadataConfirm": "Wilt u metadata ophalen voor dit album?"
@@ -35,6 +36,7 @@
       "downloadNow": "Nu downloaden",
       "downloadPathNotSet": "Downloadpad niet ingesteld",
       "fetchFailed": "Ophalen mislukt",
+      "pageLoadFailed": "Deze pagina kon niet worden geladen.",
       "finalizingSetup": "Installatie afronden",
       "newVersion": "Een nieuwe versie",
       "noChangelogProvidedRelease": "Geen changelog beschikbaar voor deze release.",
@@ -207,6 +209,8 @@
       "albumName": "Albumnaam",
       "artistZ": "Artiest (A-Z)",
       "artistZ2": "Artiest (Z-A)",
+      "more": "Meer",
+      "back": "Terug",
       "audioConverter": "Audioconverter",
       "audioQualityAnalyzer": "Audio Kwaliteitsanalyse",
       "bpmKeyAnalyzer": "BPM- en toonsoortanalyse",
@@ -413,6 +417,26 @@
     "header": {
       "tagline": "Ontvang Spotify-tracks in echte FLAC van Tidal, Qobuz en Amazon Music - geen account vereist.",
       "reload": "Auralis opnieuw laden"
+    },
+    "omnibar": {
+      "placeholder": "Plak een link, of zoek naar nummers, albums, artiesten en afspeellijsten"
+    },
+    "catalog": {
+      "emptyHint": "Plak hierboven een streaminglink, of typ om te zoeken. Resultaten openen als een catalogus; selecteer een item om het te bekijken.",
+      "recentFetches": "Recente ophaalacties",
+      "recentSearches": "Recente zoekopdrachten",
+      "remove": "Verwijderen",
+      "resultsFor": "Resultaten",
+      "selectToInspect": "Selecteer een item om het hier te bekijken.",
+      "fetchLossless": "Verliesvrij ophalen",
+      "owner": "Eigenaar",
+      "followers": "Volgers",
+      "listeners": "Luisteraars",
+      "rank": "Rang",
+      "genres": "Genres",
+      "verified": "Geverifieerd",
+      "discography": "Discografie",
+      "chooseTracks": "Choose tracks"
     },
     "history": {
       "clearDownloadHistory": "Downloadgeschiedenis wissen?",
@@ -631,6 +655,7 @@
     "sidebar": {
       "reportBugsRequestFeatures": "Bugs melden of functies aanvragen",
       "home": "Start",
+      "library": "Bibliotheek",
       "important": "Belangrijk",
       "tools": "Tools",
       "history": "Geschiedenis",
@@ -797,7 +822,15 @@
       "minimize": "Minimaliseren",
       "network": "Netwerk",
       "website": "Website",
+      "primaryNavigation": "Primaire navigatie",
       "blockedBySpotify": "(Geblokkeerd door Spotify)"
+    },
+    "apiStatus": {
+      "online": "Online",
+      "offline": "Offline",
+      "checking": "Controleren",
+      "idle": "Inactief",
+      "extendedSources": "Uitgebreide bronnen"
     },
     "trackInfo": {
       "recordLabel": "Platenlabel",
@@ -1217,6 +1250,46 @@
       "skipped_other": "{{count}}-bestanden zijn al toegevoegd",
       "skipped_one": "{{count}}-bestand is al toegevoegd"
     },
+    "downloads": {
+      "title": "Downloads",
+      "download": "Download",
+      "downloadSelected": "Download selected ({{value1}})",
+      "requested": "In downloads",
+      "added": "{{name}} added to downloads",
+      "addedPaused": "{{name}} added · downloads are paused",
+      "trackCount": "{{count}} tracks",
+      "trackCount_one": "{{count}} track",
+      "ready": "Ready when you are",
+      "autoHint": "Downloads start automatically. Keep exploring while we take care of the files.",
+      "downloading": "Downloading",
+      "waitingResume": "Waiting for you to resume",
+      "cancelCurrent": "Cancel current download",
+      "pausedHint": "Downloads are paused. New requests will wait until you resume.",
+      "empty": "Your next download starts here",
+      "emptyHint": "Find a track, album, or playlist in your library and choose Download.",
+      "findMusic": "Find music",
+      "libraryTitle": "Your music, ready to keep.",
+      "libraryHint": "Find a favorite. Explore the artwork and track list. Download it in one click.",
+      "emptyLibrary": "Start with something you love",
+      "emptyLibraryHint": "Paste a Spotify link or search for an artist, album, or track above. Your recently explored music will appear here.",
+      "checkSources": "Check download sources",
+      "cancelRequest": "Remove from downloads",
+      "saved": "Saved to your music folder",
+      "needsAttention": "Open Downloads to review this request",
+      "selectAll": "Select all displayed tracks",
+      "selectTrack": "Select {{name}} by {{artist}}",
+      "waitingCount": "{{count}} requests waiting",
+      "waitingCount_one": "{{count}} request waiting",
+      "quality": "Quality",
+      "qualityHint": "Choose the file for new downloads. If that quality is not available, the next best file is saved.",
+      "couldntGet": "Couldn't save this",
+      "couldntSave": "This one did not save. Try again in a moment.",
+      "tryAgain": "Try again",
+      "settingUp": "Setting up",
+      "ffmpegNeed": "Auralis needs an audio tool before it can save files.",
+      "couldntOpen": "Kan dit niet openen",
+      "couldntOpenHint": "Deze link is niet geladen. Probeer het zo opnieuw."
+    },
     "devices": {
       "destination": "Apparaten",
       "title": "Apparaten",
@@ -1295,6 +1368,8 @@
       "mb": "MB",
       "aiff": "AIFF",
       "amazonMusic": "Amazon Music",
+      "appleMusic": "Apple Music",
+      "jiosaavn": "JioSaavn",
       "deezer": "Deezer",
       "isrc": "ISRC",
       "lrclib": "LRCLIB",
@@ -1383,7 +1458,6 @@
     "fileManager": {
       "titleArtist": "{title} - {artist}"
     },
-
     "platformIcons": {
       "songstats": "Songstats"
     }

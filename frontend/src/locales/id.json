@@ -18,7 +18,8 @@
       "week_one": "{{count}} minggu",
       "week_other": "{{count}} minggu",
       "year_one": "{{count}} tahun",
-      "year_other": "{{count}} tahun"
+      "year_other": "{{count}} tahun",
+      "ago": "{{value}} yang lalu"
     },
     "album": {
       "fetchMetadataConfirm": "Ambil metadata untuk album ini?"
@@ -35,6 +36,7 @@
       "downloadNow": "Unduh Sekarang",
       "downloadPathNotSet": "Path unduhan belum diatur",
       "fetchFailed": "Gagal mengambil data",
+      "pageLoadFailed": "Halaman ini tidak dapat dimuat.",
       "finalizingSetup": "Menyelesaikan pengaturan",
       "newVersion": "Versi baru",
       "noChangelogProvidedRelease": "Tidak ada catatan perubahan untuk rilis ini.",
@@ -207,6 +209,8 @@
       "albumName": "Nama album",
       "artistZ": "Artis (A-Z)",
       "artistZ2": "Artis (Z-A)",
+      "more": "Lainnya",
+      "back": "Kembali",
       "audioConverter": "Pengonversi Audio",
       "audioQualityAnalyzer": "Penganalisis Kualitas Audio",
       "bpmKeyAnalyzer": "Penganalisis BPM & Tangga Nada",
@@ -413,6 +417,26 @@
     "header": {
       "reload": "Muat ulang Auralis",
       "tagline": "Dapatkan lagu Spotify dalam FLAC asli dari Tidal, Qobuz & Amazon Music — tidak perlu akun."
+    },
+    "omnibar": {
+      "placeholder": "Tempel tautan, atau cari lagu, album, artis, dan playlist"
+    },
+    "catalog": {
+      "emptyHint": "Tempel tautan streaming di atas, atau ketik untuk mencari. Hasil terbuka sebagai katalog; pilih entri untuk memeriksanya.",
+      "recentFetches": "Pengambilan terbaru",
+      "recentSearches": "Pencarian terbaru",
+      "remove": "Hapus",
+      "resultsFor": "Hasil",
+      "selectToInspect": "Pilih entri untuk memeriksanya di sini.",
+      "fetchLossless": "Ambil lossless",
+      "owner": "Pemilik",
+      "followers": "Pengikut",
+      "listeners": "Pendengar",
+      "rank": "Peringkat",
+      "genres": "Genre",
+      "verified": "Terverifikasi",
+      "discography": "Diskografi",
+      "chooseTracks": "Choose tracks"
     },
     "history": {
       "clearDownloadHistory": "Hapus Riwayat Unduhan?",
@@ -631,6 +655,7 @@
     "sidebar": {
       "reportBugsRequestFeatures": "Laporkan Bug atau Minta Fitur",
       "home": "Beranda",
+      "library": "Pustaka",
       "important": "Penting",
       "tools": "Alat",
       "history": "Riwayat",
@@ -797,7 +822,15 @@
       "minimize": "Minimalkan",
       "network": "Jaringan",
       "website": "Situs Web",
+      "primaryNavigation": "Navigasi utama",
       "blockedBySpotify": "(Diblokir oleh Spotify)"
+    },
+    "apiStatus": {
+      "online": "Online",
+      "offline": "Offline",
+      "checking": "Memeriksa",
+      "idle": "Siaga",
+      "extendedSources": "Sumber tambahan"
     },
     "trackInfo": {
       "recordLabel": "Label Rekaman",
@@ -1217,6 +1250,46 @@
       "extractFailed_one": "File {{count}} gagal diekstraksi.",
       "extractFailed_other": "File {{count}} gagal diekstraksi."
     },
+    "downloads": {
+      "title": "Downloads",
+      "download": "Download",
+      "downloadSelected": "Download selected ({{value1}})",
+      "requested": "In downloads",
+      "added": "{{name}} added to downloads",
+      "addedPaused": "{{name}} added · downloads are paused",
+      "trackCount": "{{count}} tracks",
+      "trackCount_one": "{{count}} track",
+      "ready": "Ready when you are",
+      "autoHint": "Downloads start automatically. Keep exploring while we take care of the files.",
+      "downloading": "Downloading",
+      "waitingResume": "Waiting for you to resume",
+      "cancelCurrent": "Cancel current download",
+      "pausedHint": "Downloads are paused. New requests will wait until you resume.",
+      "empty": "Your next download starts here",
+      "emptyHint": "Find a track, album, or playlist in your library and choose Download.",
+      "findMusic": "Find music",
+      "libraryTitle": "Your music, ready to keep.",
+      "libraryHint": "Find a favorite. Explore the artwork and track list. Download it in one click.",
+      "emptyLibrary": "Start with something you love",
+      "emptyLibraryHint": "Paste a Spotify link or search for an artist, album, or track above. Your recently explored music will appear here.",
+      "checkSources": "Check download sources",
+      "cancelRequest": "Remove from downloads",
+      "saved": "Saved to your music folder",
+      "needsAttention": "Open Downloads to review this request",
+      "selectAll": "Select all displayed tracks",
+      "selectTrack": "Select {{name}} by {{artist}}",
+      "waitingCount": "{{count}} requests waiting",
+      "waitingCount_one": "{{count}} request waiting",
+      "quality": "Quality",
+      "qualityHint": "Choose the file for new downloads. If that quality is not available, the next best file is saved.",
+      "couldntGet": "Couldn't save this",
+      "couldntSave": "This one did not save. Try again in a moment.",
+      "tryAgain": "Try again",
+      "settingUp": "Setting up",
+      "ffmpegNeed": "Auralis needs an audio tool before it can save files.",
+      "couldntOpen": "Tidak dapat dibuka",
+      "couldntOpenHint": "Tautan ini tidak dimuat. Coba lagi sebentar lagi."
+    },
     "devices": {
       "destination": "Perangkat",
       "title": "Perangkat",
@@ -1295,6 +1368,8 @@
       "mb": "MB",
       "aiff": "AIFF",
       "amazonMusic": "Amazon Music",
+      "appleMusic": "Apple Music",
+      "jiosaavn": "JioSaavn",
       "deezer": "Deezer",
       "isrc": "ISRC",
       "lrclib": "LRCLIB",
@@ -1383,7 +1458,6 @@
     "fileManager": {
       "titleArtist": "{title} - {artist}"
     },
-
     "platformIcons": {
       "songstats": "Songstats"
     }

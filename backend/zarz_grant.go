@@ -68,7 +68,7 @@ func DeliverZarzGrant(grant string) {
 	}
 }
 
-func waitForZarzGrant(timeout time.Duration) (string, error) {
+func waitForZarzGrant(timeout time.Duration, windowErr <-chan error) (string, error) {
 	ch := make(chan string, 1)
 	zarzGrantMu.Lock()
 	if zarzPendingGrant != "" {
@@ -79,22 +79,20 @@ func waitForZarzGrant(timeout time.Duration) (string, error) {
 	}
 	zarzGrantWaiters = append(zarzGrantWaiters, ch)
 	zarzGrantMu.Unlock()
+	defer unregisterZarzGrantWaiter(ch)
+	return selectVerificationGrant(ch, windowErr, timeout)
+}
 
-	select {
-	case grant := <-ch:
-		return grant, nil
-	case <-time.After(timeout):
-		zarzGrantMu.Lock()
-		filtered := zarzGrantWaiters[:0]
-		for _, waiter := range zarzGrantWaiters {
-			if waiter != ch {
-				filtered = append(filtered, waiter)
-			}
+func unregisterZarzGrantWaiter(ch chan string) {
+	zarzGrantMu.Lock()
+	defer zarzGrantMu.Unlock()
+	filtered := zarzGrantWaiters[:0]
+	for _, waiter := range zarzGrantWaiters {
+		if waiter != ch {
+			filtered = append(filtered, waiter)
 		}
-		zarzGrantWaiters = filtered
-		zarzGrantMu.Unlock()
-		return "", fmt.Errorf("zarz verification timed out")
 	}
+	zarzGrantWaiters = filtered
 }
 
 func pollZarzChallengeGrant(challengeID string, stop <-chan struct{}) {

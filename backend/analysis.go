@@ -2,6 +2,7 @@ package backend
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"fmt"
 	"os"
@@ -74,7 +75,9 @@ func GetMetadataWithFFprobe(filePath string) (*AnalysisResult, error) {
 		"-of", "default=noprint_wrappers=0",
 		filePath,
 	}
-	cmd := exec.Command(ffprobePath, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, ffprobePath, args...)
 	setHideWindow(cmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {

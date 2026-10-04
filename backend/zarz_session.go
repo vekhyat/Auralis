@@ -153,8 +153,6 @@ func zarzAppVersionForProvider(provider string) string {
 		return "qobuz-web@1.1.0"
 	case "amazeamazeamaze":
 		return "amzn@2.2.0"
-	case "dzr":
-		return "deezer@1.3.0"
 	default:
 		return "tidal-web@1.1.0"
 	}
@@ -455,7 +453,7 @@ func runZarzBootstrapLocked(record *zarzSessionRecord, appVersion string) error 
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", zarzUserAgentFor(appVersion))
-	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
+	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(WithDownloadContext(req))
 	if err != nil {
 		return fmt.Errorf("zarz bootstrap failed: %w", err)
 	}
@@ -543,48 +541,23 @@ func completeZarzChallenge(_ *zarzSessionRecord, challenge string) (string, erro
 	query.Set("cb", "auralis://session-grant?cb_version=v2grant&state="+callbackState)
 	parsed.RawQuery = query.Encode()
 
-	communityBrowserMu.RLock()
-	openBrowser := communityBrowserOpen
-	communityBrowserMu.RUnlock()
-
-	// Host the challenge in an embedded browser window owned by Auralis so the
-	// verification flow stays inside the app (and carries Auralis branding).
-	// The page never navigates back on desktop — grants are picked up by the
-	// redelivery poller below, with the protocol handler as a legacy backup.
+	// Host the challenge in an isolated Edge window owned by Auralis. On
+	// Windows the system browser is not used: a failed window is a download
+	// error. Grants still arrive via the redelivery poller and auralis://.
 	stopPoll := make(chan struct{})
 	defer close(stopPoll)
 	go pollZarzChallengeGrant(query.Get("id"), stopPoll)
 
-	windowDone := make(chan struct{})
-	go func() {
-		defer close(windowDone)
-		defer func() {
-			if recovered := recover(); recovered != nil {
-				fmt.Printf("Verification window panic (%v); falling back to the system browser\n", recovered)
-				if openBrowser != nil {
-					openBrowser(parsed.String())
-				}
-			}
-		}()
-		if err := OpenVerificationWindow(parsed.String()); err != nil {
-			fmt.Printf("Embedded verification window unavailable (%v); falling back to the system browser\n", err)
-			if openBrowser == nil {
-				return
-			}
-			openBrowser(parsed.String())
-		}
-	}()
-
-	fmt.Println("Zarz API requires a one-time verification in your browser...")
-	foregroundAuralisWindow()
-
-	grant, err := waitForZarzGrant(zarzVerifyTimeout)
+	fmt.Println("Zarz API requires a one-time verification...")
+	windowErr := startVerificationWindow(parsed.String())
+	grant, err := waitForZarzGrant(zarzVerifyTimeout, watchVerificationWindow(windowErr))
 	CloseVerificationWindow()
-	<-windowDone // ensure the window goroutine has fully unwound
+	drainVerificationWindow(windowErr)
 	if err != nil {
 		return "", err
 	}
 	fmt.Println("Zarz verification grant received")
+	foregroundAuralisWindow()
 	return grant, nil
 }
 
@@ -649,7 +622,7 @@ func exchangeZarzGrant(record *zarzSessionRecord, grant, appVersion string) (*za
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", zarzUserAgentFor(appVersion))
-	resp, err := NewSignedHTTPClient(20 * time.Second).Do(req)
+	resp, err := NewSignedHTTPClient(20 * time.Second).Do(WithDownloadContext(req))
 	if err != nil {
 		return nil, err
 	}
@@ -788,7 +761,7 @@ func doZarzSignedRequest(record *zarzSessionRecord, appVersion, method, requestP
 		req.Header.Set(key, value)
 	}
 
-	resp, err := zarzHTTP.Do(req)
+	resp, err := zarzHTTP.Do(WithDownloadContext(req))
 	if err != nil {
 		return nil, err
 	}

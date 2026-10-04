@@ -110,11 +110,10 @@ func saveQobuzCachedCredentials(creds *qobuzAPICredentials) error {
 		return err
 	}
 
-	if err := os.WriteFile(cachePath, body, 0o644); err != nil {
+	if err := os.WriteFile(cachePath, body, 0o600); err != nil {
 		return fmt.Errorf("failed to write qobuz credentials cache: %w", err)
 	}
-
-	return nil
+	return restrictPrivateFile(cachePath)
 }
 
 func qobuzCredentialsCacheIsFresh(creds *qobuzAPICredentials) bool {

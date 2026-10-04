@@ -4,10 +4,15 @@ import {
     ArrowLeft,
     ArrowRight,
     Bug,
+    Library,
+    Download,
+    History,
+    Settings,
     Ellipsis,
     ExternalLink,
     Minus,
     Square,
+    Usb,
     X,
 } from "lucide-react";
 import { WindowMinimise, WindowToggleMaximise, Quit } from "../../wailsjs/runtime/runtime";
@@ -18,7 +23,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { OmnibarSearch } from "@/components/OmnibarSearch";
 import { openExternal } from "@/lib/utils";
 import { cn } from "@/lib/utils";
-import type { DestinationPage, PageType } from "@/pages";
+import { PRIMARY_DESTINATIONS, type DestinationPage, type PageType } from "@/pages";
 
 const noDrag = { "--wails-draggable": "no-drag" } as React.CSSProperties;
 
@@ -57,23 +62,29 @@ export function TitleBar({ canGoBack = false, canGoForward = false, navigationDi
         openExternal("https://github.com/vekhyat/Auralis/issues");
         handleIssuesDialogChange(false);
     };
-    const destinations: Array<{ page: DestinationPage; label: string; active: boolean; count?: number }> = [
-        { page: "main", label: t("translation.sidebar.library"), active: currentPage === "main" },
-        { page: "queue", label: t("translation.queue.queue"), active: currentPage === "queue", count: queueCount },
-        { page: "history", label: t("translation.sidebar.history"), active: currentPage === "history" },
-        ...(showDevices ? [{ page: "devices" as const, label: t("translation.devices.destination"), active: currentPage === "devices" }] : []),
-        { page: "tools", label: t("translation.sidebar.tools"), active: currentPage.startsWith("audio-") || ["tools", "tempo-key-analyzer", "replaygain", "file-manager", "lyrics-manager", "enrich"].includes(currentPage) },
-        { page: "settings", label: t("translation.sidebar.settings"), active: currentPage === "settings" },
-    ];
+    const destinationLabel: Record<DestinationPage, string> = {
+        main: t("translation.sidebar.library"),
+        queue: t("translation.downloads.title"),
+        history: t("translation.sidebar.history"),
+        devices: t("translation.devices.destination"),
+        settings: t("translation.sidebar.settings"),
+    };
+    const destinationIcons = { main: Library, queue: Download, history: History, devices: Usb, settings: Settings };
+    const destinations = PRIMARY_DESTINATIONS.filter((page) => page !== "devices" || showDevices).map((page) => ({
+        page,
+        label: destinationLabel[page],
+        active: currentPage === page,
+        count: page === "queue" ? queueCount : undefined,
+    }));
     return (<>
       <header
-        className="fixed inset-x-0 top-0 z-40 flex h-11 items-center gap-3 border-b bg-background pr-0 pl-3"
+        className="fixed inset-x-0 top-0 z-40 flex h-16 items-center gap-4 border-b bg-card pr-0 pl-5"
         style={{ "--wails-draggable": "drag" } as React.CSSProperties}
         onDoubleClick={() => WindowToggleMaximise()}
       >
-        <div className="flex shrink-0 items-center gap-2" style={noDrag}>
+        <div className="flex w-[148px] shrink-0 items-center gap-2.5" style={noDrag}>
           <img src="/icon.svg" alt="" className="size-[22px] rounded-[2px]"/>
-          <span className="text-[13px] font-semibold tracking-tight">Auralis</span>
+          <span className="text-lg font-semibold tracking-tight">Auralis</span>
         </div>
 
         <div className="flex h-full shrink-0 items-center gap-0.5" style={noDrag}>
@@ -101,22 +112,24 @@ export function TitleBar({ canGoBack = false, canGoForward = false, navigationDi
           <OmnibarSearch value={omnibar.value} busy={omnibar.loading} onChange={omnibar.onChange} onSubmit={omnibar.onSubmit}/>
         </div>
 
-        <nav className="ml-auto flex h-full shrink-0 items-stretch gap-0.5" style={noDrag} aria-label={t("translation.sidebar.tools")}>
+        <nav className="shell-navigation fixed top-16 bottom-[76px] left-0 flex w-[184px] flex-col gap-1 border-r bg-card p-3 pt-6" style={noDrag} aria-label={t("translation.titleBar.primaryNavigation")}>
           {destinations.map((destination) => (<button
             key={destination.page}
             type="button"
+            aria-current={destination.active ? "page" : undefined}
+            aria-label={destination.label}
             onClick={() => onPageChange(destination.page)}
             className={cn(
-                "relative flex cursor-pointer items-center gap-1.5 px-2.5 text-[12.5px] transition-colors",
+                "relative flex h-11 cursor-pointer items-center gap-3 rounded-lg px-3 text-sm transition-colors",
                 destination.active
-                    ? "font-semibold text-primary after:absolute after:inset-x-2.5 after:bottom-2 after:h-px after:bg-primary"
+                    ? "bg-primary/10 font-semibold text-primary"
                     : "font-medium text-muted-foreground hover:text-foreground",
             )}
           >
-            <span className="whitespace-nowrap">{destination.label}</span>
-            {destination.count ? (<span className="font-mono text-[11px] tabular-nums opacity-80">{destination.count > 99 ? "99+" : destination.count}</span>) : null}
+            <span aria-hidden="true">{(() => { const Icon = destinationIcons[destination.page]; return <Icon className="size-[18px]" />; })()}</span><span className="whitespace-nowrap">{destination.label}</span>
+            {destination.count ? (<span className="ml-auto rounded bg-primary/10 px-1.5 text-xs tabular-nums">{destination.count > 99 ? "99+" : destination.count}</span>) : null}
           </button>))}
-          <Menubar className="border-none bg-transparent shadow-none px-0">
+          <Menubar className="mt-auto border-none bg-transparent shadow-none px-0">
             <MenubarMenu>
               <MenubarTrigger className="size-8 cursor-pointer rounded-[2px] p-0 transition-colors data-[state=open]:bg-muted hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground" aria-label={t("translation.common.more")}>
                 <Ellipsis className="size-4"/>
@@ -144,7 +157,7 @@ export function TitleBar({ canGoBack = false, canGoForward = false, navigationDi
           </Menubar>
         </nav>
 
-        <div className="flex h-full shrink-0 items-stretch" style={noDrag}>
+        <div className="ml-auto flex h-full shrink-0 items-stretch" style={noDrag}>
           <button onClick={() => WindowMinimise()} className="flex w-11 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label={t("translation.titleBar.minimize")}>
             <Minus className="size-3.5"/>
           </button>

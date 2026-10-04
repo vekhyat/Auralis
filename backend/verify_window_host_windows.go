@@ -10,184 +10,228 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// Win32 plumbing for the in-app verification window: a small overlapped window
-// that parents the WebView2 controller, created and pumped on the calling
-// (OS-locked) thread.
+// Win32 chrome for the isolated Edge --app verification window. The previous
+// in-process WebView2 host is intentionally gone: go-webview2 called os.Exit
+// on controller errors and took Auralis down with it.
 
 const (
-	wsOverlappedWindow = 0x00CF0000
-	wsVisible          = 0x10000000
-	wsCaption          = 0x00C00000
-	wsSysMenu          = 0x00080000
-	wsMinimizeBox      = 0x00020000
+	wsCaption        = 0x00C00000
+	wsSysMenu        = 0x00080000
+	wsThickFrame     = 0x00040000
+	wsMinimizeBox    = 0x00020000
+	wsMaximizeBox    = 0x00010000
+	wsExAppWindow    = 0x00040000
+	wsExToolWindow   = 0x00000080
+	wsExNoActivate   = 0x08000000
 
-	swShow = 5
+	swHide    = 0
+	swShow    = 5
+	swRestore = 9
 
-	wmDestroy = 0x0002
+	swpNoActivate   = 0x0010
+	swpFrameChanged = 0x0020
+	gwOwner         = 4
+
+	spiGetWorkArea = 0x0030
+
+	dwmwaBorderColor  = 34
+	dwmwaCaptionColor = 35
+	dwmwaTextColor    = 36
+
 	wmClose   = 0x0010
-
-	classNameAuralisVerify = "AuralisVerifyWindow"
+	wmDestroy = 0x0002
 )
 
-type wndClassEx struct {
-	cbSize        uint32
-	style         uint32
-	lpfnWndProc   uintptr
-	cbClsExtra    int32
-	cbWndExtra    int32
-	hInstance     windows.Handle
-	hIcon         windows.Handle
-	hCursor       windows.Handle
-	hbrBackground windows.Handle
-	lpszMenuName  *uint16
-	lpszClassName *uint16
-	hIconSm       windows.Handle
-}
-
-type msg struct {
-	hwnd     windows.HWND
-	message  uint32
-	wParam   uintptr
-	lParam   uintptr
-	time     uint32
-	pt       struct{ x, y int32 }
-	lPrivate uintptr
+type winRect struct {
+	left, top, right, bottom int32
 }
 
 var (
-	verifyHostMu     sync.Mutex
-	verifyHostProc   uintptr
-	verifyHostClass  bool
-	verifyHostHwnd   windows.HWND
+	verifyChromeMu   sync.Mutex
+	verifyChromeProc uintptr
+	verifyChromeJob  windows.Handle
+	verifyChromeShow bool
+	verifyChromeW    int
+	verifyChromeH    int
+
+	verifyGwlStyle   = int32(-16)
+	verifyGwlExStyle = int32(-20)
 
 	modUser32            = windows.NewLazySystemDLL("user32.dll")
-	procGetModuleHandleW = modUser32.NewProc("GetModuleHandleW")
-	procRegisterClassExW = modUser32.NewProc("RegisterClassExW")
-	procCreateWindowExW  = modUser32.NewProc("CreateWindowExW")
-	procDestroyWindow    = modUser32.NewProc("DestroyWindow")
 	procShowWindow       = modUser32.NewProc("ShowWindow")
 	procSetForegroundWin = modUser32.NewProc("SetForegroundWindow")
-	procDefWindowProcW   = modUser32.NewProc("DefWindowProcW")
-	procGetMessageW      = modUser32.NewProc("GetMessageW")
-	procTranslateMessage = modUser32.NewProc("TranslateMessage")
-	procDispatchMessageW = modUser32.NewProc("DispatchMessageW")
 	procPostMessageW     = modUser32.NewProc("PostMessageW")
 	procIsWindow         = modUser32.NewProc("IsWindow")
+	procGetWindowLongPtr = modUser32.NewProc("GetWindowLongPtrW")
+	procSetWindowLongPtr = modUser32.NewProc("SetWindowLongPtrW")
+	procSetWindowPos     = modUser32.NewProc("SetWindowPos")
+	procSetWindowTextW   = modUser32.NewProc("SetWindowTextW")
+	procSystemParamsInfo = modUser32.NewProc("SystemParametersInfoW")
+	procGetClassNameW    = modUser32.NewProc("GetClassNameW")
+	procGetParent        = modUser32.NewProc("GetParent")
+	procGetWindow        = modUser32.NewProc("GetWindow")
 
-	modKernel32             = windows.NewLazySystemDLL("kernel32.dll")
-	procKernelModuleHandleW = modKernel32.NewProc("GetModuleHandleW")
+	modKernel32 = windows.NewLazySystemDLL("kernel32.dll")
+
+	modDwmapi              = windows.NewLazySystemDLL("dwmapi.dll")
+	procDwmSetWindowAttr   = modDwmapi.NewProc("DwmSetWindowAttribute")
 )
 
-func createVerifyHostWindow(title string) windows.HWND {
-	verifyHostMu.Lock()
-	defer verifyHostMu.Unlock()
-
-	if verifyHostProc == 0 {
-		verifyHostProc = windows.NewCallback(verifyHostWndProc)
+func restyleVerificationJobWindows(job windows.Handle, visible bool, width, height int) {
+	if job == 0 {
+		return
 	}
-	if !verifyHostClass {
-		classNamePtr, err := syscall.UTF16PtrFromString(classNameAuralisVerify)
-		if err != nil {
-			return 0
-		}
-		instance, _, _ := procKernelModuleHandleW.Call(0)
-		var wc wndClassEx
-		wc.cbSize = uint32(unsafe.Sizeof(wc))
-		wc.lpfnWndProc = verifyHostProc
-		wc.hInstance = windows.Handle(instance)
-		wc.lpszClassName = classNamePtr
-		// ERROR_CLASS_ALREADY_EXISTS simply means a previous window round used it.
-		_, _, _ = procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
-		verifyHostClass = true
+	if width <= 0 {
+		width = verificationPopupWidth
 	}
+	if height <= 0 {
+		height = verificationPopupHeight
+	}
+	if verifyChromeProc == 0 {
+		verifyChromeProc = windows.NewCallback(enumVerificationChromeWindow)
+	}
+	verifyChromeMu.Lock()
+	verifyChromeJob = job
+	verifyChromeShow = visible
+	verifyChromeW = width
+	verifyChromeH = height
+	verifyChromeMu.Unlock()
+	_ = windows.EnumWindows(verifyChromeProc, nil)
+	verifyChromeMu.Lock()
+	verifyChromeJob = 0
+	verifyChromeMu.Unlock()
+}
 
-	titlePtr, err := syscall.UTF16PtrFromString(title)
+func enumVerificationChromeWindow(hwnd uintptr, _ uintptr) uintptr {
+	verifyChromeMu.Lock()
+	job := verifyChromeJob
+	visible := verifyChromeShow
+	width := verifyChromeW
+	height := verifyChromeH
+	verifyChromeMu.Unlock()
+	if job == 0 || !hwndBelongsToJob(hwnd, job) || !isVerificationEdgeAppWindow(hwnd) {
+		return 1
+	}
+	applyVerificationWindowChrome(windows.HWND(hwnd), visible, width, height)
+	return 1
+}
+
+func isVerificationEdgeAppWindow(hwnd uintptr) bool {
+	parent, _, _ := procGetParent.Call(hwnd)
+	if parent != 0 {
+		return false
+	}
+	owner, _, _ := procGetWindow.Call(hwnd, gwOwner)
+	if owner != 0 {
+		return false
+	}
+	return isVerificationAppWindowClass(verificationWindowClassName(hwnd))
+}
+
+func verificationWindowClassName(hwnd uintptr) string {
+	var buf [256]uint16
+	n, _, _ := procGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+	if n == 0 || n > uintptr(len(buf)) {
+		return ""
+	}
+	return windows.UTF16ToString(buf[:n])
+}
+
+func hwndBelongsToJob(hwnd uintptr, job windows.Handle) bool {
+	var pid uint32
+	_, _, _ = procGetWindowThreadProcessId.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
+	if pid == 0 {
+		return false
+	}
+	proc, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
 	if err != nil {
-		return 0
+		return false
 	}
-	classNamePtr, err := syscall.UTF16PtrFromString(classNameAuralisVerify)
-	if err != nil {
-		return 0
+	defer windows.CloseHandle(proc)
+	var inJob int32
+	r, _, _ := procIsProcessInJob.Call(uintptr(proc), uintptr(job), uintptr(unsafe.Pointer(&inJob)))
+	return r != 0 && inJob != 0
+}
+
+func applyVerificationWindowChrome(hwnd windows.HWND, visible bool, width, height int) {
+	alive, _, _ := procIsWindow.Call(uintptr(hwnd))
+	if alive == 0 {
+		return
 	}
 
-	const wsExToolWindow = 0x00000080 // keeps the helper window off the taskbar
-	style := uint32(wsOverlappedWindow | wsCaption | wsSysMenu | wsMinimizeBox | wsVisible)
-	instance, _, _ := procKernelModuleHandleW.Call(0)
-	hwnd, _, _ := procCreateWindowExW.Call(
-		uintptr(wsExToolWindow),
-		uintptr(unsafe.Pointer(classNamePtr)),
-		uintptr(unsafe.Pointer(titlePtr)),
-		uintptr(style),
-		^uintptr(0) >> 1, // CW_USEDEFAULT x
-		^uintptr(0) >> 1, // CW_USEDEFAULT y
-		500,              // width — comfortably fits the Turnstile widget
-		640,              // height
-		0, 0,
-		instance,
+	styleIndex := verifyGwlStyle
+	exIndex := verifyGwlExStyle
+	style, _, _ := procGetWindowLongPtr.Call(uintptr(hwnd), uintptr(styleIndex))
+	style &^= uintptr(wsThickFrame | wsMinimizeBox | wsMaximizeBox)
+	style |= uintptr(wsCaption | wsSysMenu)
+	_, _, _ = procSetWindowLongPtr.Call(uintptr(hwnd), uintptr(styleIndex), style)
+
+	ex, _, _ := procGetWindowLongPtr.Call(uintptr(hwnd), uintptr(exIndex))
+	ex |= uintptr(wsExToolWindow)
+	ex &^= uintptr(wsExAppWindow)
+	if visible {
+		ex &^= uintptr(wsExNoActivate)
+	} else {
+		ex |= uintptr(wsExNoActivate)
+	}
+	_, _, _ = procSetWindowLongPtr.Call(uintptr(hwnd), uintptr(exIndex), ex)
+
+	titlePtr, err := syscall.UTF16PtrFromString("Auralis")
+	if err == nil {
+		_, _, _ = procSetWindowTextW.Call(uintptr(hwnd), uintptr(unsafe.Pointer(titlePtr)))
+	}
+	applyDawnCaptionColors(hwnd)
+
+	flags := uintptr(swpFrameChanged)
+	x, y := int32(verificationOffscreenX), int32(verificationOffscreenY)
+	if visible {
+		x, y = centeredVerificationOrigin(width, height)
+	} else {
+		flags |= swpNoActivate
+	}
+	_, _, _ = procSetWindowPos.Call(
+		uintptr(hwnd),
 		0,
+		uintptr(x),
+		uintptr(y),
+		uintptr(width),
+		uintptr(height),
+		flags,
 	)
-	if hwnd == 0 {
-		return 0
-	}
-	verifyHostHwnd = windows.HWND(hwnd)
-	return verifyHostHwnd
-}
-
-func focusVerifyHostWindow(hwnd windows.HWND) {
-	procShowWindow.Call(uintptr(hwnd), swShow)
-	procSetForegroundWin.Call(uintptr(hwnd))
-}
-
-func destroyVerifyHostWindow(hwnd windows.HWND) {
-	verifyHostMu.Lock()
-	verifyHostHwnd = 0
-	verifyHostMu.Unlock()
-	if hwnd != 0 {
-		_, _, _ = procDestroyWindow.Call(uintptr(hwnd))
+	if visible {
+		_, _, _ = procShowWindow.Call(uintptr(hwnd), swRestore)
+		_, _, _ = procSetForegroundWin.Call(uintptr(hwnd))
 	}
 }
 
-func postVerifyHostClose() {
-	verifyHostMu.Lock()
-	hwnd := verifyHostHwnd
-	verifyHostMu.Unlock()
-	if hwnd != 0 {
-		_, _, _ = procPostMessageW.Call(uintptr(hwnd), wmClose, 0, 0)
+func centeredVerificationOrigin(width, height int) (int32, int32) {
+	var work winRect
+	_, _, _ = procSystemParamsInfo.Call(spiGetWorkArea, 0, uintptr(unsafe.Pointer(&work)), 0)
+	areaW := work.right - work.left
+	areaH := work.bottom - work.top
+	if areaW <= 0 || areaH <= 0 {
+		return 80, 80
 	}
+	x := work.left + (areaW-int32(width))/2
+	y := work.top + (areaH-int32(height))/2
+	if x < work.left {
+		x = work.left
+	}
+	if y < work.top {
+		y = work.top
+	}
+	return x, y
 }
 
-// pumpVerifyHostMessages runs until the window receives WM_CLOSE/WM_DESTROY.
-// Must be called on the thread that created the window.
-func pumpVerifyHostMessages(hwnd windows.HWND) {
-	var m msg
-	for {
-		ret, _, _ := procGetMessageW.Call(
-			uintptr(unsafe.Pointer(&m)),
-			uintptr(hwnd),
-			0, 0,
-		)
-		// GetMessageW returns -1 on error and 0 on WM_QUIT.
-		if ret == 0 || ^ret == 0 { // 0 or -1 → stop pumping
-			return
-		}
-		procTranslateMessage.Call(uintptr(unsafe.Pointer(&m)))
-		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
-		if m.message == wmDestroy && (hwnd == 0 || m.hwnd == hwnd) {
-			return
-		}
+func applyDawnCaptionColors(hwnd windows.HWND) {
+	if procDwmSetWindowAttr.Find() != nil {
+		return
 	}
-}
-
-func verifyHostWndProc(hwnd windows.HWND, msg uint32, wParam, lParam uintptr) uintptr {
-	switch msg {
-	case wmDestroy:
-		postQuitMessage()
-		return 0
-	}
-	ret, _, _ := procDefWindowProcW.Call(uintptr(hwnd), uintptr(msg), wParam, lParam)
-	return ret
-}
-
-func postQuitMessage() {
-	modUser32.NewProc("PostQuitMessage").Call(0)
+	caption := uint32(0x00F4F2F1) // #f1f2f4 paper
+	text := uint32(0x00332B26)    // #262b33 ink
+	border := uint32(0x00DCD7D4)
+	hwndVal := uintptr(hwnd)
+	_, _, _ = procDwmSetWindowAttr.Call(hwndVal, dwmwaCaptionColor, uintptr(unsafe.Pointer(&caption)), 4)
+	_, _, _ = procDwmSetWindowAttr.Call(hwndVal, dwmwaTextColor, uintptr(unsafe.Pointer(&text)), 4)
+	_, _, _ = procDwmSetWindowAttr.Call(hwndVal, dwmwaBorderColor, uintptr(unsafe.Pointer(&border)), 4)
 }

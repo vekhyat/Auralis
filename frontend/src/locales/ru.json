@@ -18,7 +18,8 @@
       "week_one": "{{count}} неделя",
       "week_other": "{{count}} недели",
       "year_one": "{{count}} год",
-      "year_other": "{{count}} года"
+      "year_other": "{{count}} года",
+      "ago": "{{value}} назад"
     },
     "album": {
       "fetchMetadataConfirm": "Получить метаданные для этого альбома?"
@@ -35,6 +36,7 @@
       "downloadNow": "Скачать сейчас",
       "downloadPathNotSet": "Путь загрузки не задан",
       "fetchFailed": "Ошибка получения",
+      "pageLoadFailed": "Не удалось загрузить эту страницу.",
       "finalizingSetup": "Завершаем установку",
       "newVersion": "Новая версия",
       "noChangelogProvidedRelease": "Для этого релиза нет списка изменений.",
@@ -207,6 +209,8 @@
       "albumName": "Название альбома",
       "artistZ": "Исполнитель (А-Я)",
       "artistZ2": "Исполнитель (Я-А)",
+      "more": "Ещё",
+      "back": "Назад",
       "audioConverter": "Аудиоконвертер",
       "audioQualityAnalyzer": "Анализ качества аудио",
       "bpmKeyAnalyzer": "Анализатор BPM и тональности",
@@ -413,6 +417,26 @@
     "header": {
       "tagline": "Получайте треки Spotify в настоящем формате FLAC от Tidal, Qobuz и Amazon Music — учетная запись не требуется.",
       "reload": "Перезагрузить Auralis"
+    },
+    "omnibar": {
+      "placeholder": "Вставьте ссылку или ищите треки, альбомы, исполнителей и плейлисты"
+    },
+    "catalog": {
+      "emptyHint": "Вставьте ссылку на стриминг выше или введите запрос. Результаты открываются как каталог; выберите запись, чтобы изучить её.",
+      "recentFetches": "Недавние запросы",
+      "recentSearches": "Недавние поиски",
+      "remove": "Убрать",
+      "resultsFor": "Результаты",
+      "selectToInspect": "Выберите запись, чтобы изучить её здесь.",
+      "fetchLossless": "Получить без потерь",
+      "owner": "Владелец",
+      "followers": "Подписчики",
+      "listeners": "Слушатели",
+      "rank": "Место",
+      "genres": "Жанры",
+      "verified": "Подтверждён",
+      "discography": "Дискография",
+      "chooseTracks": "Choose tracks"
     },
     "history": {
       "clearDownloadHistory": "Очистить историю загрузок?",
@@ -631,6 +655,7 @@
     "sidebar": {
       "reportBugsRequestFeatures": "Сообщить об ошибках или запросить функции",
       "home": "Главная",
+      "library": "Библиотека",
       "important": "Важно",
       "tools": "Инструменты",
       "cancel": "Отмена",
@@ -797,7 +822,15 @@
       "minimize": "Свернуть",
       "network": "Сеть",
       "website": "Веб‑сайт",
+      "primaryNavigation": "Основная навигация",
       "blockedBySpotify": "(Заблокировано Spotify)"
+    },
+    "apiStatus": {
+      "online": "В сети",
+      "offline": "Не в сети",
+      "checking": "Проверка",
+      "idle": "Ожидание",
+      "extendedSources": "Дополнительные источники"
     },
     "trackInfo": {
       "recordLabel": "Лейбл",
@@ -1217,6 +1250,46 @@
       "extractFailed_one": "Не удалось извлечь файл {{count}}.",
       "exists_one": "Файл {{count}} .lrc уже существует."
     },
+    "downloads": {
+      "title": "Downloads",
+      "download": "Download",
+      "downloadSelected": "Download selected ({{value1}})",
+      "requested": "In downloads",
+      "added": "{{name}} added to downloads",
+      "addedPaused": "{{name}} added · downloads are paused",
+      "trackCount": "{{count}} tracks",
+      "trackCount_one": "{{count}} track",
+      "ready": "Ready when you are",
+      "autoHint": "Downloads start automatically. Keep exploring while we take care of the files.",
+      "downloading": "Downloading",
+      "waitingResume": "Waiting for you to resume",
+      "cancelCurrent": "Cancel current download",
+      "pausedHint": "Downloads are paused. New requests will wait until you resume.",
+      "empty": "Your next download starts here",
+      "emptyHint": "Find a track, album, or playlist in your library and choose Download.",
+      "findMusic": "Find music",
+      "libraryTitle": "Your music, ready to keep.",
+      "libraryHint": "Find a favorite. Explore the artwork and track list. Download it in one click.",
+      "emptyLibrary": "Start with something you love",
+      "emptyLibraryHint": "Paste a Spotify link or search for an artist, album, or track above. Your recently explored music will appear here.",
+      "checkSources": "Check download sources",
+      "cancelRequest": "Remove from downloads",
+      "saved": "Saved to your music folder",
+      "needsAttention": "Open Downloads to review this request",
+      "selectAll": "Select all displayed tracks",
+      "selectTrack": "Select {{name}} by {{artist}}",
+      "waitingCount": "{{count}} requests waiting",
+      "waitingCount_one": "{{count}} request waiting",
+      "quality": "Quality",
+      "qualityHint": "Choose the file for new downloads. If that quality is not available, the next best file is saved.",
+      "couldntGet": "Couldn't save this",
+      "couldntSave": "This one did not save. Try again in a moment.",
+      "tryAgain": "Try again",
+      "settingUp": "Setting up",
+      "ffmpegNeed": "Auralis needs an audio tool before it can save files.",
+      "couldntOpen": "Не удалось открыть",
+      "couldntOpenHint": "Ссылка не загрузилась. Повторите попытку чуть позже."
+    },
     "devices": {
       "destination": "Устройства",
       "title": "Устройства",
@@ -1295,6 +1368,8 @@
       "mb": "MB",
       "aiff": "AIFF",
       "amazonMusic": "Amazon Music",
+      "appleMusic": "Apple Music",
+      "jiosaavn": "JioSaavn",
       "deezer": "Deezer",
       "isrc": "ISRC",
       "lrclib": "LRCLIB",
@@ -1383,7 +1458,6 @@
     "fileManager": {
       "titleArtist": "{title} - {artist}"
     },
-
     "platformIcons": {
       "songstats": "Songstats"
     }

@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	pathfilepath "path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	id3v2 "github.com/bogem/id3v2/v2"
 	"github.com/go-flac/flacpicture"
@@ -292,7 +294,9 @@ func extractLyricsWithFFprobe(filePath string) (string, error) {
 		return "", err
 	}
 
-	cmd := exec.Command(ffprobePath,
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, ffprobePath,
 		"-v", "quiet",
 		"-show_entries", "format_tags=lyrics:format_tags=unsyncedlyrics:format_tags=lyric",
 		"-of", "json",
@@ -599,7 +603,9 @@ func getDurationWithFFprobe(filepath string) (float64, error) {
 		return 0, fmt.Errorf("invalid ffprobe executable: %w", err)
 	}
 
-	cmd := exec.Command(ffprobePath,
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, ffprobePath,
 		"-v", "quiet",
 		"-print_format", "json",
 		"-show_format",
@@ -724,7 +730,9 @@ func extractFullMetadataWithFFprobe(filePath string) (Metadata, error) {
 		return metadata, fmt.Errorf("invalid ffprobe executable: %w", err)
 	}
 
-	cmd := exec.Command(ffprobePath,
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, ffprobePath,
 		"-v", "quiet",
 		"-print_format", "json",
 		"-show_format",

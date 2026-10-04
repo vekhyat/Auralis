@@ -1,6 +1,10 @@
 package backend
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"time"
+)
 
 func TestParseZarzGrantFromProtocolURL(t *testing.T) {
 	parsed := parseZarzGrant("auralis://session-grant?cb_version=v2grant&state=abc123&grant=token-value")
@@ -63,5 +67,39 @@ func TestDeliverZarzGrantDropsMismatchAndIdleJunk(t *testing.T) {
 	zarzGrantMu.Unlock()
 	if pending != "" {
 		t.Fatalf("idle protocol junk was stored: %q", pending)
+	}
+}
+
+func TestWaitForZarzGrantDismissUnblocks(t *testing.T) {
+	isolateVerificationHome(t)
+	prev := verificationDismissSettle
+	verificationDismissSettle = 15 * time.Millisecond
+	t.Cleanup(func() {
+		verificationDismissSettle = prev
+		zarzGrantMu.Lock()
+		zarzExpectedState = ""
+		zarzPendingGrant = ""
+		zarzGrantWaiters = nil
+		zarzGrantMu.Unlock()
+	})
+
+	zarzGrantMu.Lock()
+	zarzExpectedState = "expected-state"
+	zarzPendingGrant = ""
+	zarzGrantWaiters = nil
+	zarzGrantMu.Unlock()
+
+	windowErr := make(chan error, 1)
+	windowErr <- errVerificationDismissed
+	start := time.Now()
+	_, err := waitForZarzGrant(30*time.Second, windowErr)
+	if time.Since(start) > time.Second {
+		t.Fatal("dismissed verification must not sit on the five-minute timeout")
+	}
+	if err == nil || !strings.Contains(err.Error(), "closed before it finished") {
+		t.Fatalf("dismiss error = %v", err)
+	}
+	if !IsDownloadCancelledError(err) {
+		t.Fatalf("dismiss must cancel the download: %v", err)
 	}
 }

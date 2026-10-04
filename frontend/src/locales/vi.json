@@ -18,7 +18,8 @@
       "week_one": "{{count}} tuần",
       "week_other": "{{count}} tuần",
       "year_one": "{{count}} năm",
-      "year_other": "{{count}} năm"
+      "year_other": "{{count}} năm",
+      "ago": "{{value}} trước"
     },
     "album": {
       "fetchMetadataConfirm": "Bạn có muốn lấy metadata cho album này không?"
@@ -35,6 +36,7 @@
       "downloadNow": "Tải ngay",
       "downloadPathNotSet": "Chưa đặt đường dẫn tải",
       "fetchFailed": "Không thể lấy dữ liệu",
+      "pageLoadFailed": "Không tải được trang này.",
       "finalizingSetup": "Hoàn tất cài đặt",
       "newVersion": "Phiên bản mới",
       "noChangelogProvidedRelease": "Không có ghi chú thay đổi cho bản phát hành này.",
@@ -207,6 +209,8 @@
       "albumName": "Tên album",
       "artistZ": "Nghệ sĩ (A-Z)",
       "artistZ2": "Nghệ sĩ (Z-A)",
+      "more": "Thêm",
+      "back": "Quay lại",
       "audioConverter": "Trình đổi âm thanh",
       "audioQualityAnalyzer": "Phân tích chất lượng âm thanh",
       "bpmKeyAnalyzer": "Trình phân tích BPM và tông nhạc",
@@ -413,6 +417,26 @@
     "header": {
       "reload": "Tải lại Auralis",
       "tagline": "Nhận các bản nhạc Spotify bằng FLAC thực sự từ Tidal, Qobuz & Amazon Music — không cần tài khoản."
+    },
+    "omnibar": {
+      "placeholder": "Dán một liên kết, hoặc tìm bài hát, album, nghệ sĩ và danh sách phát"
+    },
+    "catalog": {
+      "emptyHint": "Dán một liên kết phát trực tuyến ở trên, hoặc gõ để tìm. Kết quả mở như một danh mục; chọn một mục để xem.",
+      "recentFetches": "Lần lấy dữ liệu gần đây",
+      "recentSearches": "Tìm kiếm gần đây",
+      "remove": "Xóa",
+      "resultsFor": "Kết quả",
+      "selectToInspect": "Chọn một mục để xem tại đây.",
+      "fetchLossless": "Lấy bản lossless",
+      "owner": "Chủ sở hữu",
+      "followers": "Người theo dõi",
+      "listeners": "Người nghe",
+      "rank": "Hạng",
+      "genres": "Thể loại",
+      "verified": "Đã xác minh",
+      "discography": "Tuyển tập",
+      "chooseTracks": "Choose tracks"
     },
     "history": {
       "clearDownloadHistory": "Xóa lịch sử tải xuống?",
@@ -631,6 +655,7 @@
     "sidebar": {
       "reportBugsRequestFeatures": "Báo lỗi hoặc yêu cầu tính năng",
       "home": "Trang chủ",
+      "library": "Thư viện",
       "important": "Quan trọng",
       "tools": "Công cụ",
       "cancel": "Hủy",
@@ -797,7 +822,15 @@
       "minimize": "Thu nhỏ",
       "network": "Mạng",
       "website": "Trang web",
+      "primaryNavigation": "Điều hướng chính",
       "blockedBySpotify": "(Bị Spotify chặn)"
+    },
+    "apiStatus": {
+      "online": "Trực tuyến",
+      "offline": "Ngoại tuyến",
+      "checking": "Đang kiểm tra",
+      "idle": "Chờ",
+      "extendedSources": "Nguồn mở rộng"
     },
     "trackInfo": {
       "recordLabel": "Hãng phát hành",
@@ -1217,6 +1250,46 @@
       "extracted_other": "Các tệp {{count}} được trích xuất{{skipped}}{{failed}}",
       "exists_one": "Tệp {{count}} .lrc đã tồn tại."
     },
+    "downloads": {
+      "title": "Downloads",
+      "download": "Download",
+      "downloadSelected": "Download selected ({{value1}})",
+      "requested": "In downloads",
+      "added": "{{name}} added to downloads",
+      "addedPaused": "{{name}} added · downloads are paused",
+      "trackCount": "{{count}} tracks",
+      "trackCount_one": "{{count}} track",
+      "ready": "Ready when you are",
+      "autoHint": "Downloads start automatically. Keep exploring while we take care of the files.",
+      "downloading": "Downloading",
+      "waitingResume": "Waiting for you to resume",
+      "cancelCurrent": "Cancel current download",
+      "pausedHint": "Downloads are paused. New requests will wait until you resume.",
+      "empty": "Your next download starts here",
+      "emptyHint": "Find a track, album, or playlist in your library and choose Download.",
+      "findMusic": "Find music",
+      "libraryTitle": "Your music, ready to keep.",
+      "libraryHint": "Find a favorite. Explore the artwork and track list. Download it in one click.",
+      "emptyLibrary": "Start with something you love",
+      "emptyLibraryHint": "Paste a Spotify link or search for an artist, album, or track above. Your recently explored music will appear here.",
+      "checkSources": "Check download sources",
+      "cancelRequest": "Remove from downloads",
+      "saved": "Saved to your music folder",
+      "needsAttention": "Open Downloads to review this request",
+      "selectAll": "Select all displayed tracks",
+      "selectTrack": "Select {{name}} by {{artist}}",
+      "waitingCount": "{{count}} requests waiting",
+      "waitingCount_one": "{{count}} request waiting",
+      "quality": "Quality",
+      "qualityHint": "Choose the file for new downloads. If that quality is not available, the next best file is saved.",
+      "couldntGet": "Couldn't save this",
+      "couldntSave": "This one did not save. Try again in a moment.",
+      "tryAgain": "Try again",
+      "settingUp": "Setting up",
+      "ffmpegNeed": "Auralis needs an audio tool before it can save files.",
+      "couldntOpen": "Không thể mở",
+      "couldntOpenHint": "Liên kết này không tải được. Hãy thử lại sau giây lát."
+    },
     "devices": {
       "destination": "Thiết bị",
       "title": "Thiết bị",
@@ -1295,6 +1368,8 @@
       "mb": "MB",
       "aiff": "AIFF",
       "amazonMusic": "Amazon Music",
+      "appleMusic": "Apple Music",
+      "jiosaavn": "JioSaavn",
       "deezer": "Deezer",
       "isrc": "ISRC",
       "lrclib": "LRCLIB",
@@ -1383,7 +1458,6 @@
     "fileManager": {
       "titleArtist": "{title} - {artist}"
     },
-
     "platformIcons": {
       "songstats": "Songstats"
     }

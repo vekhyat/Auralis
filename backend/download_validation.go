@@ -3,6 +3,8 @@ package backend
 import (
 	"fmt"
 	"math"
+	"os"
+	"sync"
 )
 
 const (
@@ -13,12 +15,52 @@ const (
 	durationDiffRatio         = 0.25
 )
 
+var (
+	audioDurationMu sync.Mutex
+	audioDurationFn = GetAudioDuration
+)
+
+func readAudioDuration(filePath string) (float64, error) {
+	audioDurationMu.Lock()
+	fn := audioDurationFn
+	audioDurationMu.Unlock()
+	return fn(filePath)
+}
+
+// SetAudioDurationReaderForTest replaces duration probing for tests that
+// should not shell out to ffprobe. Pass nil to restore the real reader.
+func SetAudioDurationReaderForTest(fn func(string) (float64, error)) {
+	audioDurationMu.Lock()
+	defer audioDurationMu.Unlock()
+	if fn == nil {
+		audioDurationFn = GetAudioDuration
+		return
+	}
+	audioDurationFn = fn
+}
+
+// AcceptExistingMedia reports whether an on-disk file is readable audio that
+// matches expectedSeconds when that duration is known. It never removes the
+// file. A false result means the caller should download rather than skip.
+func AcceptExistingMedia(filePath string, expectedSeconds int) bool {
+	info, err := os.Stat(filePath)
+	if err != nil || info.IsDir() || info.Size() <= 0 {
+		return false
+	}
+	if expectedSeconds > 0 {
+		ok, validationErr := ValidateDownloadedTrackDuration(filePath, expectedSeconds)
+		return validationErr == nil && ok
+	}
+	duration, err := readAudioDuration(filePath)
+	return err == nil && duration > 0
+}
+
 func ValidateDownloadedTrackDuration(filePath string, expectedSeconds int) (bool, error) {
 	if filePath == "" || expectedSeconds <= 0 {
 		return false, nil
 	}
 
-	actualDuration, err := GetAudioDuration(filePath)
+	actualDuration, err := readAudioDuration(filePath)
 	if err != nil || actualDuration <= 0 {
 		if err != nil {
 			return true, fmt.Errorf("downloaded file is not readable audio: %w", err)

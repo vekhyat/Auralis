@@ -87,20 +87,18 @@ export function DevicesPage() {
     const [doctor, setDoctor] = useState<DoctorReport | null>(null);
     const [confirm, setConfirm] = useState<"remove" | "rebuild" | null>(null);
 
-    const load = async () => {
-        try {
-            const list = ((await ListIPods()) || []) as IPod[];
-            setDevices(list);
-            setSelectedId((current) => (list.some((device) => device.id === current) ? current : list[0]?.id || ""));
-        }
-        catch (error) {
-            console.error(error);
-        }
+    const applyDevices = (result: unknown) => {
+        const list = (result || []) as IPod[];
+        setDevices(list);
+        setSelectedId((current) => (list.some((device) => device.id === current) ? current : list[0]?.id || ""));
     };
+    const load = () => ListIPods().then(applyDevices).catch((error) => console.error(error));
 
     useEffect(() => {
-        void load();
-        const timer = window.setInterval(() => void load(), 2000);
+        ListIPods().then(applyDevices).catch((error) => console.error(error));
+        const timer = window.setInterval(() => {
+            ListIPods().then(applyDevices).catch((error) => console.error(error));
+        }, 2000);
         return () => window.clearInterval(timer);
     }, []);
 
@@ -117,15 +115,24 @@ export function DevicesPage() {
     }, []);
 
     const device = devices.find((item) => item.id === selectedId) || null;
+    const deviceId = device?.id;
+    const deviceMode = device?.mode;
+    const deviceKey = device ? `${device.id}:${device.trackCount}:${device.mode}` : "";
+    const [seenDeviceKey, setSeenDeviceKey] = useState(deviceKey);
+    if (deviceKey !== seenDeviceKey) {
+        setSeenDeviceKey(deviceKey);
+        setPicked([]);
+        if (deviceMode !== "stock") {
+            setDoctor(null);
+        }
+    }
 
     useEffect(() => {
-        setPicked([]);
-        if (!device || device.mode !== "stock") {
-            setDoctor(null);
+        if (!deviceId || deviceMode !== "stock") {
             return;
         }
         let cancel = false;
-        DoctorIPod(device.id, "report").then((report) => {
+        DoctorIPod(deviceId, "report").then((report) => {
             if (!cancel) setDoctor(report as DoctorReport);
         }).catch(() => {
             if (!cancel) setDoctor(null);
@@ -133,7 +140,7 @@ export function DevicesPage() {
         return () => {
             cancel = true;
         };
-    }, [device?.id, device?.trackCount, device?.mode]);
+    }, [deviceId, deviceMode, deviceKey]);
 
     const refreshDoctor = async (id: string) => {
         try {

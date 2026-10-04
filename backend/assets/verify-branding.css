@@ -1,5 +1,14 @@
-/* Cosmetic only: hide upstream SpotiFLAC chrome, keep the Turnstile widget. */
-html, body { background: #000 !important; color: #f5f5f5 !important; }
-nav, header, footer, aside, .footer-note, .brand, .tagline, .coffee-button { display: none !important; }
-.hero { padding-top: 48px !important; padding-bottom: 48px !important; }
-iframe[src*="challenges.cloudflare.com"], .cf-turnstile, #cf-turnstile { display: block !important; }
+/* Cosmetic only: paper/slate page, keep the Turnstile widget.
+   Structural chrome is hidden from content.js after keepForCaptcha checks. */
+html, body {
+	background: #f1f2f4 !important;
+	color: #262b33 !important;
+	font-family: "Segoe UI", system-ui, sans-serif !important;
+	margin: 0 !important;
+	min-height: 0 !important;
+}
+.hero, main { padding: 12px 16px !important; min-height: 0 !important; }
+iframe[src*="challenges.cloudflare.com"], .cf-turnstile, #cf-turnstile {
+	display: block !important;
+	visibility: visible !important;
+}

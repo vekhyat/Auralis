@@ -480,15 +480,17 @@ export function ReplayGainPage() {
               {items.map((item) => {
                 const itemResult = item.result?.success ? item.result : null;
                 const statusText = itemResult ? `${formatLoudness(itemResult.integrated_loudness)} · ${formatGain(REPLAYGAIN_TARGET - itemResult.integrated_loudness)}` : item.state === "error" ? translateMessage(item.error || t("translation.replayGain.analysisFailed")) : item.state === "analyzing" ? t("translation.replayGain.analyzing") : t("translation.replayGain.pending");
-                return (<div key={item.path} role="button" tabIndex={0} className={`flex w-full cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors ${activeItem?.path === item.path ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"}`} onClick={() => setActiveSelection(item.path)} onKeyDown={(event) => {
+                return (<div key={item.path} className={`flex w-full items-start gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors ${activeItem?.path === item.path ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"}`}>
+                  <div role="button" tabIndex={0} className="flex min-w-0 flex-1 cursor-pointer items-start gap-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setActiveSelection(item.path)} onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault();
                             setActiveSelection(item.path);
                         }
                     }}>
-                  <div className="mt-0.5 shrink-0">{statusIcon(item.state)}</div>
-                  <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{item.name}</p><p className={`truncate text-xs ${item.state === "error" ? "text-destructive" : "text-muted-foreground"}`}>{statusText}</p><div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground"><span>{formatFileSize(item.size)}</span><span>{item.name.split(".").pop()?.toUpperCase() || t("translation.audioAnalysis.audio")}</span></div></div>
-                  <Button type="button" variant="ghost" size="icon" className="shrink-0" aria-label={t("translation.replayGain.removeFile")} onClick={(event) => { event.stopPropagation(); removeItem(item.path); }} disabled={busy}><X className="h-4 w-4"/></Button>
+                    <div className="mt-0.5 shrink-0">{statusIcon(item.state)}</div>
+                    <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{item.name}</p><p className={`truncate text-xs ${item.state === "error" ? "text-destructive" : "text-muted-foreground"}`}>{statusText}</p><div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground"><span>{formatFileSize(item.size)}</span><span>{item.name.split(".").pop()?.toUpperCase() || t("translation.audioAnalysis.audio")}</span></div></div>
+                  </div>
+                  <Button type="button" variant="ghost" size="icon" className="shrink-0" aria-label={t("translation.replayGain.removeFile")} onClick={(event) => { event.stopPropagation(); removeItem(item.path); }} onKeyDown={(event) => event.stopPropagation()} disabled={busy}><X className="h-4 w-4" aria-hidden="true"/></Button>
                 </div>);
             })}
             </div>

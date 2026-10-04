@@ -1,7 +1,6 @@
 package backend
 
 import (
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -101,7 +100,7 @@ func SanitizeSettingsMap(settings map[string]interface{}) map[string]interface{}
 }
 
 func CleanupLegacyTidalPublicAPIState() error {
-	appDir, err := EnsureAppDir()
+	appDir, err := EnsureAppDataDir()
 	if err != nil {
 		return err
 	}
@@ -112,35 +111,6 @@ func CleanupLegacyTidalPublicAPIState() error {
 	}
 
 	return nil
-}
-
-func SanitizePersistedConfigSettings() error {
-	configPath, err := GetConfigPath()
-	if err != nil {
-		return err
-	}
-
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		return nil
-	}
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return err
-	}
-
-	var settings map[string]interface{}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return err
-	}
-
-	sanitized := SanitizeSettingsMap(FlattenConfigSettings(settings))
-	payload, err := MarshalConfigSettings(sanitized)
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(configPath, payload, 0o644)
 }
 
 func GetDefaultMusicPath() string {
@@ -155,35 +125,12 @@ func GetDefaultMusicPath() string {
 }
 
 func GetConfigPath() (string, error) {
-	dir, err := EnsureAppDir()
+	dir, err := EnsureAppDataDir()
 	if err != nil {
 		return "", err
 	}
 
 	return filepath.Join(dir, "config.json"), nil
-}
-
-func LoadConfigSettings() (map[string]interface{}, error) {
-	configPath, err := GetConfigPath()
-	if err != nil {
-		return nil, err
-	}
-
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		return nil, nil
-	}
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, err
-	}
-
-	var settings map[string]interface{}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return nil, err
-	}
-
-	return SanitizeSettingsMap(FlattenConfigSettings(settings)), nil
 }
 
 func GetRedownloadWithSuffixSetting() bool {
@@ -197,15 +144,6 @@ func GetRedownloadWithSuffixSetting() bool {
 		return false
 	}
 	return enabled
-}
-
-func GetCustomTidalAPISetting() string {
-	settings, err := LoadConfigSettings()
-	if err != nil || settings == nil {
-		return ""
-	}
-
-	return normalizeCustomTidalAPIValue(settings["customTidalApi"])
 }
 
 func normalizeExistingFileCheckMode(value string) string {

@@ -90,6 +90,7 @@ export function FileManagerPage() {
             }
         }
         catch {
+            // Saved rename preferences are optional when storage is unavailable.
         }
         return DEFAULT_CUSTOM_FORMAT;
     });
@@ -118,6 +119,7 @@ export function FileManagerPage() {
             localStorage.setItem(STORAGE_KEY, JSON.stringify({ renameFormat }));
         }
         catch {
+            // Saved rename preferences are optional when storage is unavailable.
         }
     }, [renameFormat]);
     const filterFilesByType = (nodes: FileNode[], type: TabType): FileNode[] => {
@@ -169,7 +171,7 @@ export function FileManagerPage() {
     }, [rootPath]);
     useEffect(() => {
         if (rootPath)
-            loadFiles();
+            void Promise.resolve().then(loadFiles);
     }, [rootPath, loadFiles]);
     const filteredFiles = filterFilesByType(allFiles, activeTab);
     const getAllFilesFlat = (nodes: FileNode[]): FileNode[] => {

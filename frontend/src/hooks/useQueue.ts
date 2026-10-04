@@ -1,14 +1,17 @@
 import { t, translateMessage } from "@/i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { downloadExecution, type DownloadExecutionKind } from "@/lib/download-execution";
+import { planQueueEntry, queueControlApplies, queueRunHaltsBeforeNextItem, singleTrackQueueOutcome, type QueueAttemptDisposition } from "@/lib/queue-guards";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
-import { getNextRunnableQueueItem, getQueue, getQueueItemStatus, getRemainingQueueTracks, mergeQueueTrackFilePaths, mergeQueueTrackResults, subscribeQueue, summarizeQueueTrackResults, updateQueueItem, type QueueExecutionResult, type QueueItem, type QueueItemStatus, type QueueItemType, type QueueResumeContext, type QueueTrackStatus } from "@/lib/queue";
+import { getNextPendingQueueItem, getNextRunnableQueueItem, getQueue, getQueueItemStatus, getRemainingQueueTracks, mergeQueueTrackFilePaths, mergeQueueTrackResults, subscribeQueue, subscribeQueueAutoStart, summarizeQueueTrackResults, updateQueueItem, type QueueExecutionResult, type QueueItem, type QueueItemStatus, type QueueItemType, type QueueResumeContext } from "@/lib/queue";
 import type { TrackMetadata } from "@/types/api";
+import { removeQueueItem } from "@/lib/queue";
 interface QueueDownloadHandlers {
-    handleDownloadTrack: (id: string, trackName?: string, artistName?: string, albumName?: string, spotifyId?: string, playlistName?: string, durationMs?: number, position?: number, albumArtist?: string, releaseDate?: string, coverUrl?: string, spotifyTrackNumber?: number, spotifyDiscNumber?: number, spotifyTotalTracks?: number, spotifyTotalDiscs?: number, copyright?: string, publisher?: string, queueItemId?: string) => Promise<QueueTrackStatus | undefined>;
+    handleDownloadTrack: (id: string, trackName?: string, artistName?: string, albumName?: string, spotifyId?: string, playlistName?: string, durationMs?: number, position?: number, albumArtist?: string, releaseDate?: string, coverUrl?: string, spotifyTrackNumber?: number, spotifyDiscNumber?: number, spotifyTotalTracks?: number, spotifyTotalDiscs?: number, copyright?: string, publisher?: string, queueItemId?: string) => Promise<QueueAttemptDisposition | undefined>;
     handleDownloadAll: (tracks: TrackMetadata[], folderName?: string, isAlbum?: boolean, batchSource?: "playlist" | "album" | "discography" | "collection", queueItemId?: string, resumeContext?: QueueResumeContext) => Promise<QueueExecutionResult | undefined>;
-    handlePauseDownload: () => void;
-    handleResumeDownload: () => void;
-    handleStopDownload: () => void;
+    handlePauseDownload: (owner?: DownloadExecutionKind) => void;
+    handleResumeDownload: (owner?: DownloadExecutionKind) => void;
+    handleStopDownload: (owner?: DownloadExecutionKind) => void;
 }
 function batchSourceFor(item: QueueItem): "playlist" | "album" | "discography" | "collection" {
     if (item.type === "album")
@@ -23,6 +26,8 @@ export function useQueue(download: QueueDownloadHandlers) {
     const [items, setItems] = useState<QueueItem[]>(() => getQueue());
     const [isProcessing, setIsProcessing] = useState(false);
     const [isPausing, setIsPausing] = useState(false);
+    const [isSuspended, setIsSuspended] = useState(() => getQueue().some((item) => item.status === "paused"));
+    const suspendedRef = useRef(isSuspended);
     const [processingType, setProcessingType] = useState<QueueItemType | null>(null);
     const shouldStopRef = useRef(false);
     const shouldPauseRef = useRef(false);
@@ -41,8 +46,8 @@ export function useQueue(download: QueueDownloadHandlers) {
             if (!track?.spotify_id) {
                 throw new Error(t("translation.download.noIdFoundTrack"));
             }
-            const status = await download.handleDownloadTrack(track.spotify_id, track.name, track.artists, track.album_name, track.spotify_id, item.folderName, track.duration_ms, item.position, track.album_artist, track.release_date, track.images, track.track_number, track.disc_number, track.total_tracks, track.total_discs, track.copyright, track.publisher, item.id);
-            result = { trackResults: status ? { [track.spotify_id]: status } : {}, successCount: status === "done" ? 1 : 0, skippedCount: status === "skipped" ? 1 : 0, failedCount: status === "failed" ? 1 : 0, cancelled: status === undefined };
+            const disposition = await download.handleDownloadTrack(track.spotify_id, track.name, track.artists, track.album_name, track.spotify_id, item.folderName, track.duration_ms, item.position, track.album_artist, track.release_date, track.images, track.track_number, track.disc_number, track.total_tracks, track.total_discs, track.copyright, track.publisher, item.id);
+            result = singleTrackQueueOutcome(track.spotify_id, disposition ?? "cancelled");
         }
         else {
             result = await download.handleDownloadAll(remainingTracks, item.folderName, item.isAlbum, batchSourceFor(item), item.id, {
@@ -67,28 +72,58 @@ export function useQueue(download: QueueDownloadHandlers) {
         }
         return status;
     }, [download]);
-    const start = useCallback(async (type?: QueueItemType, itemId?: string) => {
-        if (isProcessingRef.current) {
+    const runQueue = useCallback(async (type: QueueItemType | undefined, itemId: string | undefined, pendingOnly: boolean) => {
+        while (downloadExecution.isBlocked()) {
+            await downloadExecution.whenUnblocked();
+        }
+        const plan = planQueueEntry({
+            pendingOnly,
+            queueBusy: isProcessingRef.current,
+            queuePaused: shouldPauseRef.current || suspendedRef.current,
+            queueStopped: shouldStopRef.current,
+            activeKind: downloadExecution.activeKind(),
+        });
+        if (plan === "defer-auto-start") {
+            downloadExecution.armAutoStart();
             return;
         }
-        const getNextItem = () => itemId
-            ? getQueue().find((item) => item.id === itemId && (item.status === "paused" || item.status === "pending"))
-            : getNextRunnableQueueItem(type);
-        const initialItem = getNextItem();
-        if (!initialItem) {
-            toast.info(t("translation.queue.nothingQueued"));
+        if (plan === "follow-up") {
+            downloadExecution.armFollowUp();
             return;
         }
-        const effectiveType = type ?? (itemId ? initialItem.type : null);
+        if (plan === "ignore")
+            return;
+        const lease = downloadExecution.tryAcquire("queue");
+        if (!lease) {
+            if (pendingOnly)
+                downloadExecution.armAutoStart();
+            return;
+        }
+        const getNextItem = () => {
+            if (itemId) {
+                return getQueue().find((item) => item.id === itemId && (item.status === "paused" || item.status === "pending"));
+            }
+            return pendingOnly ? getNextPendingQueueItem() : getNextRunnableQueueItem(type);
+        };
         isProcessingRef.current = true;
-        shouldStopRef.current = false;
-        shouldPauseRef.current = false;
-        download.handleResumeDownload();
-        processingTypeRef.current = effectiveType;
-        setProcessingType(effectiveType);
-        setIsPausing(false);
-        setIsProcessing(true);
         try {
+            const initialItem = getNextItem();
+            if (!initialItem) {
+                if (!pendingOnly) {
+                    toast.info(t("translation.queue.nothingQueued"));
+                }
+                return;
+            }
+            const effectiveType = type ?? (itemId ? initialItem.type : null);
+            shouldStopRef.current = false;
+            shouldPauseRef.current = false;
+            suspendedRef.current = false;
+            setIsSuspended(false);
+            download.handleResumeDownload("queue");
+            processingTypeRef.current = effectiveType;
+            setProcessingType(effectiveType);
+            setIsPausing(false);
+            setIsProcessing(true);
             for (let item: QueueItem | undefined = initialItem; item; item = itemId ? undefined : getNextItem()) {
                 if (shouldStopRef.current || shouldPauseRef.current) {
                     break;
@@ -98,6 +133,12 @@ export function useQueue(download: QueueDownloadHandlers) {
                 try {
                     const status = await runItem(item);
                     updateQueueItem(item.id, { status });
+                    if (queueRunHaltsBeforeNextItem(status) || downloadExecution.isPauseRequested()) {
+                        shouldPauseRef.current = true;
+                        suspendedRef.current = true;
+                        setIsSuspended(true);
+                        setIsPausing(true);
+                    }
                 }
                 catch (err) {
                     const message = translateMessage(err instanceof Error ? err.message : String(err));
@@ -106,21 +147,33 @@ export function useQueue(download: QueueDownloadHandlers) {
                 finally {
                     activeItemRef.current = null;
                 }
+                if (shouldStopRef.current) {
+                    // Remove only after the transfer has settled and released its
+                    // running status. Keep later requests for explicit resume.
+                    updateQueueItem(item.id, { status: "paused" });
+                    removeQueueItem(item.id);
+                }
                 if (shouldStopRef.current || shouldPauseRef.current) {
                     break;
                 }
             }
         }
         finally {
-            if (shouldPauseRef.current && !shouldStopRef.current) {
+            const paused = shouldPauseRef.current;
+            const stopped = shouldStopRef.current;
+            if (paused || stopped) {
+                // Persist the hold on the next request so a restart still waits
+                // for an explicit Resume after a pause or a cancel.
                 const nextItem = getNextItem();
                 if (nextItem) {
                     if (nextItem.status === "pending") {
                         updateQueueItem(nextItem.id, { status: "paused" });
                     }
-                    toast.info(t("translation.queue.pauseCompleted"));
+                    if (!stopped)
+                        toast.info(t("translation.queue.pauseCompleted"));
                 }
             }
+            const followAdded = downloadExecution.consumeFollowUp(paused, stopped);
             isProcessingRef.current = false;
             processingTypeRef.current = null;
             activeItemRef.current = null;
@@ -129,29 +182,51 @@ export function useQueue(download: QueueDownloadHandlers) {
             setProcessingType(null);
             shouldStopRef.current = false;
             shouldPauseRef.current = false;
+            downloadExecution.release(lease);
+            if (followAdded) {
+                queueMicrotask(() => {
+                    void runQueue(undefined, undefined, true);
+                });
+            }
         }
     }, [download, runItem]);
+    const start = useCallback((type?: QueueItemType, itemId?: string) => runQueue(type, itemId, false), [runQueue]);
+    useEffect(() => subscribeQueueAutoStart(() => {
+        void runQueue(undefined, undefined, true);
+    }), [runQueue]);
+    useEffect(() => downloadExecution.subscribe((event) => {
+        if (event.autoStart)
+            void runQueue(undefined, undefined, true);
+    }), [runQueue]);
     const startItem = useCallback((itemId: string) => start(undefined, itemId), [start]);
     const pause = useCallback((type?: QueueItemType) => {
         if (!isProcessingRef.current || shouldPauseRef.current)
             return;
-        if (type !== undefined && processingTypeRef.current !== null && processingTypeRef.current !== type)
+        if (!queueControlApplies(processingTypeRef.current, type))
+            return;
+        if (downloadExecution.activeKind() !== "queue")
             return;
         shouldPauseRef.current = true;
+        suspendedRef.current = true;
+        setIsSuspended(true);
         setIsPausing(true);
         if (activeItemRef.current?.type !== "track") {
-            download.handlePauseDownload();
+            download.handlePauseDownload("queue");
         }
     }, [download]);
     const stop = useCallback((type?: QueueItemType) => {
         if (!isProcessingRef.current)
             return;
-        if (type !== undefined && processingTypeRef.current !== null && processingTypeRef.current !== type)
+        if (!queueControlApplies(processingTypeRef.current, type))
+            return;
+        if (downloadExecution.activeKind() !== "queue")
             return;
         shouldStopRef.current = true;
+        suspendedRef.current = true;
+        setIsSuspended(true);
         shouldPauseRef.current = false;
         setIsPausing(false);
-        download.handleStopDownload();
+        download.handleStopDownload("queue");
     }, [download]);
-    return { items, isProcessing, isPausing, processingType, start, startItem, pause, stop };
+    return { items, isProcessing, isPausing, isSuspended, processingType, start, startItem, pause, stop };
 }

@@ -3,6 +3,9 @@ package backend
 import (
 	"archive/tar"
 	"archive/zip"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 
 	"fmt"
@@ -64,27 +67,6 @@ func ValidateExecutable(path string) error {
 	}
 
 	return nil
-}
-
-func GetAppDir() (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
-	}
-	return filepath.Join(homeDir, ".auralis"), nil
-}
-
-func EnsureAppDir() (string, error) {
-	appDir, err := GetAppDir()
-	if err != nil {
-		return "", err
-	}
-
-	if err := os.MkdirAll(appDir, 0o755); err != nil {
-		return "", fmt.Errorf("failed to create app directory: %w", err)
-	}
-
-	return appDir, nil
 }
 
 func GetFFmpegDir() (string, error) {
@@ -179,7 +161,9 @@ func resolveSystemExecutable(executableName string) string {
 }
 
 func runExecutableVersionCheck(path string) error {
-	cmd := exec.Command(path, "-version")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, "-version")
 	setHideWindow(cmd)
 	return cmd.Run()
 }
@@ -394,6 +378,102 @@ type githubRelease struct {
 	TagName    string `json:"tag_name"`
 	Draft      bool   `json:"draft"`
 	Prerelease bool   `json:"prerelease"`
+	Assets     []struct {
+		Name   string `json:"name"`
+		Digest string `json:"digest"`
+	} `json:"assets"`
+}
+
+func fetchFFmpegAssetDigest(downloadURL string) (string, error) {
+	if !strings.HasPrefix(downloadURL, ffmpegReleaseDownloadURL+"/") {
+		return "", fmt.Errorf("unsupported FFmpeg release URL")
+	}
+	parts := strings.Split(strings.TrimPrefix(downloadURL, ffmpegReleaseDownloadURL+"/"), "/")
+	if len(parts) != 2 {
+		return "", fmt.Errorf("invalid FFmpeg release asset URL")
+	}
+	tag, err := url.PathUnescape(parts[0])
+	if err != nil {
+		return "", err
+	}
+	asset, err := url.PathUnescape(parts[1])
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ffmpegReleasesAPIURL+"/tags/"+url.PathEscape(tag), nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "Auralis")
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return "", fmt.Errorf("fetch FFmpeg checksum: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("fetch FFmpeg checksum: HTTP %d", resp.StatusCode)
+	}
+	var release githubRelease
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&release); err != nil {
+		return "", err
+	}
+	for _, candidate := range release.Assets {
+		if candidate.Name == asset {
+			digest := strings.TrimPrefix(candidate.Digest, "sha256:")
+			decoded, decodeErr := hex.DecodeString(digest)
+			if !strings.HasPrefix(candidate.Digest, "sha256:") || decodeErr != nil || len(decoded) != sha256.Size {
+				return "", fmt.Errorf("FFmpeg asset %s has no valid SHA-256 checksum", asset)
+			}
+			return strings.ToLower(digest), nil
+		}
+	}
+	return "", fmt.Errorf("FFmpeg asset %s was not found in the release", asset)
+}
+
+func verifyFFmpegArchive(path, expectedDigest string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return err
+	}
+	if hex.EncodeToString(hash.Sum(nil)) != expectedDigest {
+		return fmt.Errorf("FFmpeg archive checksum mismatch; installation was cancelled")
+	}
+	return nil
+}
+
+func installArchivedExecutable(destPath string, source io.Reader) error {
+	file, err := os.CreateTemp(filepath.Dir(destPath), ".auralis-executable-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(file.Name())
+	defer file.Close()
+	const maximumExecutableSize = 256 << 20
+	written, err := io.Copy(file, io.LimitReader(source, maximumExecutableSize+1))
+	if err != nil {
+		return err
+	}
+	if written == 0 || written > maximumExecutableSize {
+		return fmt.Errorf("invalid extracted executable size")
+	}
+	if err := file.Sync(); err != nil {
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	if err := prepareExecutableForUse(file.Name()); err != nil {
+		return err
+	}
+	return os.Rename(file.Name(), destPath)
 }
 
 func getLatestFFmpegReleaseTag() (string, error) {
@@ -541,6 +621,10 @@ func downloadWithFallback(urls []string, destDir string, progressCallback func(i
 }
 
 func downloadAndExtract(url, destDir string, progressCallback func(int), progressStart, progressEnd int) error {
+	expectedDigest, err := fetchFFmpegAssetDigest(url)
+	if err != nil {
+		return err
+	}
 
 	tmpFile, err := os.CreateTemp("", "ffmpeg-*")
 	if err != nil {
@@ -549,8 +633,10 @@ func downloadAndExtract(url, destDir string, progressCallback func(int), progres
 	defer os.Remove(tmpFile.Name())
 	defer tmpFile.Close()
 
-	client := &http.Client{}
-	req, err := http.NewRequest("GET", url, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	client := &http.Client{Timeout: 5 * time.Minute}
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -587,6 +673,9 @@ func downloadAndExtract(url, destDir string, progressCallback func(int), progres
 				return fmt.Errorf("failed to write to temp file: %w", writeErr)
 			}
 			downloaded += int64(n)
+			if downloaded > 128<<20 {
+				return fmt.Errorf("FFmpeg archive exceeds the download size limit")
+			}
 
 			mbDownloaded := float64(downloaded) / (1024 * 1024)
 			now := time.Now()
@@ -636,7 +725,12 @@ func downloadAndExtract(url, destDir string, progressCallback func(int), progres
 		}
 	}
 
-	tmpFile.Close()
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+	if err := verifyFFmpegArchive(tmpFile.Name(), expectedDigest); err != nil {
+		return err
+	}
 
 	if totalSize > 0 {
 		fmt.Printf("\r[FFmpeg] Download complete: %.2f MB / %.2f MB (100%%)          \n",
@@ -697,15 +791,8 @@ func extractZip(zipPath, destDir string) error {
 			return fmt.Errorf("failed to open file in zip: %w", err)
 		}
 
-		outFile, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
-		if err != nil {
-			rc.Close()
-			return fmt.Errorf("failed to create output file: %w", err)
-		}
-
-		_, err = io.Copy(outFile, rc)
+		err = installArchivedExecutable(destPath, rc)
 		rc.Close()
-		outFile.Close()
 
 		if err != nil {
 			return fmt.Errorf("failed to extract file: %w", err)
@@ -780,13 +867,7 @@ func extractTarXz(tarXzPath, destDir string) error {
 
 		fmt.Printf("[FFmpeg] Found: %s\n", header.Name)
 
-		outFile, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
-		if err != nil {
-			return fmt.Errorf("failed to create output file: %w", err)
-		}
-
-		_, err = io.Copy(outFile, tarReader)
-		outFile.Close()
+		err = installArchivedExecutable(destPath, tarReader)
 
 		if err != nil {
 			return fmt.Errorf("failed to extract file: %w", err)

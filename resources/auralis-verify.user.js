@@ -28,6 +28,23 @@
 
 	const TITLE_RE = /SpotiFLAC/i;
 	const TEXT_RE = /SpotiFLAC(?:-Mobile)?/g;
+	const AURALIS_ICON = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#f1f2f4"/><rect x="7" y="7" width="50" height="50" fill="none" stroke="#262b33" stroke-width="2"/><rect x="18" y="21" width="17" height="2.5" fill="#262b33"/><rect x="15" y="30.75" width="34" height="2.5" fill="#27506f"/><rect x="21" y="40.5" width="22" height="2.5" fill="#262b33"/></svg>');
+
+	function replaceFavicon() {
+		const head = document.head || document.documentElement;
+		document.querySelectorAll('link[rel*="icon"], link[rel="apple-touch-icon"]').forEach((node) => {
+			if (node.id !== "auralis-favicon") node.remove();
+		});
+		let icon = document.getElementById("auralis-favicon");
+		if (!icon) {
+			icon = document.createElement("link");
+			icon.id = "auralis-favicon";
+			icon.rel = "icon";
+			icon.type = "image/svg+xml";
+			head.appendChild(icon);
+		}
+		icon.setAttribute("href", AURALIS_ICON);
+	}
 
 	function injectStyle() {
 		const el = document.createElement("style");
@@ -66,20 +83,24 @@
 		scheduled = true;
 		requestAnimationFrame(() => {
 			scheduled = false;
+			replaceFavicon();
 			cleanTitle();
 			scrubText(document.body);
 		});
 	});
 
 	injectStyle();
+	replaceFavicon();
 	observer.observe(document, { childList: true, subtree: true });
 
 	if (document.readyState === "loading") {
 		document.addEventListener("DOMContentLoaded", () => {
+			replaceFavicon();
 			cleanTitle();
 			scrubText(document.body);
 		});
 	} else {
+		replaceFavicon();
 		cleanTitle();
 		scrubText(document.body);
 	}
