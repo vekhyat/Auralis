@@ -20,24 +20,41 @@ type LibraryFilter func(LibraryLookup) bool
 
 // Item is one suggestion card on a shelf.
 type Item struct {
-	ID        string  `json:"id"` // fingerprint used for dismissals
-	Kind      string  `json:"kind"` // "track" | "album" | "artist"
-	Title     string  `json:"title"`
-	Artist    string  `json:"artist"`
-	Album     string  `json:"album,omitempty"`
-	Image     string  `json:"image,omitempty"`
-	SpotifyID string  `json:"spotify_id,omitempty"`
-	AlbumID   string  `json:"album_id,omitempty"`
-	ArtistID  string  `json:"artist_id,omitempty"`
-	ISRC      string  `json:"isrc,omitempty"`
-	Reason    string  `json:"reason"`
-	Score     float64 `json:"score"`
+	ID        string `json:"id"`   // fingerprint used for dismissals
+	Kind      string `json:"kind"` // "track" | "album" | "artist"
+	Title     string `json:"title"`
+	Artist    string `json:"artist"`
+	Album     string `json:"album,omitempty"`
+	Image     string `json:"image,omitempty"`
+	SpotifyID string `json:"spotify_id,omitempty"`
+	AlbumID   string `json:"album_id,omitempty"`
+	ArtistID  string `json:"artist_id,omitempty"`
+	ISRC      string `json:"isrc,omitempty"`
+	// Reason is English text for logs; the UI renders ReasonCode (with
+	// ReasonArg) through i18n.
+	Reason     string  `json:"reason"`
+	ReasonCode string  `json:"reason_code"`
+	ReasonArg  string  `json:"reason_arg,omitempty"`
+	Score      float64 `json:"score"`
 }
 
-// Shelf is a named row of items.
+// Reason codes rendered by the UI.
+const (
+	ReasonSavedSpotify = "saved_spotify"
+	ReasonLovedLastFM  = "loved_lastfm"
+	ReasonPlaysALot    = "plays_a_lot"
+	ReasonSavedAlbum   = "saved_album"
+	ReasonLikedTracks  = "liked_tracks" // arg: track count
+	ReasonSimilarTo    = "similar_to"   // arg: seed artist
+	ReasonMissingAlbum = "missing_album"
+)
+
+// Shelf is a named row of items. The UI titles shelves by ID; Seed names
+// the artist a "similar artists" shelf is based on.
 type Shelf struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
+	Seed  string `json:"seed,omitempty"`
 	Items []Item `json:"items"`
 }
 
@@ -173,15 +190,15 @@ func likedNotDownloaded(events []TasteEvent, profile Profile) []Item {
 				continue
 			}
 			seen[id] = true
-			reason := "You saved this on Spotify"
+			reason, code := "You saved this on Spotify", ReasonSavedSpotify
 			if e.Kind == KindLoved {
-				reason = "You loved this on Last.fm"
+				reason, code = "You loved this on Last.fm", ReasonLovedLastFM
 			} else if e.Kind == KindTopTrack {
-				reason = "You play this a lot"
+				reason, code = "You play this a lot", ReasonPlaysALot
 			}
 			items = append(items, Item{
 				ID: id, Kind: "track", Title: e.Title, Artist: e.Artist, Album: e.Album,
-				Image: e.Image, SpotifyID: e.SpotifyID, ISRC: e.ISRC, Reason: reason,
+				Image: e.Image, SpotifyID: e.SpotifyID, ISRC: e.ISRC, Reason: reason, ReasonCode: code,
 				Score: profile.CoreArtists[Normalise(e.Artist)] + 1,
 			})
 		case KindSaveAlbum:
@@ -198,7 +215,7 @@ func likedNotDownloaded(events []TasteEvent, profile Profile) []Item {
 			seen[id] = true
 			items = append(items, Item{
 				ID: id, Kind: "album", Title: e.Album, Artist: e.Artist, Album: e.Album,
-				Image: e.Image, AlbumID: e.AlbumID, Reason: "You saved this album",
+				Image: e.Image, AlbumID: e.AlbumID, Reason: "You saved this album", ReasonCode: ReasonSavedAlbum,
 				Score: profile.CoreArtists[Normalise(e.Artist)] + 1,
 			})
 		}
@@ -257,14 +274,16 @@ func finishAlbums(events []TasteEvent, profile Profile, belongsToLibrary Library
 		}
 		score := profile.CoreAlbums[Normalise(agg.artist)+"|"+Normalise(agg.album)] + float64(len(agg.tracks))
 		items = append(items, Item{
-			ID:      fingerprint("album", "", agg.artist, agg.album, ""),
-			Kind:    "album",
-			Title:   agg.album,
-			Artist:  agg.artist,
-			Image:   agg.image,
-			AlbumID: agg.albumID,
-			Reason:  reasonAlbum(len(agg.tracks)),
-			Score:   score,
+			ID:         fingerprint("album", "", agg.artist, agg.album, ""),
+			Kind:       "album",
+			Title:      agg.album,
+			Artist:     agg.artist,
+			Image:      agg.image,
+			AlbumID:    agg.albumID,
+			Reason:     reasonAlbum(len(agg.tracks)),
+			ReasonCode: ReasonLikedTracks,
+			ReasonArg:  itoa(len(agg.tracks)),
+			Score:      score,
 		})
 	}
 	return items
@@ -314,12 +333,14 @@ func similarArtistCandidates(candidates []SimilarArtist, seedArtist string, even
 			continue
 		}
 		items = append(items, Item{
-			ID:     id,
-			Kind:   "artist",
-			Title:  c.Name,
-			Artist: c.Name,
-			Reason: "Similar to " + strings.TrimSpace(seedArtist),
-			Score:  c.Match * 10 - float64(i)*0.01,
+			ID:         id,
+			Kind:       "artist",
+			Title:      c.Name,
+			Artist:     c.Name,
+			Reason:     "Similar to " + strings.TrimSpace(seedArtist),
+			ReasonCode: ReasonSimilarTo,
+			ReasonArg:  strings.TrimSpace(seedArtist),
+			Score:      c.Match*10 - float64(i)*0.01,
 		})
 	}
 	return items
@@ -333,14 +354,15 @@ func discographyGapItems(artist string, albums []GapAlbum, profile Profile) []It
 			continue
 		}
 		items = append(items, Item{
-			ID:      "album:" + a.ID,
-			Kind:    "album",
-			Title:   a.Name,
-			Artist:  artist,
-			Image:   a.Image,
-			AlbumID: a.ID,
-			Reason:  "Missing from your library: album by " + artist,
-			Score:   profile.CoreArtists[Normalise(artist)] + 0.5,
+			ID:         "album:" + a.ID,
+			Kind:       "album",
+			Title:      a.Name,
+			Artist:     artist,
+			Image:      a.Image,
+			AlbumID:    a.ID,
+			Reason:     "Missing from your library: album by " + artist,
+			ReasonCode: ReasonMissingAlbum,
+			Score:      profile.CoreArtists[Normalise(artist)] + 0.5,
 		})
 	}
 	return items

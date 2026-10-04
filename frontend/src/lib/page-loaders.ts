@@ -17,3 +17,7 @@ export function loadQueuePage() {
 export function loadDevicesPage() {
     return import("@/components/DevicesPage").then((module) => ({ default: module.DevicesPage }));
 }
+
+export function loadForYouPage() {
+    return import("@/components/ForYouPage").then((module) => ({ default: module.ForYouPage }));
+}

@@ -22,21 +22,21 @@ type SyncProgress struct {
 
 // Settings is what the UI shows about connections (never tokens).
 type Settings struct {
-	ForYouEnabled     bool   `json:"for_you_enabled"`
-	SpotifyClientID   string `json:"spotify_client_id"`
+	ForYouEnabled   bool   `json:"for_you_enabled"`
+	SpotifyClientID string `json:"spotify_client_id"`
 	// SpotifyRedirectURI is shown in the setup guide.
 	SpotifyRedirectURI string `json:"spotify_redirect_uri"`
-	SpotifyConnected  bool   `json:"spotify_connected"`
-	LastFMUsername    string `json:"lastfm_username"`
-	LastFMConfigured  bool   `json:"lastfm_configured"`
-	LastSync          string `json:"last_sync"`
-	EventCount        int    `json:"event_count"`
+	SpotifyConnected   bool   `json:"spotify_connected"`
+	LastFMUsername     string `json:"lastfm_username"`
+	LastFMConfigured   bool   `json:"lastfm_configured"`
+	LastSync           string `json:"last_sync"`
+	EventCount         int    `json:"event_count"`
 }
 
 // Service owns the taste store and fans out over the configured sources.
 type Service struct {
-	Store  *Store
-	Creds  *credentials.Store
+	Store   *Store
+	Creds   *credentials.Store
 	Spotify *SpotifyAPISource
 	LastFM  *LastFMSource
 
@@ -102,7 +102,7 @@ func (s *Service) SetForYouEnabled(enabled bool) error {
 }
 
 func (s *Service) SetSpotifyClientID(id string) error { return s.Spotify.SetClientID(id) }
-func (s *Service) DisconnectSpotify() error          { return s.Spotify.Disconnect() }
+func (s *Service) DisconnectSpotify() error           { return s.Spotify.Disconnect() }
 func (s *Service) SetLastFMCredentials(apiKey, username string) error {
 	return s.LastFM.SetCredentials(apiKey, username)
 }
@@ -179,14 +179,14 @@ func (s *Service) runSync(ctx context.Context, progress func(SyncProgress)) {
 	current := 0
 	for _, src := range sources {
 		if ctx.Err() != nil {
-			report(SyncProgress{Phase: "error", Error: ctx.Err().Error(), Done: true})
+			report(SyncProgress{Phase: "cancelled", Done: true})
 			return
 		}
 		report(SyncProgress{Phase: src.ID(), Message: "Pulling " + src.ID(), Current: current, Total: total})
 		events, err := src.Pull(ctx, time.Time{})
 		if err != nil {
 			if ctx.Err() != nil {
-				report(SyncProgress{Phase: "error", Error: ctx.Err().Error(), Done: true})
+				report(SyncProgress{Phase: "cancelled", Done: true})
 				return
 			}
 			// A failing source drops out but does not break the profile.
@@ -367,14 +367,19 @@ func (s *Service) GetShelves(ctx context.Context) ([]Shelf, error) {
 	}
 	shelf4 := finalise(gapItems, fb, ownership{albums: s.AlbumOwned})
 
-	title3 := "Because you listen to X"
-	if len(similar) > 0 && similar[0].seed != "" {
-		title3 = "Because you listen to " + similar[0].seed
+	title3, seed := "Similar artists", ""
+	if len(similar) > 1 {
+		seed = similar[0].seed + ", " + similar[1].seed
+	} else if len(similar) == 1 {
+		seed = similar[0].seed
+	}
+	if seed != "" {
+		title3 = "Because you listen to " + seed
 	}
 	return []Shelf{
 		{ID: "liked-not-downloaded", Title: "Liked, not downloaded", Items: shelf1},
 		{ID: "finish-albums", Title: "Finish these albums", Items: shelf2},
-		{ID: "similar-artists", Title: title3, Items: shelf3},
+		{ID: "similar-artists", Title: title3, Seed: seed, Items: shelf3},
 		{ID: "discography-gaps", Title: "Discography gaps", Items: shelf4},
 	}, nil
 }
@@ -530,6 +535,8 @@ func (s *Service) Summary() (Summary, error) {
 	if v, ok := s.Store.GetMeta("last_sync"); ok {
 		sum.LastSync = v
 	}
+	if fb, err := s.Store.GetFeedback(); err == nil {
+		sum.PinnedArtists = append(sum.PinnedArtists, fb.PinnedArtists...)
+	}
 	return sum, nil
 }
-

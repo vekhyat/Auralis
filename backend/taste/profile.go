@@ -20,18 +20,18 @@ type Affinity map[string]float64
 // Profile is the derived view over raw events. Artists/albums/tracks/genres
 // each carry a Core (long τ) and Current (short τ) affinity map.
 type Profile struct {
-	ComputedAt     time.Time `json:"computed_at"`
-	CoreArtists    Affinity  `json:"core_artists"`
-	CoreAlbums     Affinity  `json:"core_albums"`
-	CoreTracks     Affinity  `json:"core_tracks"`
-	CurrentArtists Affinity  `json:"current_artists"`
-	CurrentAlbums  Affinity  `json:"current_albums"`
-	CurrentTracks  Affinity  `json:"current_tracks"`
-	CoreGenres      Affinity  `json:"core_genres"`
-	CurrentGenres   Affinity  `json:"current_genres"`
-	PinnedArtists   []string  `json:"pinned_artists,omitempty"`
-	BannedArtists   []string  `json:"banned_artists,omitempty"`
-	ArtistNames     map[string]string `json:"artist_names,omitempty"` // normalised key -> display name
+	ComputedAt     time.Time         `json:"computed_at"`
+	CoreArtists    Affinity          `json:"core_artists"`
+	CoreAlbums     Affinity          `json:"core_albums"`
+	CoreTracks     Affinity          `json:"core_tracks"`
+	CurrentArtists Affinity          `json:"current_artists"`
+	CurrentAlbums  Affinity          `json:"current_albums"`
+	CurrentTracks  Affinity          `json:"current_tracks"`
+	CoreGenres     Affinity          `json:"core_genres"`
+	CurrentGenres  Affinity          `json:"current_genres"`
+	PinnedArtists  []string          `json:"pinned_artists,omitempty"`
+	BannedArtists  []string          `json:"banned_artists,omitempty"`
+	ArtistNames    map[string]string `json:"artist_names,omitempty"` // normalised key -> display name
 }
 
 const pinnedBoost = 8.0
@@ -159,4 +159,6 @@ type Summary struct {
 	TopGenres  []string `json:"top_genres"`
 	EventCount int      `json:"event_count"`
 	LastSync   string   `json:"last_sync"`
+	// PinnedArtists lets the panel offer Unpin where it applies.
+	PinnedArtists []string `json:"pinned_artists"`
 }

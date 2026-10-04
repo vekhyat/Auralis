@@ -2,13 +2,21 @@ import { Component, lazy, type ReactNode } from "react";
 import { t } from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { loadDebugLoggerPage, loadDevicesPage, loadHistoryPage, loadQueuePage, loadSettingsPage, } from "@/lib/page-loaders";
+import {
+    loadDebugLoggerPage,
+    loadDevicesPage,
+    loadForYouPage,
+    loadHistoryPage,
+    loadQueuePage,
+    loadSettingsPage,
+} from "@/lib/page-loaders";
 
 export const SettingsPage = lazy(loadSettingsPage);
 export const DebugLoggerPage = lazy(loadDebugLoggerPage);
 export const HistoryPage = lazy(loadHistoryPage);
 export const QueuePage = lazy(loadQueuePage);
 export const DevicesPage = lazy(loadDevicesPage);
+export const ForYouPage = lazy(loadForYouPage);
 
 export function PageLoading() {
     return (<div role="status" aria-live="polite" aria-busy="true" className="flex items-center gap-2 border border-border bg-background px-3 py-3 text-sm text-muted-foreground">
