@@ -22,7 +22,7 @@ export type ShellPage = Extract<PageType, "main" | "settings" | "debug" | "histo
 /** Destinations shown as words in the titlebar. Debug stays in the overflow menu. */
 export type DestinationPage = Extract<ShellPage, "main" | "queue" | "history" | "library-health" | "devices" | "settings">;
 
-/** Devices only appears while an iPod is connected. */
+/** Devices is always shown: it is also where export folders (e.g. for Syncthing) are added. */
 export const PRIMARY_DESTINATIONS = ["main", "queue", "history", "library-health", "devices", "settings"] as const satisfies readonly DestinationPage[];
 
 const SHELL_PAGES = new Set<PageType>(["main", "settings", "debug", "history", "queue", "devices", "library-health"]);

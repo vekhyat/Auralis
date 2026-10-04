@@ -209,7 +209,6 @@ function App() {
     const { t } = useTranslation();
     const [currentPage, setCurrentPage] = useState<ShellPage>("main");
     const [pageAttempt, setPageAttempt] = useState(0);
-    const [ipodConnected, setIpodConnected] = useState(false);
     const [spotifyUrl, setSpotifyUrl] = useState("");
     const [smartSearchInput, setSmartSearchInput] = useState("");
     const [selectedTracks, setSelectedTracks] = useState<string[]>([]);
@@ -273,7 +272,6 @@ function App() {
         EventsOn("ipod:devices", (devices: Array<{ id?: string; name?: string }> | null) => {
             sawEvent = true;
             const list = Array.isArray(devices) ? devices : [];
-            setIpodConnected(list.length > 0);
             if (first) {
                 first = false;
                 remember(list);
@@ -289,7 +287,6 @@ function App() {
         void ListIPods().then((devices) => {
             if (sawEvent) return;
             const list = Array.isArray(devices) ? devices : [];
-            setIpodConnected(list.length > 0);
             remember(list);
             first = false;
         }).catch(() => {});
@@ -297,9 +294,6 @@ function App() {
             EventsOff("ipod:devices");
         };
     }, []);
-    if (!ipodConnected && currentPage === "devices") {
-        setCurrentPage("main");
-    }
     const [isFFmpegInstalled, setIsFFmpegInstalled] = useState<boolean | null>(null);
     const [isInstallingFFmpeg, setIsInstallingFFmpeg] = useState(false);
     const [ffmpegInstallProgress, setFfmpegInstallProgress] = useState(0);
@@ -931,7 +925,6 @@ function App() {
               onForward={handleTitleBarForward}
               currentPage={currentPage}
               onPageChange={handlePageChange}
-              showDevices={ipodConnected}
               queueCount={queue.items.filter((item) => item.status === "pending" || item.status === "running").length}
               omnibar={{
                   value: smartSearchInput,

@@ -44,11 +44,10 @@ interface TitleBarProps {
     currentPage: PageType;
     onPageChange: (page: DestinationPage | "debug") => void;
     queueCount?: number;
-    showDevices?: boolean;
     omnibar: OmnibarBinding;
 }
 
-export function TitleBar({ canGoBack = false, canGoForward = false, navigationDisabled = false, onBack, onForward, currentPage, onPageChange, queueCount = 0, showDevices = false, omnibar }: TitleBarProps) {
+export function TitleBar({ canGoBack = false, canGoForward = false, navigationDisabled = false, onBack, onForward, currentPage, onPageChange, queueCount = 0, omnibar }: TitleBarProps) {
     const { t } = useTranslation();
     const [isIssuesDialogOpen, setIsIssuesDialogOpen] = useState(false);
     const [hasIssueAgreement, setHasIssueAgreement] = useState(false);
@@ -72,7 +71,7 @@ export function TitleBar({ canGoBack = false, canGoForward = false, navigationDi
         settings: t("translation.sidebar.settings"),
     };
     const destinationIcons = { main: Library, queue: Download, history: History, "library-health": Activity, devices: Usb, settings: Settings };
-    const destinations = PRIMARY_DESTINATIONS.filter((page) => page !== "devices" || showDevices).map((page) => ({
+    const destinations = PRIMARY_DESTINATIONS.map((page) => ({
         page,
         label: destinationLabel[page],
         active: currentPage === page,
