@@ -48,6 +48,10 @@ func Apply(ctx context.Context, root, journalPath string, plan *Plan) (*ApplyRes
 	if plan == nil {
 		return nil, fmt.Errorf("nil plan")
 	}
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return nil, fmt.Errorf("library root is required")
+	}
 	result := &ApplyResult{BatchID: uuid.NewString(), Errors: []string{}}
 	for i := range plan.Operations {
 		if err := ctx.Err(); err != nil {
@@ -57,6 +61,13 @@ func Apply(ctx context.Context, root, journalPath string, plan *Plan) (*ApplyRes
 		if op.Error != "" {
 			result.Skipped++
 			result.Errors = append(result.Errors, op.Path+": "+op.Error)
+			continue
+		}
+		// Plans round-trip through the UI, so re-check that every path they
+		// touch is still inside the scanned library.
+		if !withinRoot(root, op.Path) || (op.NewPath != "" && !withinRoot(root, op.NewPath)) {
+			result.Skipped++
+			result.Errors = append(result.Errors, op.Path+": path is outside the library root")
 			continue
 		}
 		entry, err := applyOne(op)
@@ -110,16 +121,16 @@ func applyTags(op Operation) (JournalEntry, error) {
 	if err != nil {
 		return JournalEntry{}, err
 	}
-	old := map[string]string{}
+	old := map[string][]string{}
 	byUpper := map[string]string{}
 	for key := range tags {
 		byUpper[strings.ToUpper(key)] = key
 	}
 	for _, key := range append(keysOf(op.Set), op.Delete...) {
 		if actual, ok := byUpper[strings.ToUpper(key)]; ok {
-			old[key] = firstTag(tags, actual)
+			old[key] = append([]string(nil), tags[actual]...)
 		} else {
-			old[key] = ""
+			old[key] = nil
 		}
 	}
 	for _, key := range op.Delete {
@@ -154,10 +165,10 @@ func applyMove(op Operation) (JournalEntry, error) {
 	if err := os.Rename(op.Path, op.NewPath); err != nil {
 		return JournalEntry{}, err
 	}
-	// Keep the library index in sync when the file was indexed.
-	if err := backend.MoveLibraryIndexFile(op.Path, op.NewPath); err != nil {
-		fmt.Printf("Warning: failed to update library index for move: %v\n", err)
-	}
+	moveSidecars(op.Path, op.NewPath)
+	// The index is a cache of what is on disk, so a failed update is not
+	// worth failing the move for; the next index refresh corrects it.
+	_ = backend.MoveLibraryIndexFile(op.Path, op.NewPath)
 	return JournalEntry{Type: "move", Path: op.Path, NewPath: op.NewPath, Size: op.Size, ModTime: op.ModTime}, nil
 }
 
@@ -173,6 +184,31 @@ func applyRmdir(op Operation) (JournalEntry, error) {
 		return JournalEntry{}, err
 	}
 	return JournalEntry{Type: "rmdir", Path: op.Path}, nil
+}
+
+// sidecarExtensions are files that belong to one track and must follow it.
+var sidecarExtensions = []string{".lrc"}
+
+// moveSidecars moves e.g. "Song.lrc" next to the moved "Song.flac". It never
+// overwrites an existing file.
+func moveSidecars(oldAudio, newAudio string) {
+	oldBase := strings.TrimSuffix(oldAudio, filepath.Ext(oldAudio))
+	newBase := strings.TrimSuffix(newAudio, filepath.Ext(newAudio))
+	for _, ext := range sidecarExtensions {
+		if !fileExists(oldBase+ext) || fileExists(newBase+ext) {
+			continue
+		}
+		_ = os.Rename(oldBase+ext, newBase+ext)
+	}
+}
+
+// withinRoot reports whether path is root itself or inside it.
+func withinRoot(root, path string) bool {
+	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
 func firstTag(tags map[string][]string, key string) string {

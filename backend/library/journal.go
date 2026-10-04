@@ -21,7 +21,7 @@ type JournalEntry struct {
 	NewPath string            `json:"new_path,omitempty"`
 	Set     map[string]string `json:"set,omitempty"`
 	Delete  []string          `json:"delete,omitempty"`
-	Old     map[string]string `json:"old,omitempty"`
+	Old     map[string][]string `json:"old,omitempty"`
 	Size    int64             `json:"size,omitempty"`
 	ModTime int64             `json:"mod_time_unix_nano,omitempty"`
 	Error   string            `json:"error,omitempty"`
@@ -146,7 +146,7 @@ func undoOne(entry JournalEntry) error {
 		removes := false
 		for key, old := range entry.Old {
 			actual, ok := byUpper[strings.ToUpper(key)]
-			if old == "" {
+			if len(old) == 0 {
 				if ok {
 					delete(tags, actual)
 					removes = true
@@ -154,9 +154,9 @@ func undoOne(entry JournalEntry) error {
 				continue
 			}
 			if ok {
-				tags[actual] = []string{old}
+				tags[actual] = old
 			} else {
-				tags[key] = []string{old}
+				tags[key] = old
 			}
 		}
 		opts := taglib.WriteOption(0)
@@ -177,6 +177,7 @@ func undoOne(entry JournalEntry) error {
 		if err := os.Rename(entry.NewPath, entry.Path); err != nil {
 			return err
 		}
+		moveSidecars(entry.NewPath, entry.Path)
 		if err := backend.MoveLibraryIndexFile(entry.NewPath, entry.Path); err != nil {
 			// Non-fatal: index is a cache of what the files say.
 			_ = err

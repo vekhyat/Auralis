@@ -37,12 +37,8 @@ type App struct {
 	ipodStop                     chan struct{}
 	libraryScanMu                sync.Mutex
 	libraryScanCancel            context.CancelFunc
-	libraryLastScan              *library.Scan
-	libraryLastIssues            []library.Issue
-	libraryLastProfileID         string
-	libraryLastRoot              string
-	libraryLastReport            *LibraryReport
-	libraryLastPlan              *library.Plan
+	libraryScanGeneration        uint64
+	libraryLast                  *libraryState
 }
 
 type CurrentIPInfo struct {
@@ -3383,7 +3379,7 @@ func (a *App) CreateM3U8File(m3u8Name string, outputDir string, filePaths []stri
 	m3u8Path := filepath.Join(outputDir, safeName+".m3u8")
 
 	tracks := library.TracksFromPaths(filePaths)
-	_, err := library.WritePlaylist(m3u8Path, tracks, library.PlaylistRelative, "", "")
+	_, err := library.WritePlaylist(m3u8Path, tracks, library.PlaylistLocal, "", "")
 	return err
 }
 

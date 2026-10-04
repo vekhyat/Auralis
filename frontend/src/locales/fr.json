@@ -1433,6 +1433,7 @@
       "fixAppliedToast": "{{applied}} corrections appliquées avec succès",
       "fixAppliedToastErrors": "{{applied}} corrections appliquées avec {{errors}} erreurs",
       "undoAppliedToast": "{{applied}} modifications annulées avec succès",
+      "noSafeFixes": "Aucune correction sûre à appliquer. Les déplacements de fichiers se choisissent un par un.",
       "undoNoBatch": "Aucune correction précédente à annuler",
       "scanCancelledToast": "L'analyse de la bibliothèque a été annulée",
       "scanErrorToast": "Échec de l'analyse : {{error}}",

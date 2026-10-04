@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,98 +23,68 @@ type LibraryReport struct {
 	Issues      []library.Issue `json:"issues"`
 }
 
+// libraryState is the most recent scan, kept so fixes are planned against
+// exactly what the user reviewed.
+type libraryState struct {
+	scan    *library.Scan
+	issues  []library.Issue
+	profile library.Profile
+	report  *LibraryReport
+}
+
+const libraryJournalName = "library_journal.jsonl"
+
 // LibraryProfiles returns all built-in target profiles.
 func (a *App) LibraryProfiles() []library.Profile {
 	return library.Profiles()
 }
 
-// GetLibraryProfiles is an alias for LibraryProfiles.
-func (a *App) GetLibraryProfiles() []library.Profile {
-	return a.LibraryProfiles()
-}
-
-// StartLibraryScan starts a cancellable background library scan and emits progress events.
+// StartLibraryScan starts a cancellable background scan. Progress arrives as
+// "library:scan-progress"; the run ends with exactly one of
+// "library:scan-complete", "library:scan-error", or "library:scan-cancelled".
 func (a *App) StartLibraryScan(root string, profileID string) error {
-	cleanRoot := filepath.Clean(strings.TrimSpace(root))
-	if cleanRoot == "" {
-		return fmt.Errorf("library root path cannot be empty")
-	}
-	info, err := os.Stat(cleanRoot)
+	cleanRoot, err := libraryRoot(root)
 	if err != nil {
-		return fmt.Errorf("cannot access library root: %w", err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("library root is not a directory")
+		return err
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	a.libraryScanMu.Lock()
 	if a.libraryScanCancel != nil {
 		a.libraryScanCancel()
-		a.libraryScanCancel = nil
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	a.libraryScanGeneration++
+	generation := a.libraryScanGeneration
 	a.libraryScanCancel = cancel
 	a.libraryScanMu.Unlock()
 
 	go func() {
 		defer func() {
 			a.libraryScanMu.Lock()
-			a.libraryScanCancel = nil
+			// A newer scan may have replaced this one; leave its cancel alone.
+			if a.libraryScanGeneration == generation {
+				a.libraryScanCancel = nil
+			}
 			a.libraryScanMu.Unlock()
+			cancel()
 		}()
 
-		profile := library.ProfileByID(profileID)
-		scan, err := library.ScanLibrary(ctx, cleanRoot, func(p library.ScanProgress) {
-			if a.ctx != nil {
-				runtime.EventsEmit(a.ctx, "library:scan-progress", p)
-			}
+		report, err := a.scanLibrary(ctx, cleanRoot, profileID, func(p library.ScanProgress) {
+			a.emitLibraryEvent("library:scan-progress", p)
 		})
-		if err != nil {
-			if ctx.Err() != nil {
-				if a.ctx != nil {
-					runtime.EventsEmit(a.ctx, "library:scan-cancelled", "scan cancelled")
-				}
-				return
-			}
-			if a.ctx != nil {
-				runtime.EventsEmit(a.ctx, "library:scan-error", err.Error())
-			}
-			return
-		}
-
-		issues := library.DetectAll(scan, profile)
-		score := calculateHealthScore(len(scan.Tracks), issues)
-		report := &LibraryReport{
-			Root:        cleanRoot,
-			ProfileID:   profile.ID,
-			HealthScore: score,
-			TotalTracks: len(scan.Tracks),
-			TotalAlbums: countAlbums(scan.Tracks),
-			Issues:      issues,
-		}
-
-		a.libraryScanMu.Lock()
-		a.libraryLastScan = scan
-		a.libraryLastIssues = issues
-		a.libraryLastProfileID = profile.ID
-		a.libraryLastRoot = cleanRoot
-		a.libraryLastReport = report
-		a.libraryScanMu.Unlock()
-
-		if a.ctx != nil {
-			runtime.EventsEmit(a.ctx, "library:scan-complete", report)
+		switch {
+		case errors.Is(err, context.Canceled):
+			a.emitLibraryEvent("library:scan-cancelled", nil)
+		case err != nil:
+			a.emitLibraryEvent("library:scan-error", err.Error())
+		default:
+			a.emitLibraryEvent("library:scan-complete", report)
 		}
 	}()
-
 	return nil
 }
 
-// LibraryStartScan is an alias for StartLibraryScan.
-func (a *App) LibraryStartScan(root string, profileID string) error {
-	return a.StartLibraryScan(root, profileID)
-}
-
-// CancelLibraryScan cancels any currently running library scan.
+// CancelLibraryScan cancels the running library scan, if any.
 func (a *App) CancelLibraryScan() {
 	a.libraryScanMu.Lock()
 	defer a.libraryScanMu.Unlock()
@@ -123,203 +94,131 @@ func (a *App) CancelLibraryScan() {
 	}
 }
 
-// LibraryCancelScan is an alias for CancelLibraryScan.
-func (a *App) LibraryCancelScan() {
-	a.CancelLibraryScan()
+// GetLibraryReport returns the report from the most recent scan.
+func (a *App) GetLibraryReport() (*LibraryReport, error) {
+	state := a.currentLibraryState()
+	if state == nil {
+		return nil, fmt.Errorf("no library scan has been performed yet")
+	}
+	return state.report, nil
 }
 
-// ScanLibrarySync executes a scan synchronously (convenient for testing and non-event callers).
-func (a *App) ScanLibrarySync(root string, profileID string) (*LibraryReport, error) {
-	cleanRoot := filepath.Clean(strings.TrimSpace(root))
-	if cleanRoot == "" {
-		return nil, fmt.Errorf("library root path cannot be empty")
+// PreviewLibraryFixes builds a plan for the selected issue IDs, or for every
+// fixable issue when issueIDs is empty. Nothing is changed on disk.
+func (a *App) PreviewLibraryFixes(issueIDs []string) (*library.Plan, error) {
+	state := a.currentLibraryState()
+	if state == nil {
+		return nil, fmt.Errorf("no library scan available")
 	}
-	info, err := os.Stat(cleanRoot)
-	if err != nil {
-		return nil, fmt.Errorf("cannot access library root: %w", err)
+	wanted := make(map[string]bool, len(issueIDs))
+	for _, id := range issueIDs {
+		wanted[id] = true
 	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("library root is not a directory")
+	var selected []library.Issue
+	for _, issue := range state.issues {
+		if issue.Fixable && (len(wanted) == 0 || wanted[issue.ID]) {
+			selected = append(selected, issue)
+		}
 	}
+	return library.BuildPlan(state.scan, state.profile, selected), nil
+}
 
-	profile := library.ProfileByID(profileID)
-	scan, err := library.ScanLibrary(context.Background(), cleanRoot, nil)
+// ApplyLibraryPlan executes a previewed plan inside the scanned library root
+// and records every change in the undo journal.
+func (a *App) ApplyLibraryPlan(plan *library.Plan) (*library.ApplyResult, error) {
+	if plan == nil {
+		return nil, fmt.Errorf("no plan to apply")
+	}
+	state := a.currentLibraryState()
+	if state == nil {
+		return nil, fmt.Errorf("scan the library before applying fixes")
+	}
+	journalPath, err := libraryJournalPath()
 	if err != nil {
 		return nil, err
 	}
+	return library.Apply(context.Background(), state.scan.Root, journalPath, plan)
+}
 
+// UndoLastLibraryFix reverts the most recent applied fix batch.
+func (a *App) UndoLastLibraryFix() (*library.ApplyResult, error) {
+	journalPath, err := libraryJournalPath()
+	if err != nil {
+		return nil, err
+	}
+	return library.UndoLast(journalPath)
+}
+
+// ExportLibraryPlaylist writes an .m3u8 using mode "relative", "root", or
+// "device". Tracks that cannot be expressed in the mode are skipped and
+// listed in the result.
+func (a *App) ExportLibraryPlaylist(m3u8Path string, trackPaths []string, mode string, musicRoot string, devicePrefix string) (*library.PlaylistResult, error) {
+	playlistMode := library.PlaylistMode(mode)
+	switch playlistMode {
+	case "":
+		playlistMode = library.PlaylistRelative
+	case library.PlaylistRelative, library.PlaylistRoot, library.PlaylistDevice:
+	default:
+		return nil, fmt.Errorf("unknown playlist mode %q", mode)
+	}
+	return library.WritePlaylist(m3u8Path, library.TracksFromPaths(trackPaths), playlistMode, musicRoot, devicePrefix)
+}
+
+func (a *App) scanLibrary(ctx context.Context, root, profileID string, progress func(library.ScanProgress)) (*LibraryReport, error) {
+	profile := library.ProfileByID(profileID)
+	scan, err := library.ScanLibrary(ctx, root, progress)
+	if err != nil {
+		return nil, err
+	}
 	issues := library.DetectAll(scan, profile)
-	score := calculateHealthScore(len(scan.Tracks), issues)
 	report := &LibraryReport{
-		Root:        cleanRoot,
+		Root:        root,
 		ProfileID:   profile.ID,
-		HealthScore: score,
+		HealthScore: calculateHealthScore(len(scan.Tracks), issues),
 		TotalTracks: len(scan.Tracks),
 		TotalAlbums: countAlbums(scan.Tracks),
 		Issues:      issues,
 	}
-
 	a.libraryScanMu.Lock()
-	a.libraryLastScan = scan
-	a.libraryLastIssues = issues
-	a.libraryLastProfileID = profile.ID
-	a.libraryLastRoot = cleanRoot
-	a.libraryLastReport = report
+	a.libraryLast = &libraryState{scan: scan, issues: issues, profile: profile, report: report}
 	a.libraryScanMu.Unlock()
-
 	return report, nil
 }
 
-// GetLibraryReport returns the report from the most recent scan.
-func (a *App) GetLibraryReport() (*LibraryReport, error) {
+func (a *App) currentLibraryState() *libraryState {
 	a.libraryScanMu.Lock()
 	defer a.libraryScanMu.Unlock()
-	if a.libraryLastReport == nil {
-		return nil, fmt.Errorf("no library scan has been performed yet")
-	}
-	return a.libraryLastReport, nil
+	return a.libraryLast
 }
 
-// LibraryGetReport is an alias for GetLibraryReport.
-func (a *App) LibraryGetReport() (*LibraryReport, error) {
-	return a.GetLibraryReport()
+func (a *App) emitLibraryEvent(name string, payload interface{}) {
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, name, payload)
+	}
 }
 
-// PreviewLibraryFixes builds a Plan for the selected issue IDs (or all fixable issues if issueIDs is empty).
-func (a *App) PreviewLibraryFixes(issueIDs []string) (*library.Plan, error) {
-	a.libraryScanMu.Lock()
-	scan := a.libraryLastScan
-	issues := a.libraryLastIssues
-	profileID := a.libraryLastProfileID
-	a.libraryScanMu.Unlock()
-
-	if scan == nil {
-		return nil, fmt.Errorf("no library scan available")
+func libraryRoot(root string) (string, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return "", fmt.Errorf("library root path cannot be empty")
 	}
-	profile := library.ProfileByID(profileID)
-
-	var selected []library.Issue
-	if len(issueIDs) == 0 {
-		for _, issue := range issues {
-			if issue.Fixable {
-				selected = append(selected, issue)
-			}
-		}
-	} else {
-		idSet := make(map[string]bool, len(issueIDs))
-		for _, id := range issueIDs {
-			idSet[id] = true
-		}
-		for _, issue := range issues {
-			if idSet[issue.ID] && issue.Fixable {
-				selected = append(selected, issue)
-			}
-		}
+	clean := filepath.Clean(root)
+	info, err := os.Stat(clean)
+	if err != nil {
+		return "", fmt.Errorf("cannot access library root: %w", err)
 	}
-
-	plan := library.BuildPlan(scan, profile, selected)
-	a.libraryScanMu.Lock()
-	a.libraryLastPlan = plan
-	a.libraryScanMu.Unlock()
-	return plan, nil
+	if !info.IsDir() {
+		return "", fmt.Errorf("library root is not a directory")
+	}
+	return clean, nil
 }
 
-// LibraryPreviewFixes is an alias for PreviewLibraryFixes.
-func (a *App) LibraryPreviewFixes(issueIDs []string) (*library.Plan, error) {
-	return a.PreviewLibraryFixes(issueIDs)
-}
-
-// PreviewLibraryRuleFixes builds a Plan for all fixable issues belonging to the given rule IDs.
-func (a *App) PreviewLibraryRuleFixes(ruleIDs []string) (*library.Plan, error) {
-	a.libraryScanMu.Lock()
-	scan := a.libraryLastScan
-	issues := a.libraryLastIssues
-	profileID := a.libraryLastProfileID
-	a.libraryScanMu.Unlock()
-
-	if scan == nil {
-		return nil, fmt.Errorf("no library scan available")
-	}
-	profile := library.ProfileByID(profileID)
-
-	ruleSet := make(map[string]bool, len(ruleIDs))
-	for _, rid := range ruleIDs {
-		ruleSet[rid] = true
-	}
-	var selected []library.Issue
-	for _, issue := range issues {
-		if ruleSet[issue.RuleID] && issue.Fixable {
-			selected = append(selected, issue)
-		}
-	}
-
-	plan := library.BuildPlan(scan, profile, selected)
-	a.libraryScanMu.Lock()
-	a.libraryLastPlan = plan
-	a.libraryScanMu.Unlock()
-	return plan, nil
-}
-
-// ApplyLibraryPlan executes a plan and writes each applied change to the journal.
-// If plan is nil, it applies the last previewed plan.
-func (a *App) ApplyLibraryPlan(plan *library.Plan) (*library.ApplyResult, error) {
-	a.libraryScanMu.Lock()
-	root := a.libraryLastRoot
-	if plan == nil {
-		plan = a.libraryLastPlan
-	}
-	a.libraryScanMu.Unlock()
-
-	if plan == nil {
-		return nil, fmt.Errorf("no plan to apply")
-	}
-
+func libraryJournalPath() (string, error) {
 	appDir, err := backend.EnsureAppDataDir()
 	if err != nil {
-		return nil, fmt.Errorf("cannot resolve app data dir: %w", err)
+		return "", fmt.Errorf("cannot resolve app data dir: %w", err)
 	}
-	journalPath := filepath.Join(appDir, "library_journal.jsonl")
-
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return library.Apply(ctx, root, journalPath, plan)
-}
-
-// LibraryApplyPlan is an alias for ApplyLibraryPlan.
-func (a *App) LibraryApplyPlan(plan *library.Plan) (*library.ApplyResult, error) {
-	return a.ApplyLibraryPlan(plan)
-}
-
-// UndoLastLibraryFix reverts the most recent applied fix batch recorded in the journal.
-func (a *App) UndoLastLibraryFix() (*library.ApplyResult, error) {
-	appDir, err := backend.EnsureAppDataDir()
-	if err != nil {
-		return nil, fmt.Errorf("cannot resolve app data dir: %w", err)
-	}
-	journalPath := filepath.Join(appDir, "library_journal.jsonl")
-	return library.UndoLast(journalPath)
-}
-
-// LibraryUndoLastFix is an alias for UndoLastLibraryFix.
-func (a *App) LibraryUndoLastFix() (*library.ApplyResult, error) {
-	return a.UndoLastLibraryFix()
-}
-
-// ExportLibraryPlaylist exports tracks to an M3U8 playlist using the requested mode.
-func (a *App) ExportLibraryPlaylist(m3u8Path string, trackPaths []string, mode string, musicRoot string, devicePrefix string) (*library.PlaylistResult, error) {
-	tracks := library.TracksFromPaths(trackPaths)
-	playlistMode := library.PlaylistMode(mode)
-	if playlistMode == "" {
-		playlistMode = library.PlaylistRelative
-	}
-	return library.WritePlaylist(m3u8Path, tracks, playlistMode, musicRoot, devicePrefix)
-}
-
-// LibraryExportPlaylist is an alias for ExportLibraryPlaylist.
-func (a *App) LibraryExportPlaylist(m3u8Path string, trackPaths []string, mode string, musicRoot string, devicePrefix string) (*library.PlaylistResult, error) {
-	return a.ExportLibraryPlaylist(m3u8Path, trackPaths, mode, musicRoot, devicePrefix)
+	return filepath.Join(appDir, libraryJournalName), nil
 }
 
 func countAlbums(tracks []library.Track) int {
@@ -330,11 +229,10 @@ func countAlbums(tracks []library.Track) int {
 	return len(albums)
 }
 
+// calculateHealthScore weighs issues by severity against library size. A
+// library with any issue never shows a perfect 100.
 func calculateHealthScore(totalTracks int, issues []library.Issue) int {
-	if totalTracks == 0 {
-		return 100
-	}
-	if len(issues) == 0 {
+	if totalTracks == 0 || len(issues) == 0 {
 		return 100
 	}
 	penalty := 0
@@ -345,19 +243,16 @@ func calculateHealthScore(totalTracks int, issues []library.Issue) int {
 		case library.SeverityWarning:
 			penalty += 2
 		default:
-			penalty += 1
+			penalty++
 		}
 	}
 	ratio := float64(penalty) / float64(totalTracks*3)
-	if ratio > 1.0 {
-		ratio = 1.0
+	if ratio > 1 {
+		ratio = 1
 	}
-	score := int((1.0 - ratio) * 100)
+	score := int((1 - ratio) * 100)
 	if score >= 100 {
 		score = 99
-	}
-	if score < 0 {
-		score = 0
 	}
 	return score
 }

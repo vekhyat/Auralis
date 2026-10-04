@@ -83,49 +83,113 @@ func TestCompilationDetectAndFix(t *testing.T) {
 	}
 }
 
-func TestTrackNumberDetectGapAndFix(t *testing.T) {
+func TestTrackNumberGapIsReportedNotRenumbered(t *testing.T) {
+	// Tracks 1, 3, 4 of a 12-track album: the album is incomplete, and the
+	// existing numbers are correct and must not be rewritten.
 	scan := &Scan{Tracks: []Track{
-		{Path: `C:\m\A\L\1.flac`, RelPath: "A/L/1.flac", TrackNumber: 1, TrackTotal: 3},
-		{Path: `C:\m\A\L\3.flac`, RelPath: "A/L/3.flac", TrackNumber: 3, TrackTotal: 3},
-		{Path: `C:\m\A\L\4.flac`, RelPath: "A/L/4.flac", TrackNumber: 4, TrackTotal: 3},
+		{Path: `C:\m\A\L\01.flac`, RelPath: "A/L/01.flac", Album: "L", TrackNumber: 1, TrackTotal: 12},
+		{Path: `C:\m\A\L\03.flac`, RelPath: "A/L/03.flac", Album: "L", TrackNumber: 3, TrackTotal: 12},
+		{Path: `C:\m\A\L\04.flac`, RelPath: "A/L/04.flac", Album: "L", TrackNumber: 4, TrackTotal: 12},
 	}}
-	issues := trackNumberRule.Detect(scan, ProfileByID(ProfilePoweramp))
-	if len(issues) == 0 {
-		t.Fatal("expected gap/total issues")
+	issues := DetectAll(scan, ProfileByID(ProfilePoweramp))
+	var gap bool
+	for _, issue := range issues {
+		if issue.RuleID != "TRACKNUMBER" {
+			continue
+		}
+		if issue.Fixable {
+			t.Fatalf("incomplete album must not be fixable: %+v", issue)
+		}
+		gap = gap || strings.Contains(issue.Message, "may be missing")
 	}
-	ops := trackNumberRule.Fix(scan, ProfileByID(ProfilePoweramp), issues)
-	if len(ops) == 0 {
-		t.Fatal("expected fix ops")
+	if !gap {
+		t.Fatalf("expected a missing-tracks report, got %+v", issues)
 	}
-	// After applying the normalised numbering, detection must be quiet.
-	byOp := map[string]Operation{}
-	for _, op := range ops {
-		byOp[op.Path] = op
-	}
-	for i := range scan.Tracks {
-		if op, ok := byOp[scan.Tracks[i].Path]; ok {
-			var total int
-			var num int
-			if v, ok := op.Set["TRACKTOTAL"]; ok && v != "" {
-				if n := parseLeadingInt(v); n > 0 {
-					total = n
-				}
-			}
-			if n := parseLeadingInt(op.Set["TRACKNUMBER"]); n > 0 {
-				num = n
-			}
-			scan.Tracks[i].TrackNumber = num
-			scan.Tracks[i].TrackTotal = total
+}
+
+func TestTrackNumberFixes(t *testing.T) {
+	scan := &Scan{Tracks: []Track{
+		// Total lower than the highest number on the disc.
+		{Path: `C:\m\A\L\01.flac`, RelPath: "A/L/01.flac", Album: "L", Format: "flac", TrackNumber: 1, TrackTotal: 2, TrackNumberRaw: "1"},
+		{Path: `C:\m\A\L\02.flac`, RelPath: "A/L/02.flac", Album: "L", Format: "flac", TrackNumber: 2, TrackTotal: 2, TrackNumberRaw: "2"},
+		// Vorbis "3/3" style value.
+		{Path: `C:\m\A\L\03.flac`, RelPath: "A/L/03.flac", Album: "L", Format: "flac", TrackNumber: 3, TrackTotal: 3, TrackNumberRaw: "3/3"},
+		// Missing number, recoverable from the file name.
+		{Path: `C:\m\A\L\04 - Four.flac`, RelPath: "A/L/04 - Four.flac", Album: "L", Format: "flac"},
+	}}
+	profile := ProfileByID(ProfilePoweramp)
+	var fixable []Issue
+	for _, issue := range trackNumberRule.Detect(scan, profile) {
+		if issue.Fixable {
+			fixable = append(fixable, issue)
 		}
 	}
-	if issues := trackNumberRule.Detect(scan, ProfileByID(ProfilePoweramp)); len(issues) != 0 {
-		t.Fatalf("expected clean after fix, got %+v", issues)
+	ops := trackNumberRule.Fix(scan, profile, fixable)
+	got := map[string]map[string]string{}
+	for _, op := range ops {
+		got[filepath.Base(op.Path)] = op.Set
+	}
+	want := map[string]map[string]string{
+		"01.flac":        {"TRACKNUMBER": "1", "TRACKTOTAL": "4", "TOTALTRACKS": "4"},
+		"02.flac":        {"TRACKNUMBER": "2", "TRACKTOTAL": "4", "TOTALTRACKS": "4"},
+		"03.flac":        {"TRACKNUMBER": "3", "TRACKTOTAL": "4", "TOTALTRACKS": "4"},
+		"04 - Four.flac": {"TRACKNUMBER": "4", "TRACKTOTAL": "4", "TOTALTRACKS": "4"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("ops = %+v", got)
+	}
+	for name, set := range want {
+		for k, v := range set {
+			if got[name][k] != v {
+				t.Fatalf("%s %s = %q, want %q (all: %+v)", name, k, got[name][k], v, got)
+			}
+		}
+	}
+}
+
+func TestAlbumWideRulesSkipLooseFiles(t *testing.T) {
+	// Loose singles in the library root, and a folder holding several
+	// albums, must never be retagged as one compilation.
+	scan := &Scan{Tracks: []Track{
+		{Path: `C:\m\a.flac`, RelPath: "a.flac", Artist: "A", Album: "X"},
+		{Path: `C:\m\b.flac`, RelPath: "b.flac", Artist: "B", Album: "Y"},
+		{Path: `C:\m\c.flac`, RelPath: "c.flac", Artist: "C", Album: "Z"},
+		{Path: `C:\m\Mix\1.flac`, RelPath: "Mix/1.flac", Artist: "A", Album: "One"},
+		{Path: `C:\m\Mix\2.flac`, RelPath: "Mix/2.flac", Artist: "B", Album: "Two"},
+		{Path: `C:\m\Mix\3.flac`, RelPath: "Mix/3.flac", Artist: "C", Album: "Three"},
+	}}
+	for _, issue := range DetectAll(scan, ProfileByID(ProfilePoweramp)) {
+		switch issue.RuleID {
+		case "COMPILATION", "ALBUMARTIST", "TRACKNUMBER", "DISCNUMBER":
+			t.Fatalf("album rule fired on loose files: %+v", issue)
+		}
+	}
+}
+
+func TestLooksMultiDisc(t *testing.T) {
+	for dir, want := range map[string]bool{"A/Album/CD1": true, "A/Album/Disc 2": true, "ACDC/Back in Black": false, "A/Discovery": false} {
+		if got := looksMultiDisc(dir); got != want {
+			t.Errorf("looksMultiDisc(%q) = %v, want %v", dir, got, want)
+		}
+	}
+}
+
+func TestIssueIDsAreUnique(t *testing.T) {
+	scan := &Scan{Tracks: []Track{
+		{Path: `C:\m\A\L\1.flac`, RelPath: "A/L/1.flac", Album: "L", Format: "flac", CoverBytes: 2 * 1024 * 1024, CoverWidth: 3000, CoverHeight: 3000},
+	}}
+	seen := map[string]bool{}
+	for _, issue := range DetectAll(scan, ProfileByID(ProfilePoweramp)) {
+		if seen[issue.ID] {
+			t.Fatalf("duplicate issue ID %q", issue.ID)
+		}
+		seen[issue.ID] = true
 	}
 }
 
 func TestTrackNumberUnparseable(t *testing.T) {
 	scan := &Scan{Tracks: []Track{
-		{Path: `C:\m\A\L\1.flac`, RelPath: "A/L/1.flac", TrackNumberRaw: "not-a-number"},
+		{Path: `C:\m\A\L\1.flac`, RelPath: "A/L/1.flac", Album: "L", TrackNumberRaw: "not-a-number"},
 	}}
 	issues := trackNumberRule.Detect(scan, ProfileByID(ProfilePoweramp))
 	if len(issues) == 0 || !strings.Contains(issues[0].Message, "unparseable") {

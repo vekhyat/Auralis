@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -79,10 +80,9 @@ func TestAppLibraryScanAndDoctorWorkflow(t *testing.T) {
 
 	app := &App{}
 
-	// Test synchronous scan
-	report, err := app.ScanLibrarySync(root, library.ProfilePoweramp)
+	report, err := app.scanLibrary(context.Background(), root, library.ProfilePoweramp, nil)
 	if err != nil {
-		t.Fatalf("ScanLibrarySync failed: %v", err)
+		t.Fatalf("scanLibrary failed: %v", err)
 	}
 	if report == nil {
 		t.Fatal("expected non-nil report")
@@ -134,11 +134,29 @@ func TestAppLibraryAsyncScanAndCancel(t *testing.T) {
 		t.Fatalf("StartLibraryScan failed: %v", err)
 	}
 
-	// Cancel scan immediately
 	app.CancelLibraryScan()
 
-	// Wait briefly for goroutine
-	time.Sleep(50 * time.Millisecond)
+	// A second scan replaces the first; the first one's cleanup must not
+	// clear the second scan's cancel func.
+	if err := app.StartLibraryScan(root, library.ProfilePoweramp); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		app.libraryScanMu.Lock()
+		done := app.libraryScanCancel == nil
+		app.libraryScanMu.Unlock()
+		if done {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("scan did not finish")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := app.GetLibraryReport(); err != nil {
+		t.Fatalf("expected a report after the second scan: %v", err)
+	}
 }
 
 func TestAppExportLibraryPlaylist(t *testing.T) {

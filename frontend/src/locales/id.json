@@ -1433,6 +1433,7 @@
       "fixAppliedToast": "Berhasil menerapkan {{applied}} perbaikan",
       "fixAppliedToastErrors": "Menerapkan {{applied}} perbaikan dengan {{errors}} kesalahan",
       "undoAppliedToast": "Berhasil memulihkan {{applied}} perubahan",
+      "noSafeFixes": "Tidak ada perbaikan aman untuk diterapkan. Pemindahan file harus dipilih satu per satu.",
       "undoNoBatch": "Tidak ada perbaikan sebelumnya untuk dibatalkan",
       "scanCancelledToast": "Pemindaian perpustakaan dibatalkan",
       "scanErrorToast": "Pemindaian gagal: {{error}}",

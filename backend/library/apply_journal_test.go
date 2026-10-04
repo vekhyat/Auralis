@@ -143,7 +143,7 @@ func TestJournalRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	journal := filepath.Join(dir, "j.jsonl")
 	entries := []JournalEntry{
-		{BatchID: "b1", Time: time.Now().UTC().Format(time.RFC3339), Type: "tags", Path: `C:\m\a.flac`, Set: map[string]string{"A": "1"}, Old: map[string]string{"A": ""}},
+		{BatchID: "b1", Time: time.Now().UTC().Format(time.RFC3339), Type: "tags", Path: `C:\m\a.flac`, Set: map[string]string{"A": "1"}, Old: map[string][]string{"A": nil}},
 		{BatchID: "b1", Time: time.Now().UTC().Format(time.RFC3339), Type: "move", Path: `C:\m\a.flac`, NewPath: `C:\m\b\a.flac`},
 		{BatchID: "b2", Time: time.Now().UTC().Format(time.RFC3339), Type: "tags", Path: `C:\m\c.flac`, Set: map[string]string{"B": "2"}},
 	}
@@ -200,5 +200,87 @@ func TestUndoLastEndToEndWithJournal(t *testing.T) {
 	}
 	if !sawUndo {
 		t.Fatal("expected undo marker in journal")
+	}
+}
+
+func TestApplyRejectsPathsOutsideRoot(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	flac := filepath.Join(outside, "a.flac")
+	makeAudioFile(t, flac, map[string]string{"title": "T"})
+	inside := filepath.Join(root, "x.flac")
+	makeAudioFile(t, inside, map[string]string{"title": "X"})
+	plan := &Plan{Operations: []Operation{
+		{Type: "tags", Path: flac, Set: map[string]string{"ALBUMARTIST": "Z"}},
+		{Type: "move", Path: inside, NewPath: filepath.Join(root, "..", "escaped.flac")},
+	}}
+	result, err := Apply(context.Background(), root, filepath.Join(root, "j.jsonl"), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Applied != 0 || result.Skipped != 2 {
+		t.Fatalf("expected both operations refused, got %+v", result)
+	}
+	if _, err := os.Stat(inside); err != nil {
+		t.Fatalf("file inside root was moved: %v", err)
+	}
+	if _, err := Apply(context.Background(), "", filepath.Join(root, "j.jsonl"), plan); err == nil {
+		t.Fatal("expected an error without a root")
+	}
+}
+
+func TestMoveCarriesLyricsSidecar(t *testing.T) {
+	root := t.TempDir()
+	flac := filepath.Join(root, "Old", "a.flac")
+	if err := os.MkdirAll(filepath.Dir(flac), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	makeAudioFile(t, flac, map[string]string{"title": "T"})
+	lrc := filepath.Join(root, "Old", "a.lrc")
+	if err := os.WriteFile(lrc, []byte("[00:01.00]hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := os.Stat(flac)
+	dest := filepath.Join(root, "New", "b.flac")
+	journal := filepath.Join(root, "j.jsonl")
+	plan := &Plan{Operations: []Operation{{Type: "move", Path: flac, NewPath: dest, Size: info.Size(), ModTime: info.ModTime().UnixNano()}}}
+	if _, err := Apply(context.Background(), root, journal, plan); err != nil {
+		t.Fatal(err)
+	}
+	if !fileExists(filepath.Join(root, "New", "b.lrc")) || fileExists(lrc) {
+		t.Fatal("lyrics sidecar did not follow the track")
+	}
+	if _, err := UndoLast(journal); err != nil {
+		t.Fatal(err)
+	}
+	if !fileExists(lrc) {
+		t.Fatal("undo did not bring the sidecar back")
+	}
+}
+
+func TestUndoRestoresMultiValueTag(t *testing.T) {
+	dir := t.TempDir()
+	flac := filepath.Join(dir, "a.flac")
+	makeAudioFile(t, flac, map[string]string{"title": "T"})
+	tags, err := taglib.ReadTags(flac)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tags["ALBUMARTIST"] = []string{"A", "B"}
+	if err := taglib.WriteTags(flac, tags, 0); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := os.Stat(flac)
+	journal := filepath.Join(dir, "j.jsonl")
+	plan := &Plan{Operations: []Operation{{Type: "tags", Path: flac, Set: map[string]string{"ALBUMARTIST": "C"}, Size: info.Size(), ModTime: info.ModTime().UnixNano()}}}
+	if _, err := Apply(context.Background(), dir, journal, plan); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UndoLast(journal); err != nil {
+		t.Fatal(err)
+	}
+	restored, _ := taglib.ReadTags(flac)
+	if got := restored["ALBUMARTIST"]; len(got) != 2 || got[0] != "A" || got[1] != "B" {
+		t.Fatalf("expected both album artists restored, got %q", got)
 	}
 }

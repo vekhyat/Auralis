@@ -1433,6 +1433,7 @@
       "fixAppliedToast": "{{applied}} düzeltme başarıyla uygulandı",
       "fixAppliedToastErrors": "{{applied}} düzeltme {{errors}} hata ile uygulandı",
       "undoAppliedToast": "{{applied}} değişiklik başarıyla geri alındı",
+      "noSafeFixes": "Uygulanacak güvenli düzeltme yok. Dosya taşımaları tek tek seçilmelidir.",
       "undoNoBatch": "Geri alınacak önceki düzeltme yok",
       "scanCancelledToast": "Kütüphane taraması iptal edildi",
       "scanErrorToast": "Tarama başarısız: {{error}}",

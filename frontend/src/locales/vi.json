@@ -1433,6 +1433,7 @@
       "fixAppliedToast": "Đã áp dụng thành công {{applied}} bản sửa",
       "fixAppliedToastErrors": "Đã áp dụng {{applied}} bản sửa với {{errors}} lỗi",
       "undoAppliedToast": "Đã khôi phục thành công {{applied}} thay đổi",
+      "noSafeFixes": "Không có bản sửa an toàn nào để áp dụng. Việc di chuyển tệp phải được chọn từng mục.",
       "undoNoBatch": "Không có bản sửa nào trước đó để hoàn tác",
       "scanCancelledToast": "Đã hủy quét thư viện",
       "scanErrorToast": "Quét thất bại: {{error}}",

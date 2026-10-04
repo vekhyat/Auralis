@@ -1433,6 +1433,7 @@
       "fixAppliedToast": "{{applied}} Korrekturen erfolgreich angewendet",
       "fixAppliedToastErrors": "{{applied}} Korrekturen angewendet mit {{errors}} Fehlern",
       "undoAppliedToast": "{{applied}} Änderungen erfolgreich wiederhergestellt",
+      "noSafeFixes": "Keine sicheren Korrekturen verfügbar. Dateiverschiebungen müssen einzeln ausgewählt werden.",
       "undoNoBatch": "Keine vorherigen Korrekturen zum Rückgängigmachen vorhanden",
       "scanCancelledToast": "Bibliotheksscan wurde abgebrochen",
       "scanErrorToast": "Scan fehlgeschlagen: {{error}}",

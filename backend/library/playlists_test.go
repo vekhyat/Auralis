@@ -90,6 +90,19 @@ func TestPlaylistRelativeDifferentVolumeSkipped(t *testing.T) {
 	}
 }
 
+func TestPlaylistLocalKeepsOtherDriveAbsolute(t *testing.T) {
+	// CreateM3U8File playlists are played on this PC, where an absolute
+	// path on another drive still works, so they keep it.
+	line, reason := playlistLine(`C:\music\mix.m3u8`, `D:\songs\x.flac`, PlaylistLocal, "", "")
+	if reason != "" || line != `D:\songs\x.flac` {
+		t.Fatalf("line=%q reason=%q", line, reason)
+	}
+	line, _ = playlistLine(`C:\music\mix.m3u8`, `C:\music\A\x.flac`, PlaylistLocal, "", "")
+	if line != "A/x.flac" {
+		t.Fatalf("same-drive line = %q", line)
+	}
+}
+
 func TestPlaylistUTF8AndForwardSlashes(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "mix.m3u8")

@@ -1433,6 +1433,7 @@
       "fixAppliedToast": "Se aplicaron exitosamente {{applied}} correcciones",
       "fixAppliedToastErrors": "Se aplicaron {{applied}} correcciones con {{errors}} errores",
       "undoAppliedToast": "Se restauraron exitosamente {{applied}} cambios",
+      "noSafeFixes": "No hay correcciones seguras para aplicar. Los movimientos de archivos se eligen uno por uno.",
       "undoNoBatch": "No hay correcciones previas para deshacer",
       "scanCancelledToast": "Se canceló el escaneo de la biblioteca",
       "scanErrorToast": "Error al escanear: {{error}}",

@@ -15,8 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-flac/go-flac"
-	"github.com/vekhyat/Auralis/backend"
 	"go.senan.xyz/taglib"
 )
 
@@ -80,10 +78,11 @@ func ScanLibrary(ctx context.Context, root string, progress func(ScanProgress)) 
 	audioDirs := map[string]bool{}
 	var audioPaths []string
 	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if walkErr != nil {
-			if walkErr == context.Canceled || ctx.Err() != nil {
-				return ctx.Err()
-			}
+			// Unreadable entries are skipped rather than failing the scan.
 			return nil
 		}
 		if info.IsDir() {
@@ -239,16 +238,11 @@ func readTrack(root, path string) (Track, error) {
 	track.FolderCover = folderHasCover(filepath.Dir(path))
 	track.LRC = lrcExists(path)
 
-	if track.Format == "flac" {
-		if bits, samples, rate := flacStreamInfo(path); rate > 0 {
-			track.BitDepth = bits
-			track.DurationSeconds = float64(samples) / float64(rate)
-		}
-	}
-	if track.DurationSeconds <= 0 {
-		if d, err := backend.GetAudioDuration(path); err == nil && d > 0 {
-			track.DurationSeconds = d
-		}
+	// ReadProperties parses the stream headers in-process, which avoids
+	// spawning ffprobe for every MP3/M4A in a large library.
+	if props, err := taglib.ReadProperties(path); err == nil {
+		track.DurationSeconds = props.Length.Seconds()
+		track.BitDepth = int(props.BitDepth)
 	}
 	return track, nil
 }
@@ -314,26 +308,4 @@ func lrcExists(audioPath string) bool {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
-}
-
-func flacStreamInfo(path string) (bitDepth int, totalSamples uint64, sampleRate uint32) {
-	f, err := flac.ParseFile(path)
-	if err != nil {
-		return 0, 0, 0
-	}
-	for _, block := range f.Meta {
-		if block.Type != flac.StreamInfo || len(block.Data) < 18 {
-			continue
-		}
-		data := block.Data
-		sampleRate = uint32(data[10])<<12 | uint32(data[11])<<4 | uint32(data[12])>>4
-		bitDepth = (((int(data[12]) & 0x01) << 4) | (int(data[13]) >> 4)) + 1
-		totalSamples = uint64(data[13]&0x0F)<<32 |
-			uint64(data[14])<<24 |
-			uint64(data[15])<<16 |
-			uint64(data[16])<<8 |
-			uint64(data[17])
-		return bitDepth, totalSamples, sampleRate
-	}
-	return 0, 0, 0
 }

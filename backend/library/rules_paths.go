@@ -1,7 +1,6 @@
 package library
 
 import (
-	"path"
 	"path/filepath"
 	"strings"
 )
@@ -23,6 +22,11 @@ var pathRule = Rule{
 					Message:  "path contains characters illegal for this profile",
 					Fixable:  true,
 				})
+				continue
+			}
+			if strings.TrimSpace(t.Title) == "" || strings.TrimSpace(t.Album) == "" {
+				// Without tags the template would send every file to
+				// "Unknown Album/Unknown Title" and collide.
 				continue
 			}
 			expected := expectedRelPath(profile, t)
@@ -98,4 +102,3 @@ func year4(year string) string {
 	return year
 }
 
-var _ = path.Join

@@ -1433,6 +1433,7 @@
       "fixAppliedToast": "Applicate con successo {{applied}} correzioni",
       "fixAppliedToastErrors": "Applicate {{applied}} correzioni con {{errors}} errori",
       "undoAppliedToast": "Ripristinate con successo {{applied}} modifiche",
+      "noSafeFixes": "Nessuna correzione sicura da applicare. Gli spostamenti dei file vanno scelti uno per uno.",
       "undoNoBatch": "Nessuna correzione precedente da annullare",
       "scanCancelledToast": "La scansione della libreria è stata annullata",
       "scanErrorToast": "Scansione non riuscita: {{error}}",

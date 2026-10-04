@@ -232,16 +232,25 @@ export function LibraryHealthPage() {
         [selectedIssueIds]
     );
 
+    // "Safe" means tag edits and empty-folder removal. Path fixes move files
+    // around the library, so they are only planned when picked explicitly.
     const handlePreviewAllSafe = useCallback(async () => {
+        const safeIds = (report?.issues ?? [])
+            .filter((issue) => issue.fixable && issue.rule_id !== "PATH")
+            .map((issue) => issue.id);
+        if (safeIds.length === 0) {
+            toast.info(t("translation.libraryHealth.noSafeFixes"));
+            return;
+        }
         try {
-            const plan = await PreviewLibraryFixes([]);
+            const plan = await PreviewLibraryFixes(safeIds);
             setPreviewPlan(plan);
             setIsPreviewOpen(true);
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             toast.error(msg);
         }
-    }, []);
+    }, [report]);
 
     const handleApplyPlan = async () => {
         if (!previewPlan) return;

@@ -3,10 +3,10 @@ import { useTranslation } from "react-i18next";
 import i18n, { translateMessage } from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, } from "@/components/ui/dialog";
-import { Activity, X } from "lucide-react";
+import { X } from "lucide-react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { getSettings, getSettingsWithDefaults, loadSettings, saveSettings, applyThemeMode } from "@/lib/settings";
-import { cn, openExternal } from "@/lib/utils";
+import { openExternal } from "@/lib/utils";
 import { fetchSpotifyMetadata } from "@/lib/api";
 import { OpenFolder, CheckFFmpegInstalled, DownloadFFmpeg, GetRecentFetches, SaveRecentFetches, ListIPods } from "../wailsjs/go/main/App";
 import { EventsOn, EventsOff, Quit } from "../wailsjs/runtime/runtime";
@@ -818,15 +818,6 @@ function App() {
         setShowUnsavedChangesDialog(false);
         setPendingPageChange(null);
     };
-    useEffect(() => {
-        EventsOn("library:open-health", () => {
-            setCurrentPage("library-health");
-        });
-        return () => {
-            EventsOff("library:open-health");
-        };
-    }, []);
-
     const [secondaryPages, setSecondaryPages] = useState(() => ({
         settings: SettingsPage,
         debug: DebugLoggerPage,
@@ -958,23 +949,6 @@ function App() {
               }}
             />
 
-            <div className="fixed bottom-[116px] left-0 w-[184px] p-3 z-40 pointer-events-auto" style={{ "--wails-draggable": "no-drag" } as React.CSSProperties}>
-              <button
-                type="button"
-                aria-current={currentPage === "library-health" ? "page" : undefined}
-                aria-label={t("translation.libraryHealth.title")}
-                onClick={() => handlePageChange("library-health")}
-                className={cn(
-                  "relative flex h-11 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-sm transition-colors",
-                  currentPage === "library-health"
-                    ? "bg-primary/10 font-semibold text-primary"
-                    : "font-medium text-muted-foreground hover:text-foreground"
-                )}
-              >
-                <Activity className="size-[18px] shrink-0" />
-                <span className="whitespace-nowrap truncate">{t("translation.libraryHealth.title")}</span>
-              </button>
-            </div>
 
             <main
               data-page={currentPage}

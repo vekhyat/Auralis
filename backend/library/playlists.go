@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/vekhyat/Auralis/backend"
 	"go.senan.xyz/taglib"
 )
 
@@ -21,6 +20,11 @@ const (
 	// PlaylistDevice prefixes paths made relative to the music root with a
 	// device-absolute prefix such as /storage/emulated/0/Music.
 	PlaylistDevice PlaylistMode = "device"
+	// PlaylistLocal is relative to the playlist like PlaylistRelative, but
+	// falls back to the absolute path for files on another drive. It is only
+	// for playlists played on this PC, which is what CreateM3U8File has
+	// always written; never use it for device exports.
+	PlaylistLocal PlaylistMode = "local"
 )
 
 // PlaylistTrack is one entry to write.
@@ -107,6 +111,11 @@ func playlistLine(m3u8Path, trackPath string, mode PlaylistMode, musicRoot, devi
 			return "", reason
 		}
 		return filepath.ToSlash(rel), ""
+	case PlaylistLocal:
+		if rel, err := filepath.Rel(filepath.Dir(m3u8Path), trackPath); err == nil {
+			return filepath.ToSlash(rel), ""
+		}
+		return trackPath, ""
 	default: // PlaylistRelative
 		rel, err := filepath.Rel(filepath.Dir(m3u8Path), trackPath)
 		if err != nil {
@@ -143,8 +152,8 @@ func TracksFromPaths(paths []string) []PlaylistTrack {
 			track.Title = firstNonEmptyPlaylist(tags, "TITLE", taglib.Title)
 			track.Artist = firstNonEmptyPlaylist(tags, "ARTIST", taglib.Artist)
 		}
-		if d, err := backend.GetAudioDuration(p); err == nil && d > 0 {
-			track.DurationSeconds = d
+		if props, err := taglib.ReadProperties(p); err == nil {
+			track.DurationSeconds = props.Length.Seconds()
 		}
 		tracks = append(tracks, track)
 	}

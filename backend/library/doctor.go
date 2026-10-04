@@ -1,8 +1,6 @@
 package library
 
 import (
-	"context"
-	"fmt"
 	"sort"
 	"strings"
 )
@@ -83,7 +81,9 @@ func DetectAll(scan *Scan, profile Profile) []Issue {
 				detected[i].Fixable = false
 			}
 			if detected[i].ID == "" {
-				detected[i].ID = rule.ID + "|" + detected[i].Path
+				// Several issues can share a rule and path (e.g. a missing
+				// cover and an oversized one), so the message is part of the ID.
+				detected[i].ID = rule.ID + "|" + detected[i].Path + "|" + detected[i].Message
 			}
 		}
 		issues = append(issues, detected...)
@@ -92,9 +92,22 @@ func DetectAll(scan *Scan, profile Profile) []Issue {
 		if issues[i].RuleID != issues[j].RuleID {
 			return issues[i].RuleID < issues[j].RuleID
 		}
-		return issues[i].Path < issues[j].Path
+		return issues[i].ID < issues[j].ID
 	})
-	return issues
+	return dedupeIssueIDs(issues)
+}
+
+func dedupeIssueIDs(issues []Issue) []Issue {
+	seen := make(map[string]bool, len(issues))
+	out := issues[:0]
+	for _, issue := range issues {
+		if seen[issue.ID] {
+			continue
+		}
+		seen[issue.ID] = true
+		out = append(out, issue)
+	}
+	return out
 }
 
 // Fixable issues of the given rules produce a Plan. Never mutates anything.
@@ -153,6 +166,23 @@ func TrackByPath(scan *Scan, path string) *Track {
 	return nil
 }
 
+// singleAlbum reports whether a folder's tracks can be treated as one release.
+// Loose files in the library root, or a folder holding several differently
+// named albums, are left alone so album-wide fixes cannot retag unrelated
+// tracks.
+func singleAlbum(dir string, tracks []*Track) bool {
+	if dir == "" {
+		return false
+	}
+	albums := map[string]bool{}
+	for _, t := range tracks {
+		if a := strings.ToLower(strings.TrimSpace(t.Album)); a != "" {
+			albums[a] = true
+		}
+	}
+	return len(albums) <= 1
+}
+
 // Albums groups track indexes by album directory.
 func Albums(scan *Scan) map[string][]*Track {
 	groups := map[string][]*Track{}
@@ -185,5 +215,3 @@ func mostCommon(counts map[string]int) string {
 	return best
 }
 
-var _ = fmt.Sprintf
-var _ = context.Canceled

@@ -1433,6 +1433,7 @@
       "fixAppliedToast": "Successfully applied {{applied}} fixes",
       "fixAppliedToastErrors": "Applied {{applied}} fixes with {{errors}} errors",
       "undoAppliedToast": "Successfully restored {{applied}} changes",
+      "noSafeFixes": "No safe fixes to apply. File moves have to be picked one by one.",
       "undoNoBatch": "No previous fixes to undo",
       "scanCancelledToast": "Library scan was cancelled",
       "scanErrorToast": "Scan failed: {{error}}",

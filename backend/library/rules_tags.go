@@ -2,7 +2,7 @@ package library
 
 import (
 	"path"
-	"sort"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -15,6 +15,9 @@ var albumArtistRule = Rule{
 	Detect: func(scan *Scan, profile Profile) []Issue {
 		var issues []Issue
 		for dir, tracks := range Albums(scan) {
+			if !singleAlbum(dir, tracks) {
+				continue
+			}
 			seen := map[string]int{}
 			for _, t := range tracks {
 				if strings.TrimSpace(t.AlbumArtist) != "" {
@@ -106,6 +109,9 @@ var compilationRule = Rule{
 	Detect: func(scan *Scan, profile Profile) []Issue {
 		var issues []Issue
 		for dir, tracks := range Albums(scan) {
+			if !singleAlbum(dir, tracks) {
+				continue
+			}
 			artists := map[string]bool{}
 			for _, t := range tracks {
 				if a := strings.ToLower(strings.TrimSpace(t.Artist)); a != "" {
@@ -151,96 +157,126 @@ var compilationRule = Rule{
 
 // --- Track numbers ----------------------------------------------------------
 
+// Gaps and track totals larger than the files present usually mean the album
+// is incomplete, not that the numbers are wrong, so those are reported only.
+// Fixes never renumber a track that already has a number.
+
 var trackNumberRule = Rule{
 	ID:       "TRACKNUMBER",
 	Severity: SeverityWarning,
 	Detect: func(scan *Scan, profile Profile) []Issue {
 		var issues []Issue
 		for dir, tracks := range Albums(scan) {
-			perDisc := map[int][]*Track{}
-			for _, t := range tracks {
-				d := t.DiscNumber
-				if d == 0 {
-					d = 1
-				}
-				perDisc[d] = append(perDisc[d], t)
+			if !singleAlbum(dir, tracks) {
+				continue
 			}
-			for disc, discTracks := range perDisc {
-				numbers := map[int]bool{}
+			for disc, discTracks := range tracksPerDisc(tracks) {
+				seen := map[int]string{}
+				maxNum := 0
 				for _, t := range discTracks {
-					if t.TrackNumberRaw != "" && t.TrackNumber == 0 {
-						issues = append(issues, Issue{RuleID: "TRACKNUMBER", Path: t.Path, AlbumDir: dir, Message: "unparseable track number \"" + t.TrackNumberRaw + "\"", Fixable: true})
-					}
-					if t.TrackNumber == 0 {
-						issues = append(issues, Issue{RuleID: "TRACKNUMBER", Path: t.Path, AlbumDir: dir, Message: "missing track number", Fixable: true})
+					switch {
+					case t.TrackNumber == 0 && t.TrackNumberRaw != "":
+						issues = append(issues, Issue{Path: t.Path, AlbumDir: dir, Message: "unparseable track number \"" + t.TrackNumberRaw + "\"", Fixable: filenameTrackNumber(t) > 0})
+						continue
+					case t.TrackNumber == 0:
+						issues = append(issues, Issue{Path: t.Path, AlbumDir: dir, Message: "missing track number", Fixable: filenameTrackNumber(t) > 0})
 						continue
 					}
-					numbers[t.TrackNumber] = true
-					if t.TrackTotal != 0 && t.TrackTotal != len(discTracks) {
-						issues = append(issues, Issue{RuleID: "TRACKNUMBER", Path: t.Path, AlbumDir: dir, Message: "track total " + strconv.Itoa(t.TrackTotal) + " does not match " + strconv.Itoa(len(discTracks)) + " tracks", Fixable: true})
+					if other, dup := seen[t.TrackNumber]; dup {
+						issues = append(issues, Issue{Path: t.Path, AlbumDir: dir, Message: "track number " + strconv.Itoa(t.TrackNumber) + " is also used by " + other})
+					}
+					seen[t.TrackNumber] = t.RelPath
+					if t.TrackNumber > maxNum {
+						maxNum = t.TrackNumber
+					}
+					if t.Format == "flac" && strings.Contains(t.TrackNumberRaw, "/") {
+						issues = append(issues, Issue{Path: t.Path, AlbumDir: dir, Message: "track number stored as \"" + t.TrackNumberRaw + "\" instead of separate TRACKNUMBER/TRACKTOTAL", Fixable: true})
 					}
 				}
-				max := 0
-				for n := range numbers {
-					if n > max {
-						max = n
+				highest := highestTrackNumber(discTracks)
+				for _, t := range discTracks {
+					if t.TrackNumber > 0 && t.TrackTotal > 0 && t.TrackTotal < highest {
+						issues = append(issues, Issue{Path: t.Path, AlbumDir: dir, Message: "track total " + strconv.Itoa(t.TrackTotal) + " is lower than track number " + strconv.Itoa(highest), Fixable: true})
 					}
 				}
-				if max > len(numbers) {
-					issues = append(issues, Issue{RuleID: "TRACKNUMBER", Path: dir, AlbumDir: dir, Message: "gap in track numbering on disc " + strconv.Itoa(disc), Fixable: true})
+				if maxNum > len(seen) {
+					issues = append(issues, Issue{Path: dir, AlbumDir: dir, Message: "disc " + strconv.Itoa(disc) + " has " + strconv.Itoa(len(seen)) + " numbered tracks up to " + strconv.Itoa(maxNum) + "; some tracks may be missing"})
 				}
 			}
 		}
-		return dedupeIssues(issues)
+		return issues
 	},
 	Fix: func(scan *Scan, profile Profile, issues []Issue) []Operation {
 		albums := Albums(scan)
-		seen := map[string]bool{}
+		done := map[string]bool{}
 		var ops []Operation
 		for _, issue := range issues {
-			if seen[issue.AlbumDir] {
+			t := TrackByPath(scan, issue.Path)
+			if t == nil || done[t.Path] {
 				continue
 			}
-			seen[issue.AlbumDir] = true
-			tracks := append([]*Track{}, albums[issue.AlbumDir]...)
-			sort.Slice(tracks, func(i, j int) bool {
-				a, b := tracks[i], tracks[j]
-				if a.DiscNumber != b.DiscNumber {
-					return a.DiscNumber < b.DiscNumber
-				}
-				if a.TrackNumber != b.TrackNumber {
-					if a.TrackNumber == 0 {
-						return false
-					}
-					if b.TrackNumber == 0 {
-						return true
-					}
-					return a.TrackNumber < b.TrackNumber
-				}
-				return a.RelPath < b.RelPath
-			})
-			// Group per disc so totals are per-disc counts.
-			perDisc := map[int][]*Track{}
-			for _, t := range tracks {
-				d := t.DiscNumber
-				if d == 0 {
-					d = 1
-				}
-				perDisc[d] = append(perDisc[d], t)
+			done[t.Path] = true
+			num := effectiveTrackNumber(t)
+			if num == 0 {
+				continue
 			}
-			for _, discTracks := range perDisc {
-				for i, t := range discTracks {
-					num := i + 1
-					total := len(discTracks)
-					if t.TrackNumber == num && t.TrackTotal == total {
-						continue
-					}
-					ops = append(ops, tagOp(t, trackSet(t.Format, num, total), "normalise track number + total"))
-				}
+			disc := t.DiscNumber
+			if disc == 0 {
+				disc = 1
 			}
+			total := t.TrackTotal
+			if highest := highestTrackNumber(tracksPerDisc(albums[issue.AlbumDir])[disc]); total < highest {
+				total = highest
+			}
+			ops = append(ops, tagOp(t, trackSet(t.Format, num, total), "normalise track number and total"))
 		}
 		return ops
 	},
+}
+
+// effectiveTrackNumber is the tagged number, or the one in the file name.
+func effectiveTrackNumber(t *Track) int {
+	if t.TrackNumber > 0 {
+		return t.TrackNumber
+	}
+	return filenameTrackNumber(t)
+}
+
+func highestTrackNumber(tracks []*Track) int {
+	highest := 0
+	for _, t := range tracks {
+		if n := effectiveTrackNumber(t); n > highest {
+			highest = n
+		}
+	}
+	return highest
+}
+
+func tracksPerDisc(tracks []*Track) map[int][]*Track {
+	perDisc := map[int][]*Track{}
+	for _, t := range tracks {
+		d := t.DiscNumber
+		if d == 0 {
+			d = 1
+		}
+		perDisc[d] = append(perDisc[d], t)
+	}
+	return perDisc
+}
+
+// filenameTrackPattern matches "03 Title", "03. Title", "03 - Title" and the
+// profile layout "2-03. Title".
+var filenameTrackPattern = regexp.MustCompile(`^(?:\d{1,2}-)?(\d{1,3})(?:[ ._)-]|$)`)
+
+// filenameTrackNumber recovers a track number from the file name, or 0.
+func filenameTrackNumber(t *Track) int {
+	base := strings.TrimSuffix(path.Base(t.RelPath), path.Ext(t.RelPath))
+	m := filenameTrackPattern.FindStringSubmatch(base)
+	if m == nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(m[1])
+	return n
 }
 
 var discNumberRule = Rule{
@@ -249,24 +285,24 @@ var discNumberRule = Rule{
 	Detect: func(scan *Scan, profile Profile) []Issue {
 		var issues []Issue
 		for dir, tracks := range Albums(scan) {
-			hasSet, hasMissing, maxDisc := false, false, 0
+			if !singleAlbum(dir, tracks) {
+				continue
+			}
+			hasSet, hasMissing := false, false
 			for _, t := range tracks {
 				if t.DiscNumber > 0 {
 					hasSet = true
-					if t.DiscNumber > maxDisc {
-						maxDisc = t.DiscNumber
-					}
 				} else {
 					hasMissing = true
 				}
 			}
 			if hasMissing && hasSet {
-				issues = append(issues, Issue{RuleID: "DISCNUMBER", Path: dir, AlbumDir: dir, Message: "disc numbers are inconsistent across the album", Fixable: true})
-			} else if hasMissing && maxDisc == 0 && looksMultiDisc(dir) {
-				issues = append(issues, Issue{RuleID: "DISCNUMBER", Path: dir, AlbumDir: dir, Message: "missing disc numbers", Fixable: true})
+				issues = append(issues, Issue{Path: dir, AlbumDir: dir, Message: "disc numbers are inconsistent across the album", Fixable: true})
+			} else if hasMissing && looksMultiDisc(dir) {
+				issues = append(issues, Issue{Path: dir, AlbumDir: dir, Message: "folder looks like one disc of a set but has no disc numbers"})
 			}
 		}
-		return dedupeIssues(issues)
+		return issues
 	},
 	Fix: func(scan *Scan, profile Profile, issues []Issue) []Operation {
 		albums := Albums(scan)
@@ -299,23 +335,12 @@ var discNumberRule = Rule{
 	},
 }
 
-func looksMultiDisc(dir string) bool {
-	lower := strings.ToLower(path.Base(dir))
-	return strings.Contains(lower, "disc") || strings.Contains(lower, "cd") || strings.Contains(lower, "disk")
-}
+var multiDiscPattern = regexp.MustCompile(`(?i)\b(?:disc|disk|cd)\s*\d`)
 
-func dedupeIssues(issues []Issue) []Issue {
-	seen := map[string]bool{}
-	out := issues[:0]
-	for _, issue := range issues {
-		key := issue.Path + "|" + issue.Message
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		out = append(out, issue)
-	}
-	return out
+// looksMultiDisc matches folder names such as "CD1" or "Disc 2", but not
+// names that merely contain the letters, such as "ACDC".
+func looksMultiDisc(dir string) bool {
+	return multiDiscPattern.MatchString(path.Base(dir))
 }
 
 func tagOp(t *Track, set map[string]string, reason string) Operation {

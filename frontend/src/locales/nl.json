@@ -1433,6 +1433,7 @@
       "fixAppliedToast": "{{applied}} herstelacties succesvol toegepast",
       "fixAppliedToastErrors": "{{applied}} herstelacties toegepast met {{errors}} fouten",
       "undoAppliedToast": "{{applied}} wijzigingen succesvol hersteld",
+      "noSafeFixes": "Geen veilige herstelacties om toe te passen. Bestandsverplaatsingen kies je één voor één.",
       "undoNoBatch": "Geen eerdere herstelacties om ongedaan te maken",
       "scanCancelledToast": "Bibliotheekscan is geannuleerd",
       "scanErrorToast": "Scan mislukt: {{error}}",

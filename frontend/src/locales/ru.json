@@ -1433,6 +1433,7 @@
       "fixAppliedToast": "Успешно применено исправлений: {{applied}}",
       "fixAppliedToastErrors": "Применено {{applied}} исправлений с ошибками: {{errors}}",
       "undoAppliedToast": "Успешно отменено изменений: {{applied}}",
+      "noSafeFixes": "Нет безопасных исправлений. Перемещение файлов нужно выбирать по одному.",
       "undoNoBatch": "Нет предыдущих исправлений для отмены",
       "scanCancelledToast": "Сканирование медиатеки отменено",
       "scanErrorToast": "Ошибка сканирования: {{error}}",

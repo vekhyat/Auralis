@@ -20,10 +20,10 @@ export type PageType =
 export type ShellPage = Extract<PageType, "main" | "settings" | "debug" | "history" | "queue" | "devices" | "library-health">;
 
 /** Destinations shown as words in the titlebar. Debug stays in the overflow menu. */
-export type DestinationPage = Extract<ShellPage, "main" | "queue" | "history" | "devices" | "settings">;
+export type DestinationPage = Extract<ShellPage, "main" | "queue" | "history" | "library-health" | "devices" | "settings">;
 
 /** Devices only appears while an iPod is connected. */
-export const PRIMARY_DESTINATIONS = ["main", "queue", "history", "devices", "settings"] as const satisfies readonly DestinationPage[];
+export const PRIMARY_DESTINATIONS = ["main", "queue", "history", "library-health", "devices", "settings"] as const satisfies readonly DestinationPage[];
 
 const SHELL_PAGES = new Set<PageType>(["main", "settings", "debug", "history", "queue", "devices", "library-health"]);
 
