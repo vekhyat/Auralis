@@ -125,3 +125,46 @@ func TestMassStorageTarget(t *testing.T) {
 		t.Logf("FreeSpace reported %d (err: %v)", free, err)
 	}
 }
+
+func TestPutFailureKeepsPreviousCopy(t *testing.T) {
+	root := t.TempDir()
+	target := New("t", "T", root)
+	dst := filepath.Join(root, "A", "song.flac")
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, []byte("old good copy"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(t.TempDir(), "new.flac")
+	if err := os.WriteFile(src, make([]byte, 256*1024), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	err := target.Put(ctx, src, "A/song.flac", func(n int64) { cancel() })
+	if err == nil {
+		t.Fatal("expected the cancelled copy to fail")
+	}
+	if got, _ := os.ReadFile(dst); string(got) != "old good copy" {
+		t.Fatalf("previous copy was damaged: %q", got)
+	}
+	if _, err := os.Stat(dst + partSuffix); !os.IsNotExist(err) {
+		t.Fatal("partial file left behind")
+	}
+}
+
+func TestMoveRefusesToReplace(t *testing.T) {
+	root := t.TempDir()
+	target := New("t", "T", root)
+	for _, name := range []string{"a.flac", "b.flac"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := target.Move(context.Background(), "a.flac", "b.flac"); err == nil {
+		t.Fatal("expected move onto an existing file to fail")
+	}
+	if got, _ := os.ReadFile(filepath.Join(root, "b.flac")); string(got) != "b.flac" {
+		t.Fatal("destination was replaced")
+	}
+}

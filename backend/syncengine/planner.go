@@ -126,6 +126,7 @@ func PlanSelect(opts PlanOptions) *Plan {
 		m = NewManifest(opts.Profile.ID)
 	}
 	desired := map[string]*SourceTrack{}
+	takenFold := map[string]bool{}
 	for i := range opts.Tracks {
 		tr := &opts.Tracks[i]
 		rel := opts.Profile.RelativePath(library.TrackFields{
@@ -133,7 +134,8 @@ func PlanSelect(opts PlanOptions) *Plan {
 			Album: tr.Album, Year: tr.Year, TrackNumber: tr.TrackNumber,
 			DiscNumber: tr.DiscNumber, DiscTotal: tr.DiscTotal,
 		})
-		rel = opts.Profile.SanitizeRelativePath(rel + opts.Policy.RemoteExt(tr.Ext))
+		rel = uniqueRel(takenFold, opts.Profile.SanitizeRelativePath(rel+opts.Policy.RemoteExt(tr.Ext)))
+		takenFold[strings.ToLower(rel)] = true
 		desired[rel] = tr
 	}
 
@@ -302,10 +304,22 @@ func HumanBytes(v int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(v)/float64(div), "KMGTPE"[exp])
 }
 
-// DeletePath returns the trash destination for a managed file.
-func DeletePath(rel, trashDir string, stamp int64) string {
-	base := path.Base(rel)
-	return path.Join(trashDir, fmt.Sprintf("%d", stamp), base)
+// uniqueRel returns rel, or "name (2).ext", "name (3).ext"... when two
+// tracks would land on the same device path (e.g. duplicate tags), so one
+// cannot silently replace the other. takenFold holds lower-cased paths
+// because FAT, exFAT and Android shared storage ignore case.
+func uniqueRel(takenFold map[string]bool, rel string) string {
+	if !takenFold[strings.ToLower(rel)] {
+		return rel
+	}
+	ext := path.Ext(rel)
+	base := strings.TrimSuffix(rel, ext)
+	for n := 2; ; n++ {
+		candidate := fmt.Sprintf("%s (%d)%s", base, n, ext)
+		if !takenFold[strings.ToLower(candidate)] {
+			return candidate
+		}
+	}
 }
 
 // SanitizedManifestEntry builds the manifest entry for a completed operation.

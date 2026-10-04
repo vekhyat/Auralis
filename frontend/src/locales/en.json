@@ -1426,6 +1426,8 @@
       "statusTranscoding": "Transcoding audio...",
       "statusTransferring": "Transferring files...",
       "statusCleaning": "Cleaning up old files...",
+      "doneWithSkipped_one": "Sync finished. {{count}} track was skipped because a file Auralis didn't add is already there.",
+      "doneWithSkipped_other": "Sync finished. {{count}} tracks were skipped because files Auralis didn't add are already there.",
       "statusDone": "Sync completed successfully!",
       "statusCancelled": "Sync cancelled",
       "statusError": "Sync error: {{error}}",

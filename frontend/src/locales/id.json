@@ -1426,6 +1426,8 @@
       "statusTranscoding": "Mengonversi audio...",
       "statusTransferring": "Mentransfer berkas...",
       "statusCleaning": "Membersihkan berkas lama...",
+      "doneWithSkipped_one": "Sinkronisasi selesai. {{count}} lagu dilewati karena sudah ada file yang tidak ditambahkan Auralis di sana.",
+      "doneWithSkipped_other": "Sinkronisasi selesai. {{count}} lagu dilewati karena sudah ada file yang tidak ditambahkan Auralis di sana.",
       "statusDone": "Sinkronisasi berhasil diselesaikan!",
       "statusCancelled": "Sinkronisasi dibatalkan",
       "statusError": "Kesalahan sinkronisasi: {{error}}",

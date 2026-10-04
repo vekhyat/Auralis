@@ -19,6 +19,9 @@ const ManifestVersion = 1
 // ManifestPathRel is where the manifest lives, relative to the music root.
 const ManifestPathRel = ".auralis/manifest.json"
 
+// TrashDirRel holds files removed by a sync, relative to the music root.
+const TrashDirRel = ".auralis/trash"
+
 // ManifestEntry records one managed file on the device.
 type ManifestEntry struct {
 	// RemotePath is the file's path relative to the music root.

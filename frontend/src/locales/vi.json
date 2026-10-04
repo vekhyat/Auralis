@@ -1426,6 +1426,8 @@
       "statusTranscoding": "Đang chuyển mã âm thanh...",
       "statusTransferring": "Đang truyền tệp...",
       "statusCleaning": "Đang dọn dẹp các tệp cũ...",
+      "doneWithSkipped_one": "Đã đồng bộ xong. Đã bỏ qua {{count}} bài vì ở đó đã có tệp không do Auralis thêm vào.",
+      "doneWithSkipped_other": "Đã đồng bộ xong. Đã bỏ qua {{count}} bài vì ở đó đã có tệp không do Auralis thêm vào.",
       "statusDone": "Đồng bộ hoàn tất thành công!",
       "statusCancelled": "Đã hủy đồng bộ",
       "statusError": "Lỗi đồng bộ: {{error}}",

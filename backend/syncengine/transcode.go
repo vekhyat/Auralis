@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/vekhyat/Auralis/backend"
+	"go.senan.xyz/taglib"
 )
 
 // TranscodeCache converts lossless sources per FormatPolicy and caches the
@@ -78,14 +79,17 @@ func transcodeTo(ctx context.Context, src, dst string, policy FormatPolicy) erro
 	if err := backend.ValidateExecutable(ffmpeg); err != nil {
 		return err
 	}
-	args := []string{"-hide_banner", "-nostats", "-i", src, "-map", "0:a", "-map", "0:v?", "-map_metadata", "0", "-y"}
+	// Cover art is dropped here and copied with taglib afterwards: the Ogg
+	// muxer rejects an attached image stream, and MP4 needs it flagged as
+	// cover art, so one path that works for every format is simpler.
+	args := []string{"-hide_banner", "-nostats", "-i", src, "-map", "0:a", "-vn", "-map_metadata", "0", "-y"}
 	switch policy.Mode {
 	case "aac":
-		args = append(args, "-c:a", "aac", "-b:a", "256k", "-c:v", "copy", "-f", "ipod", dst)
+		args = append(args, "-c:a", "aac", "-b:a", "256k", "-f", "ipod", dst)
 	case "opus":
-		args = append(args, "-c:a", "libopus", "-b:a", "160k", "-c:v", "copy", dst)
+		args = append(args, "-c:a", "libopus", "-b:a", "160k", "-f", "ogg", dst)
 	case "mp3":
-		args = append(args, "-c:a", "libmp3lame", "-q:a", "0", "-id3v2_version", "3", "-c:v", "copy", dst)
+		args = append(args, "-c:a", "libmp3lame", "-q:a", "0", "-id3v2_version", "3", "-f", "mp3", dst)
 	default:
 		return fmt.Errorf("unsupported transcode mode %q", policy.Mode)
 	}
@@ -102,10 +106,17 @@ func transcodeTo(ctx context.Context, src, dst string, policy FormatPolicy) erro
 		}
 		return fmt.Errorf("ffmpeg: %w: %s", err, text)
 	}
+	// Missing art is not worth failing the sync over.
+	if cover, err := taglib.ReadImage(src); err == nil && len(cover) > 0 {
+		_ = taglib.WriteImage(dst, cover)
+	}
 	return nil
 }
 
-// execCmd binds the command to ctx so cancellation kills FFmpeg.
+// execCmd binds the command to ctx so cancellation kills FFmpeg, and hides
+// the console window Windows would otherwise flash for every track.
 func execCmd(ctx context.Context, name string, args ...string) *exec.Cmd {
-	return exec.CommandContext(ctx, name, args...)
+	cmd := exec.CommandContext(ctx, name, args...)
+	hideWindow(cmd)
+	return cmd
 }

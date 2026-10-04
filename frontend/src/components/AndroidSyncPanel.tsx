@@ -22,7 +22,7 @@ import {
     StartSync,
 } from "../../wailsjs/go/main/App";
 import { devices, syncengine } from "../../wailsjs/go/models";
-import { EventsOff, EventsOn } from "../../wailsjs/runtime/runtime";
+import { EventsOn } from "../../wailsjs/runtime/runtime";
 import {
     AlertCircle,
     Check,
@@ -48,17 +48,29 @@ function formatBytes(value: number): string {
     return `${Math.max(1, Math.round(value / (1024 * 1024)))} MB`;
 }
 
+/** Mirrors syncengine.Progress. Copy events omit the op counts, so the
+ * panel merges events instead of replacing them. */
 interface ProgressEvent {
     phase: string;
-    opTotal?: number;
+    op_total?: number;
     done?: number;
-    bytesTotal?: number;
-    bytesDone?: number;
+    bytes?: number;
     name?: string;
-    speedBps?: number;
-    etaSec?: number;
+    skipped?: number;
     error?: string;
 }
+
+const PHASE_LABELS: Record<string, string> = {
+    copy: "translation.sync.statusTransferring",
+    move: "translation.sync.statusTransferring",
+    progress: "translation.sync.statusTransferring",
+    skipped: "translation.sync.statusTransferring",
+    delete: "translation.sync.statusCleaning",
+    manifest: "translation.sync.statusCleaning",
+    starting: "translation.sync.statusStarting",
+    done: "translation.sync.statusDone",
+    cancelled: "translation.sync.statusCancelled",
+};
 
 export function AndroidSyncPanel() {
     const [targets, setTargets] = useState<devices.SyncTargetView[]>([]);
@@ -117,13 +129,17 @@ export function AndroidSyncPanel() {
             pull();
         };
 
-        EventsOn("devices:changed", handleDevices);
+        // Use the returned unsubscribers: EventsOff would also remove other
+        // components' listeners for the same event.
+        const unsubscribers = [EventsOn("devices:changed", handleDevices)];
 
-        EventsOn("sync:progress", (event: ProgressEvent) => {
-            setSyncProgress(event);
+        unsubscribers.push(EventsOn("sync:progress", (event: ProgressEvent) => {
+            setSyncProgress((previous) => ({ ...previous, ...event }));
             if (event?.phase === "done" || event?.phase === "error" || event?.phase === "cancelled") {
                 setSyncing(false);
-                if (event.phase === "done") {
+                if (event.phase === "done" && event.skipped) {
+                    toast.warning(t("translation.sync.doneWithSkipped", { count: event.skipped }));
+                } else if (event.phase === "done") {
                     toast.success(t("translation.sync.statusDone"));
                 } else if (event.phase === "cancelled") {
                     toast.info(t("translation.sync.statusCancelled"));
@@ -132,9 +148,9 @@ export function AndroidSyncPanel() {
                 }
                 pull();
             }
-        });
+        }));
 
-        EventsOn("platform-tools:progress", (data: { percent: number; status: string }) => {
+        unsubscribers.push(EventsOn("platform-tools:progress", (data: { percent: number; status: string }) => {
             setAdbProgress(data);
             if (data.percent >= 100) {
                 setAdbDownloading(false);
@@ -142,13 +158,11 @@ export function AndroidSyncPanel() {
                 toast.success(t("translation.sync.adbInstalled"));
                 pull();
             }
-        });
+        }));
 
         return () => {
             mounted = false;
-            EventsOff("devices:changed");
-            EventsOff("sync:progress");
-            EventsOff("platform-tools:progress");
+            unsubscribers.forEach((unsubscribe) => unsubscribe());
         };
     }, []);
 
@@ -212,6 +226,7 @@ export function AndroidSyncPanel() {
 
     const handleStartSync = async () => {
         if (!activeTarget) return;
+        setSyncProgress({ phase: "starting" });
         setSyncing(true);
         setShowPlanDialog(false);
         try {
@@ -224,6 +239,7 @@ export function AndroidSyncPanel() {
 
     const handleResumeSync = async () => {
         if (!activeTarget) return;
+        setSyncProgress({ phase: "starting" });
         setSyncing(true);
         try {
             await ResumeSync(activeTarget.id);
@@ -541,8 +557,8 @@ export function AndroidSyncPanel() {
                                         <Button
                                             variant="default"
                                             size="sm"
-                                            disabled={syncing || !activeTarget.connected}
-                                            onClick={() => void handleStartSync()}
+                                            disabled={planning || syncing || !activeTarget.connected}
+                                            onClick={() => void handlePreviewSync()}
                                         >
                                             <Play className="mr-1.5 size-3.5" />
                                             {t("translation.sync.syncNow")}
@@ -571,27 +587,23 @@ export function AndroidSyncPanel() {
                                     <div className="mt-2 flex flex-col gap-2 rounded-md bg-muted/40 p-3 text-xs">
                                         <div className="flex items-center justify-between">
                                             <span className="font-medium text-foreground">
-                                                {syncProgress.phase === "transcoding" && t("translation.sync.statusTranscoding")}
-                                                {syncProgress.phase === "transferring" && t("translation.sync.statusTransferring")}
-                                                {syncProgress.phase === "deleting" && t("translation.sync.statusCleaning")}
-                                                {syncProgress.phase === "done" && t("translation.sync.statusDone")}
-                                                {syncProgress.phase === "starting" && t("translation.sync.statusStarting")}
-                                                {syncProgress.phase === "cancelled" && t("translation.sync.statusCancelled")}
-                                                {syncProgress.phase === "error" && t("translation.sync.statusError", { error: syncProgress.error || "" })}
+                                                {syncProgress.phase === "error"
+                                                    ? t("translation.sync.statusError", { error: syncProgress.error || "" })
+                                                    : t(PHASE_LABELS[syncProgress.phase] ?? "translation.sync.statusTransferring")}
                                             </span>
-                                            {syncProgress.opTotal && syncProgress.opTotal > 0 && (
+                                            {syncProgress.op_total ? (
                                                 <span className="font-mono text-[10px] text-muted-foreground">
-                                                    {syncProgress.done || 0} / {syncProgress.opTotal}
+                                                    {syncProgress.done || 0} / {syncProgress.op_total}
                                                 </span>
-                                            )}
+                                            ) : null}
                                         </div>
 
-                                        {syncProgress.bytesTotal && syncProgress.bytesTotal > 0 && (
+                                        {syncProgress.op_total ? (
                                             <Progress
-                                                value={Math.round(((syncProgress.bytesDone || 0) / syncProgress.bytesTotal) * 100)}
+                                                value={Math.round(((syncProgress.done || 0) / syncProgress.op_total) * 100)}
                                                 className="h-1.5 w-full"
                                             />
-                                        )}
+                                        ) : null}
 
                                         {syncProgress.name && (
                                             <span className="font-mono text-[11px] text-muted-foreground truncate">

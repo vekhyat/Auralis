@@ -1426,6 +1426,8 @@
       "statusTranscoding": "Transcodifica audio in corso...",
       "statusTransferring": "Trasferimento file in corso...",
       "statusCleaning": "Pulizia vecchi file in corso...",
+      "doneWithSkipped_one": "Sincronizzazione completata. {{count}} brano è stato saltato perché lì c'è già un file non aggiunto da Auralis.",
+      "doneWithSkipped_other": "Sincronizzazione completata. {{count}} brani sono stati saltati perché lì ci sono già file non aggiunti da Auralis.",
       "statusDone": "Sincronizzazione completata con successo!",
       "statusCancelled": "Sincronizzazione annullata",
       "statusError": "Errore di sincronizzazione: {{error}}",

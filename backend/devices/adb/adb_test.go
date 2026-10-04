@@ -271,3 +271,30 @@ func TestTargetSyncTargetInterface(t *testing.T) {
 		t.Errorf("expected Move(root) to fail")
 	}
 }
+
+func TestTargetPutRenamesAndShellFailuresSurface(t *testing.T) {
+	server := newFakeServer(t)
+	defer server.close()
+	target := NewTarget(NewClient(server.addr()), "emulator-5554", "Pixel 7", "/sdcard/Music")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	local := filepath.Join(t.TempDir(), "a.flac")
+	if err := os.WriteFile(local, []byte("audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := target.Put(ctx, local, "A/a.flac", nil); err != nil {
+		t.Fatal(err)
+	}
+	if size, err := target.StatSize(ctx, "A/a.flac"); err != nil || size != 5 {
+		t.Fatalf("uploaded file not at its final name: size=%d err=%v", size, err)
+	}
+	if _, err := target.StatSize(ctx, "A/a.flac"+partSuffix); err == nil {
+		t.Fatal("partial upload name left behind")
+	}
+
+	// A failing mv must be reported, not silently treated as success.
+	if err := target.Move(ctx, "/sdcard/Music/A/a.flac", "/sdcard/Music/readonly/a.flac"); err == nil {
+		t.Fatal("expected the failed move to return an error")
+	}
+}

@@ -1426,6 +1426,8 @@
       "statusTranscoding": "Transcodificando audio...",
       "statusTransferring": "Transfiriendo archivos...",
       "statusCleaning": "Limpiando archivos antiguos...",
+      "doneWithSkipped_one": "Sincronización terminada. Se omitió {{count}} pista porque ya hay ahí un archivo que Auralis no agregó.",
+      "doneWithSkipped_other": "Sincronización terminada. Se omitieron {{count}} pistas porque ya hay ahí archivos que Auralis no agregó.",
       "statusDone": "¡Sincronización completada con éxito!",
       "statusCancelled": "Sincronización cancelada",
       "statusError": "Error de sincronización: {{error}}",

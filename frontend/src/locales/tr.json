@@ -1426,6 +1426,8 @@
       "statusTranscoding": "Ses dönüştürülüyor...",
       "statusTransferring": "Dosyalar aktarılıyor...",
       "statusCleaning": "Eski dosyalar temizleniyor...",
+      "doneWithSkipped_one": "Eşitleme tamamlandı. Orada Auralis'in eklemediği bir dosya olduğu için {{count}} parça atlandı.",
+      "doneWithSkipped_other": "Eşitleme tamamlandı. Orada Auralis'in eklemediği dosyalar olduğu için {{count}} parça atlandı.",
       "statusDone": "Eşitleme başarıyla tamamlandı!",
       "statusCancelled": "Eşitleme iptal edildi",
       "statusError": "Eşitleme hatası: {{error}}",

@@ -124,6 +124,11 @@ func (t *Target) List(ctx context.Context, root string) ([]syncengine.RemoteEntr
 	return out, nil
 }
 
+// partSuffix marks an in-progress copy. The file only takes its real name
+// once complete, so an interrupted sync never leaves a truncated track (or
+// destroys the previous good copy during an update).
+const partSuffix = ".auralis-part"
+
 // Put copies localPath to remotePath, creating parents, and reports the
 // cumulative byte count after every 64 KiB chunk.
 func (t *Target) Put(ctx context.Context, localPath, remotePath string, progress func(int64)) error {
@@ -145,21 +150,37 @@ func (t *Target) Put(ctx context.Context, localPath, remotePath string, progress
 		return err
 	}
 	defer src.Close()
-	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	partPath := dstPath + partSuffix
+	dst, err := os.OpenFile(partPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
 	}
+	if err := copyWithProgress(ctx, dst, src, progress); err != nil {
+		dst.Close()
+		os.Remove(partPath)
+		return err
+	}
+	if err := dst.Close(); err != nil {
+		os.Remove(partPath)
+		return err
+	}
+	if err := os.Rename(partPath, dstPath); err != nil {
+		os.Remove(partPath)
+		return err
+	}
+	return nil
+}
+
+func copyWithProgress(ctx context.Context, dst io.Writer, src io.Reader, progress func(int64)) error {
 	buf := make([]byte, 64*1024)
 	var copied int64
 	for {
 		if err := ctx.Err(); err != nil {
-			dst.Close()
 			return err
 		}
 		n, rerr := src.Read(buf)
 		if n > 0 {
 			if _, werr := dst.Write(buf[:n]); werr != nil {
-				dst.Close()
 				return werr
 			}
 			copied += int64(n)
@@ -168,18 +189,16 @@ func (t *Target) Put(ctx context.Context, localPath, remotePath string, progress
 			}
 		}
 		if rerr == io.EOF {
-			break
+			return nil
 		}
 		if rerr != nil {
-			dst.Close()
 			return rerr
 		}
 	}
-	return dst.Close()
 }
 
 // Move renames from to to, falling back to copy+remove when the rename
-// fails (cross-volume move or an existing destination on Windows).
+// fails (e.g. across volumes). It refuses to replace an existing file.
 func (t *Target) Move(ctx context.Context, from, to string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -194,6 +213,9 @@ func (t *Target) Move(ctx context.Context, from, to string) error {
 	}
 	if fromPath == filepath.Clean(t.Root) || toPath == filepath.Clean(t.Root) {
 		return fmt.Errorf("cannot move target root %q", t.Root)
+	}
+	if _, err := os.Stat(toPath); err == nil {
+		return fmt.Errorf("move destination %q already exists", to)
 	}
 	if err := os.MkdirAll(filepath.Dir(toPath), 0o755); err != nil {
 		return err

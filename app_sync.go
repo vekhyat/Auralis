@@ -109,13 +109,7 @@ func (a *App) PlanSync(id string) (*syncengine.Plan, error) {
 
 	freeBytes, _ := target.FreeSpace(ctx)
 
-	var existingManifest *syncengine.Manifest
-	if opener, ok := target.(syncengine.Open); ok {
-		if rc, err := opener.Open(ctx, syncengine.JoinRemote(target.Info().Root, syncengine.ManifestPathRel)); err == nil {
-			defer rc.Close()
-			existingManifest, _ = syncengine.ReadManifest(rc)
-		}
-	}
+	existingManifest := readDeviceManifest(ctx, target)
 
 	plan := syncengine.PlanSelect(syncengine.PlanOptions{
 		Tracks:         selectedTracks,
@@ -151,15 +145,11 @@ func (a *App) StartSync(id string) error {
 		return errors.New("a sync job is already in progress")
 	}
 
+	// Only run a plan the user has previewed: it may move files to trash.
 	plan := a.activeSyncPlan
 	if plan == nil || a.activeSyncPlanTargetID != id {
 		a.syncMu.Unlock()
-		var err error
-		plan, err = a.PlanSync(id)
-		if err != nil {
-			return err
-		}
-		a.syncMu.Lock()
+		return errors.New("preview the sync before starting it")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -178,12 +168,7 @@ func (a *App) StartSync(id string) error {
 		mgr := a.getSyncManager()
 		target, libProfile, policy, err := mgr.ResolveTarget(id)
 		if err != nil {
-			if a.ctx != nil {
-				runtime.EventsEmit(a.ctx, "sync:progress", syncengine.Progress{
-					Phase: "error",
-					Name:  err.Error(),
-				})
-			}
+			a.emitSyncProgress(syncengine.Progress{Phase: "error", Error: err.Error()})
 			return
 		}
 
@@ -214,30 +199,18 @@ func (a *App) StartSync(id string) error {
 			},
 		}
 
-		var existingManifest *syncengine.Manifest
-		if opener, ok := target.(syncengine.Open); ok {
-			if rc, err := opener.Open(ctx, syncengine.JoinRemote(target.Info().Root, syncengine.ManifestPathRel)); err == nil {
-				defer rc.Close()
-				existingManifest, _ = syncengine.ReadManifest(rc)
-			}
+		manifest := readDeviceManifest(ctx, target)
+		if manifest == nil {
+			// First sync to this device.
+			manifest = syncengine.NewManifest(libProfile.ID)
 		}
 
-		execErr := executor.Run(ctx, plan, existingManifest)
+		execErr := executor.Run(ctx, plan, manifest)
 		if execErr != nil {
 			if errors.Is(execErr, context.Canceled) {
-				if a.ctx != nil {
-					runtime.EventsEmit(a.ctx, "sync:progress", syncengine.Progress{
-						Phase: "cancelled",
-						Name:  "Sync cancelled by user",
-					})
-				}
+				a.emitSyncProgress(syncengine.Progress{Phase: "cancelled"})
 			} else {
-				if a.ctx != nil {
-					runtime.EventsEmit(a.ctx, "sync:progress", syncengine.Progress{
-						Phase: "error",
-						Name:  execErr.Error(),
-					})
-				}
+				a.emitSyncProgress(syncengine.Progress{Phase: "error", Error: execErr.Error()})
 			}
 			return
 		}
@@ -247,18 +220,24 @@ func (a *App) StartSync(id string) error {
 		prof.LastSyncTime = time.Now().Unix()
 		_ = mgr.SaveProfile(prof)
 
-		// Clean up plan snapshot and journal on successful complete
+		// The plan is spent: the next sync needs a fresh preview.
 		if appDir != "" {
 			_ = os.Remove(filepath.Join(appDir, "sync_plans", targetIDHash(id)+".json"))
 		}
+		a.syncMu.Lock()
+		if a.activeSyncPlan == plan {
+			a.activeSyncPlan = nil
+			a.activeSyncPlanTargetID = ""
+		}
+		a.syncMu.Unlock()
 
+		a.emitSyncProgress(syncengine.Progress{
+			Phase:   "done",
+			OpTotal: len(plan.Ops),
+			Done:    len(plan.Ops),
+			Skipped: len(executor.Skipped),
+		})
 		if a.ctx != nil {
-			runtime.EventsEmit(a.ctx, "sync:progress", syncengine.Progress{
-				Phase:   "done",
-				OpTotal: len(plan.Ops),
-				Done:    len(plan.Ops),
-				Name:    "Sync completed successfully",
-			})
 			// Notify device changed to refresh views
 			views, _ := mgr.ListTargets(context.Background())
 			runtime.EventsEmit(a.ctx, "devices:changed", views)
@@ -266,6 +245,31 @@ func (a *App) StartSync(id string) error {
 	}()
 
 	return nil
+}
+
+// readDeviceManifest loads the manifest Auralis keeps on the device, or
+// returns nil when the device has never been synced.
+func readDeviceManifest(ctx context.Context, target syncengine.SyncTarget) *syncengine.Manifest {
+	opener, ok := target.(syncengine.Open)
+	if !ok {
+		return nil
+	}
+	rc, err := opener.Open(ctx, syncengine.JoinRemote(target.Info().Root, syncengine.ManifestPathRel))
+	if err != nil {
+		return nil
+	}
+	defer rc.Close()
+	manifest, err := syncengine.ReadManifest(rc)
+	if err != nil {
+		return nil
+	}
+	return manifest
+}
+
+func (a *App) emitSyncProgress(p syncengine.Progress) {
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "sync:progress", p)
+	}
 }
 
 // CancelSync halts the active sync process.

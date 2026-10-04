@@ -1,6 +1,7 @@
 package adb
 
 import (
+	"regexp"
 	"bytes"
 	"encoding/binary"
 	"fmt"
@@ -147,7 +148,29 @@ func (s *fakeServer) handleDeviceTransport(conn net.Conn) {
 	}
 }
 
+var fakeMvPattern = regexp.MustCompile(`mv (?:-f )?'([^']*)' '([^']*)'`)
+
 func (s *fakeServer) handleShellCommand(conn net.Conn, cmd string) {
+	// Commands wrapped by Target.run expect an exit-status trailer. Paths
+	// under /readonly fail, like a write to a protected folder would.
+	if strings.HasSuffix(cmd, "echo __AURALIS_RC=$?") {
+		s.mu.Lock()
+		s.commands = append(s.commands, cmd)
+		// Emulate "mv -f 'from' 'to'" so uploads land under their final name.
+		if m := fakeMvPattern.FindStringSubmatch(cmd); m != nil && !strings.Contains(cmd, "/readonly/") {
+			if f, ok := s.files[m[1]]; ok {
+				s.files[m[2]] = f
+				delete(s.files, m[1])
+			}
+		}
+		s.mu.Unlock()
+		if strings.Contains(cmd, "/readonly/") {
+			_, _ = io.WriteString(conn, "mv: Permission denied\r\n__AURALIS_RC=1\r\n")
+			return
+		}
+		_, _ = io.WriteString(conn, "__AURALIS_RC=0\r\n")
+		return
+	}
 	if strings.HasPrefix(cmd, "df") {
 		// Output toybox df format
 		out := "Filesystem     1K-blocks      Used Available Use% Mounted on\n" +

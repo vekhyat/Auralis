@@ -1426,6 +1426,8 @@
       "statusTranscoding": "Audio transcoderen...",
       "statusTransferring": "Bestanden overdragen...",
       "statusCleaning": "Oude bestanden opruimen...",
+      "doneWithSkipped_one": "Synchronisatie voltooid. {{count}} nummer is overgeslagen omdat daar al een bestand staat dat Auralis niet heeft toegevoegd.",
+      "doneWithSkipped_other": "Synchronisatie voltooid. {{count}} nummers zijn overgeslagen omdat daar al bestanden staan die Auralis niet heeft toegevoegd.",
       "statusDone": "Synchronisatie succesvol voltooid!",
       "statusCancelled": "Synchronisatie geannuleerd",
       "statusError": "Synchronisatiefout: {{error}}",

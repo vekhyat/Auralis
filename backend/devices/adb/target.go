@@ -150,8 +150,7 @@ func (t *Target) Put(ctx context.Context, localPath, remotePath string, progress
 	t.mu.Unlock()
 
 	if !alreadyCreated {
-		cmd := fmt.Sprintf("mkdir -p %s", QuoteArg(dir))
-		if _, err := t.client.Shell(ctx, t.Serial, cmd); err != nil {
+		if _, err := t.run(ctx, "mkdir -p "+QuoteArg(dir)); err != nil {
 			return fmt.Errorf("adb mkdir: %w", err)
 		}
 		t.mu.Lock()
@@ -163,7 +162,42 @@ func (t *Target) Put(ctx context.Context, localPath, remotePath string, progress
 	if err != nil {
 		return err
 	}
-	return t.client.Send(ctx, t.Serial, localPath, resolved, 0o644, info.ModTime(), progress)
+	// Send to a temporary name and rename once complete, so an interrupted
+	// transfer never leaves a truncated track or damages the previous copy.
+	part := resolved + partSuffix
+	if err := t.client.Send(ctx, t.Serial, localPath, part, 0o644, info.ModTime(), progress); err != nil {
+		_, _ = t.run(context.Background(), "rm -f "+QuoteArg(part))
+		return err
+	}
+	if _, err := t.run(ctx, "mv -f "+QuoteArg(part)+" "+QuoteArg(resolved)); err != nil {
+		return fmt.Errorf("adb rename: %w", err)
+	}
+	return nil
+}
+
+// partSuffix marks an in-progress transfer.
+const partSuffix = ".auralis-part"
+
+// rcMarker carries the exit status back. The adb "shell:" service does not
+// report exit codes, so without it a failed mv or rm would look successful.
+const rcMarker = "__AURALIS_RC="
+
+// run executes a shell command and returns an error when it exits non-zero.
+func (t *Target) run(ctx context.Context, cmd string) (string, error) {
+	out, err := t.client.Shell(ctx, t.Serial, "("+cmd+") 2>&1; echo "+rcMarker+"$?")
+	if err != nil {
+		return "", err
+	}
+	text := strings.TrimRight(string(out), "\r\n")
+	idx := strings.LastIndex(text, rcMarker)
+	if idx < 0 {
+		return "", fmt.Errorf("adb shell returned no exit status: %q", text)
+	}
+	body := strings.TrimSpace(text[:idx])
+	if rc := strings.TrimSpace(text[idx+len(rcMarker):]); rc != "0" {
+		return body, fmt.Errorf("exit status %s: %s", rc, body)
+	}
+	return body, nil
 }
 
 // Move renames from to to using adb shell mv.
@@ -180,11 +214,11 @@ func (t *Target) Move(ctx context.Context, from, to string) error {
 		return fmt.Errorf("cannot move target root %q", t.Root)
 	}
 
-	dir := path.Dir(toPath)
-	cmd := fmt.Sprintf("mkdir -p %s && mv %s %s", QuoteArg(dir), QuoteArg(fromPath), QuoteArg(toPath))
-	out, err := t.client.Shell(ctx, t.Serial, cmd)
-	if err != nil {
-		return fmt.Errorf("adb move: %w: %s", err, string(out))
+	to = QuoteArg(toPath)
+	cmd := fmt.Sprintf("if [ -e %s ]; then echo 'destination exists'; exit 17; fi; mkdir -p %s && mv %s %s",
+		to, QuoteArg(path.Dir(toPath)), QuoteArg(fromPath), to)
+	if _, err := t.run(ctx, cmd); err != nil {
+		return fmt.Errorf("adb move: %w", err)
 	}
 	return nil
 }
@@ -199,10 +233,8 @@ func (t *Target) Delete(ctx context.Context, remotePath string) error {
 		return fmt.Errorf("cannot delete root directory %q", t.Root)
 	}
 
-	cmd := fmt.Sprintf("rm -f %s", QuoteArg(resolved))
-	out, err := t.client.Shell(ctx, t.Serial, cmd)
-	if err != nil {
-		return fmt.Errorf("adb delete: %w: %s", err, string(out))
+	if _, err := t.run(ctx, "rm -f "+QuoteArg(resolved)); err != nil {
+		return fmt.Errorf("adb delete: %w", err)
 	}
 	return nil
 }
@@ -252,14 +284,12 @@ func parseDfOutput(out string) (free, total int64, err error) {
 	return 0, 0, fmt.Errorf("unable to parse df output: %q", out)
 }
 
-// Commit triggers media scanner broadcast to refresh Android library.
+// Commit asks Android to index the music folder. Android 11+ indexes files
+// written to shared storage on its own; the broadcast helps older versions.
+// Players with their own scanner (Poweramp) pick changes up on next launch.
 func (t *Target) Commit(ctx context.Context) error {
-	// 1. Android standard media scanner broadcast
-	cmd := fmt.Sprintf("am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d %s", QuoteArg("file://"+t.Root))
+	cmd := "am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d " + QuoteArg("file://"+t.Root)
 	_, _ = t.client.Shell(ctx, t.Serial, cmd)
-
-	// 2. Poweramp rescan intent (best-effort)
-	_, _ = t.client.Shell(ctx, t.Serial, "am broadcast -a com.maxmpz.audioplayer.API_COMMAND --ei cmd 100")
 	return nil
 }
 

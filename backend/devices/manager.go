@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,8 @@ type Manager struct {
 	mu            sync.RWMutex
 	watchStop     chan struct{}
 	watchMu       sync.Mutex
+	// adbStartTried rate-limits attempts to launch the adb server.
+	adbStartTried time.Time
 }
 
 // NewManager creates a Manager and loads stored configurations from the app directory.
@@ -97,6 +100,7 @@ func (m *Manager) ListTargets(ctx context.Context) ([]SyncTargetView, error) {
 	var views []SyncTargetView
 
 	// 1. ADB devices
+	m.ensureADBServer(ctx)
 	adbCtx, adbCancel := context.WithTimeout(ctx, 600*time.Millisecond)
 	adbDevs, _ := m.adbClient.Devices(adbCtx)
 	adbCancel()
@@ -128,7 +132,11 @@ func (m *Manager) ListTargets(ctx context.Context) ([]SyncTargetView, error) {
 	// 2. Removable volumes
 	drives, _ := massstorage.RemovableDrives()
 	for _, dr := range drives {
-		id := "drive:" + dr.Root
+		if isIPodDrive(dr.Root) {
+			continue // iPods have their own sync flow on the Devices page
+		}
+		// Keyed by volume serial so settings follow the stick, not the letter.
+		id := "drive:" + dr.ID
 		defaultRoot := filepath.Join(dr.Root, "Music")
 		profile := m.getOrCreateProfileLocked(id, "massstorage", dr.Name, dr.Name, defaultRoot)
 		views = append(views, SyncTargetView{
@@ -136,7 +144,7 @@ func (m *Manager) ListTargets(ctx context.Context) ([]SyncTargetView, error) {
 			Name:       profile.FriendlyName,
 			Kind:       "massstorage",
 			Model:      dr.Name,
-			Root:       profile.TargetFolder,
+			Root:       rebaseDrive(profile.TargetFolder, dr.Root),
 			Connected:  true,
 			FreeBytes:  dr.FreeBytes,
 			TotalBytes: dr.TotalBytes,
@@ -176,7 +184,47 @@ func (m *Manager) ListTargets(ctx context.Context) ([]SyncTargetView, error) {
 		})
 	}
 
+	// Stable order: the watcher compares signatures, and map iteration
+	// order would otherwise look like a change on every poll.
+	sort.Slice(views, func(i, j int) bool { return views[i].ID < views[j].ID })
 	return views, nil
+}
+
+// ensureADBServer starts the adb server when platform-tools are installed
+// and nothing is listening yet. Failed starts are retried at most every 30s.
+func (m *Manager) ensureADBServer(ctx context.Context) {
+	if !adb.IsPlatformToolsInstalled() {
+		return
+	}
+	m.mu.Lock()
+	if time.Since(m.adbStartTried) < 30*time.Second {
+		m.mu.Unlock()
+		return
+	}
+	m.adbStartTried = time.Now()
+	m.mu.Unlock()
+	startCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := adb.EnsureServerRunning(startCtx, ""); err == nil {
+		m.mu.Lock()
+		m.adbStartTried = time.Time{} // running: check cheaply next time
+		m.mu.Unlock()
+	}
+}
+
+// isIPodDrive reports whether a drive is an iPod in disk mode.
+func isIPodDrive(root string) bool {
+	info, err := os.Stat(filepath.Join(root, "iPod_Control"))
+	return err == nil && info.IsDir()
+}
+
+// rebaseDrive moves a saved Windows folder onto the drive's current letter,
+// e.g. `E:\Music` becomes `F:\Music` when the stick mounts as F:.
+func rebaseDrive(folder, driveRoot string) string {
+	if len(folder) >= 2 && folder[1] == ':' && len(driveRoot) >= 2 && driveRoot[1] == ':' {
+		return driveRoot[:2] + folder[2:]
+	}
+	return folder
 }
 
 func (m *Manager) getOrCreateProfileLocked(id, kind, name, model, root string) DeviceProfile {
@@ -279,9 +327,19 @@ func (m *Manager) ResolveTarget(id string) (syncengine.SyncTarget, library.Profi
 		return tgt, libProfile, p.FormatPolicy, nil
 
 	case strings.HasPrefix(id, "drive:"):
-		root := p.TargetFolder
-		if root == "" {
-			root = strings.TrimPrefix(id, "drive:")
+		drives, _ := massstorage.RemovableDrives()
+		var driveRoot string
+		for _, dr := range drives {
+			if "drive:"+dr.ID == id {
+				driveRoot = dr.Root
+			}
+		}
+		if driveRoot == "" {
+			return nil, libProfile, p.FormatPolicy, fmt.Errorf("drive %s is not connected", p.FriendlyName)
+		}
+		root := filepath.Join(driveRoot, "Music")
+		if p.TargetFolder != "" {
+			root = rebaseDrive(p.TargetFolder, driveRoot)
 		}
 		tgt := massstorage.New(id, p.FriendlyName, root)
 		tgt.Removable = true

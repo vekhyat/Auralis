@@ -147,3 +147,107 @@ func TestExecutorDeleteGoesToTrash(t *testing.T) {
 		t.Fatalf("trash files = %d, want %d", trashCount, len(tracks))
 	}
 }
+
+func TestExecutorResumeRebuildsManifestFromJournal(t *testing.T) {
+	// A real restart reloads the old manifest from the device; the journal
+	// must restore what finished before the crash.
+	tracks := setupLibrary(t)
+	profile := library.ProfileByID(library.ProfileMediaStore)
+	journalPath := filepath.Join(t.TempDir(), "journal.jsonl")
+	plan := PlanSelect(PlanOptions{Tracks: tracks, Profile: profile, ProfileVersion: 1, Policy: FormatPolicy{Mode: "keep"}, Manifest: NewManifest(profile.ID), FreeBytes: 1 << 40})
+	target := &failingPutTarget{memTarget: newMemTarget(), putFailures: 2}
+	ex := &Executor{Target: target, Root: "/music", Profile: profile, ProfileVersion: 1, Policy: FormatPolicy{Mode: "keep"}, JournalPath: journalPath, Concurrency: 1}
+	if err := ex.Run(context.Background(), plan, NewManifest(profile.ID)); err == nil {
+		t.Fatal("expected the simulated crash")
+	}
+
+	healthy := newMemTarget()
+	healthy.files = target.memTarget.files
+	fresh := NewManifest(profile.ID)
+	ex2 := &Executor{Target: healthy, Root: "/music", Profile: profile, ProfileVersion: 1, Policy: FormatPolicy{Mode: "keep"}, JournalPath: journalPath, Concurrency: 1}
+	if err := ex2.Run(context.Background(), plan, fresh); err != nil {
+		t.Fatal(err)
+	}
+	if len(fresh.Entries) != len(tracks) {
+		t.Fatalf("manifest after resume has %d entries, want %d", len(fresh.Entries), len(tracks))
+	}
+	if healthy.puts > len(tracks)-2+1 { // remaining tracks + manifest upload
+		t.Fatalf("resume re-copied finished tracks: %d puts", healthy.puts)
+	}
+	if _, err := os.Stat(journalPath); !os.IsNotExist(err) {
+		t.Fatalf("journal should be removed after success, stat err = %v", err)
+	}
+}
+
+func TestExecutorNeverOverwritesUnmanagedFiles(t *testing.T) {
+	tracks := setupLibrary(t)
+	profile := library.ProfileByID(library.ProfileMediaStore)
+	plan := PlanSelect(PlanOptions{Tracks: tracks, Profile: profile, ProfileVersion: 1, Policy: FormatPolicy{Mode: "keep"}, Manifest: NewManifest(profile.ID), FreeBytes: 1 << 40})
+	target := newMemTarget()
+	userFile := JoinRemote("/music", plan.Ops[0].Remote)
+	target.files[userFile] = []byte("the user's own copy")
+	manifest := NewManifest(profile.ID)
+	ex := &Executor{Target: target, Root: "/music", Profile: profile, ProfileVersion: 1, Policy: FormatPolicy{Mode: "keep"}, JournalPath: filepath.Join(t.TempDir(), "j.jsonl"), Concurrency: 1}
+	if err := ex.Run(context.Background(), plan, manifest); err != nil {
+		t.Fatal(err)
+	}
+	if string(target.files[userFile]) != "the user's own copy" {
+		t.Fatal("an unmanaged file on the device was overwritten")
+	}
+	if manifest.Entry(plan.Ops[0].Remote) != nil {
+		t.Fatal("a skipped file must not become managed")
+	}
+	if len(ex.Skipped) != 1 || ex.Skipped[0] != plan.Ops[0].Remote {
+		t.Fatalf("skipped = %v", ex.Skipped)
+	}
+}
+
+func TestExecutorTrashKeepsRelativePath(t *testing.T) {
+	tracks := setupLibrary(t)
+	// Same title on two albums: both land in trash without colliding.
+	tracks[2].Title = tracks[0].Title
+	tracks[2].TrackNumber = tracks[0].TrackNumber
+	profile := library.ProfileByID(library.ProfileMediaStore)
+	target := newMemTarget()
+	manifest := NewManifest(profile.ID)
+	ex := &Executor{Target: target, Root: "/music", Profile: profile, ProfileVersion: 1, Policy: FormatPolicy{Mode: "keep"}, JournalPath: filepath.Join(t.TempDir(), "j.jsonl"), Concurrency: 1, now: func() time.Time { return time.Unix(1700000000, 0) }}
+	plan := PlanSelect(PlanOptions{Tracks: tracks, Profile: profile, ProfileVersion: 1, Policy: FormatPolicy{Mode: "keep"}, Manifest: manifest, FreeBytes: 1 << 40})
+	if err := ex.Run(context.Background(), plan, manifest); err != nil {
+		t.Fatal(err)
+	}
+	plan2 := PlanSelect(PlanOptions{Profile: profile, ProfileVersion: 1, Policy: FormatPolicy{Mode: "keep"}, Manifest: manifest, FreeBytes: 1 << 40})
+	if err := ex.Run(context.Background(), plan2, manifest); err != nil {
+		t.Fatal(err)
+	}
+	trash := 0
+	for p := range target.files {
+		if strings.HasPrefix(p, "/music/.auralis/trash/1700000000/") {
+			trash++
+		}
+	}
+	if trash != len(tracks) {
+		t.Fatalf("trash files = %d, want %d", trash, len(tracks))
+	}
+}
+
+func TestPlanDisambiguatesCollidingPaths(t *testing.T) {
+	tracks := setupLibrary(t)
+	dup := tracks[0]
+	dup.Path += ".copy"
+	dup.Hash = "other"
+	dup.Title = strings.ToUpper(dup.Title) // differs only by case
+	tracks = append(tracks, dup)
+	profile := library.ProfileByID(library.ProfileMediaStore)
+	plan := PlanSelect(PlanOptions{Tracks: tracks, Profile: profile, ProfileVersion: 1, Policy: FormatPolicy{Mode: "keep"}, Manifest: NewManifest(profile.ID), FreeBytes: 1 << 40})
+	seen := map[string]bool{}
+	for _, op := range plan.Ops {
+		key := strings.ToLower(op.Remote)
+		if seen[key] {
+			t.Fatalf("two operations target %q", op.Remote)
+		}
+		seen[key] = true
+	}
+	if plan.Adds != len(tracks) {
+		t.Fatalf("adds = %d, want %d", plan.Adds, len(tracks))
+	}
+}
