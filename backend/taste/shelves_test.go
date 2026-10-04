@@ -1,6 +1,8 @@
 package taste
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -45,7 +47,7 @@ func TestLikedNotDownloadedShelf(t *testing.T) {
 
 	profile := BuildProfile(events, fb, now)
 	rawItems := likedNotDownloaded(events, profile)
-	shelfItems := finalise(rawItems, fb, libraryFilter)
+	shelfItems := finalise(rawItems, fb, ownership{tracks: libraryFilter})
 
 	// track1 is owned -> excluded
 	// track2 is dismissed -> excluded
@@ -84,7 +86,7 @@ func TestFinishAlbumsShelf(t *testing.T) {
 
 	profile := BuildProfile(events, fb, now)
 	albumItems := finishAlbums(events, profile, libraryFilter)
-	items := finalise(albumItems, fb, nil)
+	items := finalise(albumItems, fb, ownership{})
 
 	if len(items) != 1 {
 		t.Fatalf("expected 1 album item to finish, got %d: %+v", len(items), items)
@@ -153,5 +155,46 @@ func TestCappingAndDiversity(t *testing.T) {
 	}
 	if div[0].Artist != "Artist1" || div[1].Artist != "Artist2" || div[2].Artist != "Artist1" || div[3].Artist != "Artist2" || div[4].Artist != "Artist1" {
 		t.Fatalf("unexpected diversity ordering: %+v", div)
+	}
+}
+
+func TestOwnedAlbumsAreFilteredAndGapsKeepFullReleases(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{"Radiohead/OK Computer", "Weezer"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	index := &FolderAlbumIndex{Root: root}
+	if !index.Owned("Radiohead", "OK Computer (Remastered)") {
+		t.Fatal("expected the album folder to count as owned")
+	}
+	// "Weezer" at the top level is the artist folder (no audio inside), so
+	// the self-titled album is not owned.
+	if index.Owned("Weezer", "Weezer") {
+		t.Fatal("artist folder mistaken for a self-titled album")
+	}
+
+	items := []Item{
+		{ID: "album:1", Kind: "album", Title: "OK Computer", Artist: "Radiohead"},
+		{ID: "album:2", Kind: "album", Title: "Kid A", Artist: "Radiohead"},
+	}
+	kept := finalise(items, Feedback{}, ownership{albums: index.Owned})
+	if len(kept) != 1 || kept[0].Title != "Kid A" {
+		t.Fatalf("kept = %+v", kept)
+	}
+
+	gaps := discographyGapItems("Radiohead", []GapAlbum{
+		{ID: "a", Name: "In Rainbows", AlbumType: "album"},
+		{ID: "b", Name: "Creep", AlbumType: "single", TotalTracks: 2},
+		{ID: "c", Name: "My Iron Lung", AlbumType: "single", TotalTracks: 8},
+		{ID: "d", Name: "Hits", AlbumType: "compilation"},
+	}, Profile{})
+	var names []string
+	for _, g := range gaps {
+		names = append(names, g.Title)
+	}
+	if len(names) != 2 || names[0] != "In Rainbows" || names[1] != "My Iron Lung" {
+		t.Fatalf("gap releases = %v", names)
 	}
 }

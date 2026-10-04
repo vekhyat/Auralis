@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sync"
 
 	"github.com/vekhyat/Auralis/backend"
 	"github.com/vekhyat/Auralis/backend/credentials"
@@ -24,7 +25,7 @@ func (a *App) getTasteService() (*taste.Service, error) {
 		return nil, fmt.Errorf("app data dir: %w", err)
 	}
 
-	creds, err := credentials.OpenAt(appDir)
+	creds, err := credentials.Open()
 	if err != nil {
 		return nil, fmt.Errorf("credentials store: %w", err)
 	}
@@ -42,18 +43,8 @@ func (a *App) getTasteService() (*taste.Service, error) {
 		return nil
 	}
 
-	// LibraryFilter seam: checks whether item is in user's existing downloaded library
 	svc.LibraryFilter = func(lookup taste.LibraryLookup) bool {
-		settings, err := backend.LoadConfigSettings()
-		root := ""
-		if err == nil && settings != nil {
-			if s, ok := settings["downloadPath"].(string); ok {
-				root = s
-			}
-		}
-		if root == "" {
-			root = backend.GetDefaultMusicPath()
-		}
+		root := tasteLibraryRoot()
 
 		var filenames []string
 		if lookup.Artist != "" && lookup.Title != "" {
@@ -67,6 +58,19 @@ func (a *App) getTasteService() (*taste.Service, error) {
 		}
 		_, found, err := backend.FindExistingLibraryFile(root, req)
 		return err == nil && found
+	}
+
+	var albumsMu sync.Mutex
+	var albums *taste.FolderAlbumIndex
+	svc.AlbumOwned = func(artist, album string) bool {
+		root := tasteLibraryRoot()
+		albumsMu.Lock()
+		if albums == nil || albums.Root != root {
+			albums = &taste.FolderAlbumIndex{Root: root}
+		}
+		index := albums
+		albumsMu.Unlock()
+		return index.Owned(artist, album)
 	}
 
 	// FetchArtistDiscography seam: retrieves an artist's full albums using Spotify metadata client
@@ -96,6 +100,16 @@ func (a *App) getTasteService() (*taste.Service, error) {
 
 	a.taste = svc
 	return svc, nil
+}
+
+// tasteLibraryRoot is the download folder the "already owned?" checks use.
+func tasteLibraryRoot() string {
+	if settings, err := backend.LoadConfigSettings(); err == nil && settings != nil {
+		if root, ok := settings["downloadPath"].(string); ok && root != "" {
+			return root
+		}
+	}
+	return backend.GetDefaultMusicPath()
 }
 
 func (a *App) closeTaste() {
@@ -172,6 +186,17 @@ func (a *App) DisconnectLastFM() error {
 		return err
 	}
 	return svc.LastFM.Disconnect()
+}
+
+// SelectSpotifyExportFile opens a file dialog to pick a zip or json Spotify export file.
+func (a *App) SelectSpotifyExportFile() (string, error) {
+	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select Spotify Export",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "Spotify Exports (*.zip, *.json)", Pattern: "*.zip;*.json"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		},
+	})
 }
 
 // ImportSpotifyExport imports a Spotify JSON dump or zip file.

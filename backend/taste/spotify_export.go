@@ -83,8 +83,7 @@ func (s *SpotifyExport) importDir(dir string) ([]TasteEvent, error) {
 		if d.IsDir() {
 			return nil
 		}
-		name := strings.ToLower(d.Name())
-		if strings.HasSuffix(name, ".json") && (strings.HasPrefix(name, "streaming_history_audio") || strings.HasPrefix(name, "streaminghistory")) {
+		if isHistoryFile(d.Name()) {
 			ev, err := s.importFile(p)
 			if err != nil {
 				return err
@@ -207,6 +206,20 @@ func parseLegacy(row map[string]interface{}) (TasteEvent, error) {
 	return ev, nil
 }
 
+// isHistoryFile matches the streaming-history JSON files in both export
+// formats ("Streaming_History_Audio_*.json" and "StreamingHistory*.json").
+func isHistoryFile(name string) bool {
+	name = strings.ToLower(filepath.Base(name))
+	return strings.HasSuffix(name, ".json") &&
+		(strings.HasPrefix(name, "streaming_history_audio") || strings.HasPrefix(name, "streaminghistory"))
+}
+
+// maxHistoryFileBytes bounds each extracted file. Real history files are a
+// few MB to tens of MB; the cap stops a malformed archive filling the disk.
+const maxHistoryFileBytes = 512 << 20
+
+// unzipDir extracts only the streaming-history files; exports also hold
+// unrelated data the import never reads.
 func unzipDir(src, dest string) error {
 	r, err := zip.OpenReader(src)
 	if err != nil {
@@ -214,6 +227,12 @@ func unzipDir(src, dest string) error {
 	}
 	defer r.Close()
 	for _, f := range r.File {
+		if f.FileInfo().IsDir() || !isHistoryFile(f.Name) {
+			continue
+		}
+		if f.UncompressedSize64 > maxHistoryFileBytes {
+			return fmt.Errorf("%s is larger than expected for a Spotify export", f.Name)
+		}
 		target := filepath.Join(dest, f.Name)
 		if !strings.HasPrefix(target, filepath.Clean(dest)+string(os.PathSeparator)) {
 			return fmt.Errorf("illegal path %s in archive", f.Name)
@@ -234,11 +253,14 @@ func unzipDir(src, dest string) error {
 			dst.Close()
 			return err
 		}
-		_, err = io.Copy(dst, rc)
+		n, err := io.Copy(dst, io.LimitReader(rc, maxHistoryFileBytes+1))
 		rc.Close()
 		dst.Close()
 		if err != nil {
 			return err
+		}
+		if n > maxHistoryFileBytes {
+			return fmt.Errorf("%s is larger than expected for a Spotify export", f.Name)
 		}
 	}
 	return nil

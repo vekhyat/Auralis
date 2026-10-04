@@ -3,7 +3,6 @@ package taste
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +24,8 @@ type SyncProgress struct {
 type Settings struct {
 	ForYouEnabled     bool   `json:"for_you_enabled"`
 	SpotifyClientID   string `json:"spotify_client_id"`
+	// SpotifyRedirectURI is shown in the setup guide.
+	SpotifyRedirectURI string `json:"spotify_redirect_uri"`
 	SpotifyConnected  bool   `json:"spotify_connected"`
 	LastFMUsername    string `json:"lastfm_username"`
 	LastFMConfigured  bool   `json:"lastfm_configured"`
@@ -41,6 +42,8 @@ type Service struct {
 
 	// Injectable seams (tests substitute fakes).
 	LibraryFilter LibraryFilter
+	// AlbumOwned reports albums already in the library; nil skips the check.
+	AlbumOwned AlbumFilter
 	// FetchArtistDiscography returns an artist's albums for the discography
 	// gaps shelf. Production wiring uses the anonymous Spotify metadata
 	// client; nil disables that shelf.
@@ -66,7 +69,7 @@ func NewService(store *Store, creds *credentials.Store) *Service {
 func (s *Service) Close() error { return s.Store.Close() }
 
 func (s *Service) GetSettings() Settings {
-	cfg := Settings{}
+	cfg := Settings{SpotifyRedirectURI: SpotifyRedirectURI}
 	if v, ok := s.Store.GetMeta("for_you_enabled"); ok && v == "1" {
 		cfg.ForYouEnabled = true
 	}
@@ -328,8 +331,11 @@ func (s *Service) GetShelves(ctx context.Context) ([]Shelf, error) {
 		return nil, err
 	}
 
-	shelf1 := finalise(likedNotDownloaded(events, profile), fb, s.LibraryFilter)
-	shelf2 := finalise(finishAlbums(events, profile, s.LibraryFilter), fb, nil)
+	owned := ownership{tracks: s.LibraryFilter, albums: s.AlbumOwned}
+	shelf1 := finalise(likedNotDownloaded(events, profile), fb, owned)
+	// Finish-albums candidates are partly owned by definition; only the
+	// liked tracks are checked (inside finishAlbums).
+	shelf2 := finalise(finishAlbums(events, profile, s.LibraryFilter), fb, ownership{})
 
 	var similar []similarArtistKey
 	if s.LastFMConfigured() {
@@ -345,7 +351,7 @@ func (s *Service) GetShelves(ctx context.Context) ([]Shelf, error) {
 	for _, s := range similar {
 		similarItems = append(similarItems, similarArtistCandidates(s.candidates, s.seed, events, fb)...)
 	}
-	shelf3 := finalise(similarItems, fb, nil)
+	shelf3 := finalise(similarItems, fb, ownership{})
 
 	var gapItems []Item
 	if s.FetchArtistDiscography != nil {
@@ -359,7 +365,7 @@ func (s *Service) GetShelves(ctx context.Context) ([]Shelf, error) {
 			gapItems = append(gapItems, discographyGapItems(s.displayNameOf(profile, key), albums, profile)...)
 		}
 	}
-	shelf4 := finalise(gapItems, fb, nil)
+	shelf4 := finalise(gapItems, fb, ownership{albums: s.AlbumOwned})
 
 	title3 := "Because you listen to X"
 	if len(similar) > 0 && similar[0].seed != "" {
@@ -527,4 +533,3 @@ func (s *Service) Summary() (Summary, error) {
 	return sum, nil
 }
 
-var _ = fmt.Sprintf // silences future string building

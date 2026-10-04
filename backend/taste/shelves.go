@@ -115,8 +115,27 @@ func capPerArtist(items []Item) []Item {
 	return out
 }
 
+// ownership answers "already downloaded?" for tracks and albums.
+type ownership struct {
+	tracks LibraryFilter
+	albums AlbumFilter
+}
+
+func (o ownership) owns(it Item) bool {
+	if it.Artist == "" {
+		return false
+	}
+	switch it.Kind {
+	case "track":
+		return o.tracks != nil && o.tracks(LibraryLookup{SpotifyID: it.SpotifyID, ISRC: it.ISRC, Artist: it.Artist, Title: it.Title})
+	case "album":
+		return o.albums != nil && o.albums(it.Artist, it.Title)
+	}
+	return false
+}
+
 // finalise applies owned/dismissed/banned filtering, caps and diversity.
-func finalise(items []Item, fb Feedback, belongsToLibrary LibraryFilter) []Item {
+func finalise(items []Item, fb Feedback, owned ownership) []Item {
 	kept := items[:0]
 	for _, it := range items {
 		if fb.DismissedItems != nil && fb.DismissedItems[it.ID] {
@@ -125,10 +144,8 @@ func finalise(items []Item, fb Feedback, belongsToLibrary LibraryFilter) []Item 
 		if isBanned(fb, it.Artist) {
 			continue
 		}
-		if it.Artist != "" && belongsToLibrary != nil {
-			if belongsToLibrary(LibraryLookup{SpotifyID: it.SpotifyID, ISRC: it.ISRC, Artist: it.Artist, Title: it.Title}) {
-				continue
-			}
+		if owned.owns(it) {
+			continue
 		}
 		kept = append(kept, it)
 	}
@@ -196,6 +213,7 @@ func finishAlbums(events []TasteEvent, profile Profile, belongsToLibrary Library
 		artist, album string
 		tracks        map[string]TasteEvent
 		image         string
+		albumID       string
 	}
 	groups := map[string]*albumAgg{}
 	for _, e := range events {
@@ -215,6 +233,9 @@ func finishAlbums(events []TasteEvent, profile Profile, belongsToLibrary Library
 		}
 		if agg.image == "" && e.Image != "" {
 			agg.image = e.Image
+		}
+		if agg.albumID == "" && e.AlbumID != "" {
+			agg.albumID = e.AlbumID
 		}
 		agg.tracks[Normalise(e.Title)] = e
 	}
@@ -236,13 +257,14 @@ func finishAlbums(events []TasteEvent, profile Profile, belongsToLibrary Library
 		}
 		score := profile.CoreAlbums[Normalise(agg.artist)+"|"+Normalise(agg.album)] + float64(len(agg.tracks))
 		items = append(items, Item{
-			ID:     fingerprint("album", "", agg.artist, agg.album, ""),
-			Kind:   "album",
-			Title:  agg.album,
-			Artist: agg.artist,
-			Image:  agg.image,
-			Reason: reasonAlbum(len(agg.tracks)),
-			Score:  score,
+			ID:      fingerprint("album", "", agg.artist, agg.album, ""),
+			Kind:    "album",
+			Title:   agg.album,
+			Artist:  agg.artist,
+			Image:   agg.image,
+			AlbumID: agg.albumID,
+			Reason:  reasonAlbum(len(agg.tracks)),
+			Score:   score,
 		})
 	}
 	return items
@@ -307,7 +329,7 @@ func similarArtistCandidates(candidates []SimilarArtist, seedArtist string, even
 func discographyGapItems(artist string, albums []GapAlbum, profile Profile) []Item {
 	var items []Item
 	for _, a := range albums {
-		if a.ID == "" || a.Name == "" {
+		if a.ID == "" || a.Name == "" || !isFullRelease(a) {
 			continue
 		}
 		items = append(items, Item{
@@ -322,6 +344,19 @@ func discographyGapItems(artist string, albums []GapAlbum, profile Profile) []It
 		})
 	}
 	return items
+}
+
+// isFullRelease keeps albums and EPs. Spotify labels EPs "single", so a
+// "single" with four or more tracks counts; compilations and true singles
+// would crowd out the albums a fan is actually missing.
+func isFullRelease(a GapAlbum) bool {
+	switch strings.ToLower(a.AlbumType) {
+	case "album", "":
+		return true
+	case "single":
+		return a.TotalTracks >= 4
+	}
+	return false
 }
 
 // TopAffinityArtists returns up to n display names ranked by Core affinity.

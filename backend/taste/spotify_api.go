@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -22,6 +23,12 @@ const (
 	spotifyRefreshKey   = "spotify.refresh"
 	spotifyClientIDKey  = "spotify.client_id"
 	spotifyScopeRequest = "user-top-read user-library-read user-read-recently-played user-follow-read playlist-read-private"
+
+	// SpotifyRedirectPort is fixed because Spotify only accepts redirect
+	// URIs registered exactly in the user's developer app.
+	SpotifyRedirectPort = 43821
+	// SpotifyRedirectURI is what users register in their Spotify app.
+	SpotifyRedirectURI = "http://127.0.0.1:43821/callback"
 )
 
 // SpotifyAPISource is a TasteSource backed by the official Spotify Web API
@@ -37,6 +44,8 @@ type SpotifyAPISource struct {
 	OpenURL func(string) error
 	// Timeout bounds the loopback OAuth wait. Default 3 minutes.
 	Timeout time.Duration
+	// ListenAddr overrides the loopback listener (tests use port 0).
+	ListenAddr string
 
 	mu    sync.Mutex
 	token *tokenState
@@ -69,6 +78,28 @@ func (s *SpotifyAPISource) httpClient() *http.Client {
 }
 
 func (s *SpotifyAPISource) ID() string { return "spotify_api" }
+
+// ListenAddr overrides the loopback address in tests.
+func (s *SpotifyAPISource) listenAddr() string {
+	if s.ListenAddr != "" {
+		return s.ListenAddr
+	}
+	return fmt.Sprintf("127.0.0.1:%d", SpotifyRedirectPort)
+}
+
+// sameHost reports whether a pagination link points at the API host, so the
+// bearer token is never sent anywhere else.
+func (s *SpotifyAPISource) sameHost(link string) bool {
+	next, err := url.Parse(link)
+	if err != nil {
+		return false
+	}
+	base, err := url.Parse(s.apiBase())
+	if err != nil {
+		return false
+	}
+	return next.Scheme == base.Scheme && next.Host == base.Host
+}
 
 // Connected reports whether a refresh token is stored.
 func (s *SpotifyAPISource) Connected() bool {
@@ -140,9 +171,9 @@ func (s *SpotifyAPISource) Connect(ctx context.Context) error {
 		return fmt.Errorf("oauth state: %w", err)
 	}
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := net.Listen("tcp", s.listenAddr())
 	if err != nil {
-		return fmt.Errorf("spotify connect: %w", err)
+		return fmt.Errorf("spotify connect: port %d is in use by another program: %w", SpotifyRedirectPort, err)
 	}
 	defer listener.Close()
 	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", listener.Addr().(*net.TCPAddr).Port)
@@ -151,10 +182,16 @@ func (s *SpotifyAPISource) Connect(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
+		// Anything without our state did not come from this sign-in, so it
+		// is ignored rather than allowed to end the flow.
+		if !validState(state, q.Get("state")) {
+			http.Error(w, "unexpected request", http.StatusBadRequest)
+			return
+		}
 		if errStr := q.Get("error"); errStr != "" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, "<html><body style=\"font-family:sans-serif;padding:32px;\"><h2>Auralis Spotify Connection Failed</h2><p>%s</p></body></html>", errStr)
+			fmt.Fprintf(w, "<html><body style=\"font-family:sans-serif;padding:32px;\"><h2>Auralis Spotify Connection Failed</h2><p>%s</p></body></html>", html.EscapeString(errStr))
 			select {
 			case callbackCh <- callbackResult{err: fmt.Errorf("spotify authorization denied: %s", errStr)}:
 			default:
@@ -416,6 +453,9 @@ func (s *SpotifyAPISource) getPagedList(ctx context.Context, url string) ([]json
 		}
 		items = append(items, rows...)
 		url = page.Next
+		if url != "" && !s.sameHost(url) {
+			return items, fmt.Errorf("spotify api: refusing pagination link to another host")
+		}
 	}
 	return items, nil
 }
@@ -584,6 +624,9 @@ func (s *SpotifyAPISource) Pull(ctx context.Context, since time.Time) ([]TasteEv
 			events = append(events, e)
 		}
 		followURL = payload.Artists.Next
+		if followURL != "" && !s.sameHost(followURL) {
+			return events, fmt.Errorf("spotify api: refusing pagination link to another host")
+		}
 	}
 
 	recent, err := s.getRecentlyPlayed(ctx)
