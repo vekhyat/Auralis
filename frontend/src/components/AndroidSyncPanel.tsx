@@ -26,8 +26,6 @@ import { EventsOff, EventsOn } from "../../wailsjs/runtime/runtime";
 import {
     AlertCircle,
     Check,
-    ChevronDown,
-    ChevronRight,
     Download,
     Folder,
     FolderPlus,
@@ -35,6 +33,7 @@ import {
     HelpCircle,
     Play,
     RefreshCw,
+    RotateCcw,
     Sliders,
     Smartphone,
     Trash2,
@@ -58,109 +57,123 @@ interface ProgressEvent {
     name?: string;
     speedBps?: number;
     etaSec?: number;
+    error?: string;
 }
 
 export function AndroidSyncPanel() {
     const [targets, setTargets] = useState<devices.SyncTargetView[]>([]);
     const [selectedId, setSelectedId] = useState<string>("");
-    const [adbInstalled, setAdbInstalled] = useState<boolean>(true);
-    const [adbDownloading, setAdbDownloading] = useState<boolean>(false);
-    const [adbDownloadProgress, setAdbDownloadProgress] = useState<number>(0);
-    const [adbDownloadStatus, setAdbDownloadStatus] = useState<string>("");
-
     const [profile, setProfile] = useState<devices.DeviceProfile | null>(null);
     const [plan, setPlan] = useState<syncengine.Plan | null>(null);
-    const [showPlanDialog, setShowPlanDialog] = useState<boolean>(false);
-    const [planning, setPlanning] = useState<boolean>(false);
-    const [syncing, setSyncing] = useState<boolean>(false);
+    const [showPlanDialog, setShowPlanDialog] = useState(false);
+    const [planning, setPlanning] = useState(false);
+    const [syncing, setSyncing] = useState(false);
     const [syncProgress, setSyncProgress] = useState<ProgressEvent | null>(null);
-    const [showHelp, setShowHelp] = useState<boolean>(false);
+    const [adbInstalled, setAdbInstalled] = useState<boolean | null>(null);
+    const [adbDownloading, setAdbDownloading] = useState(false);
+    const [adbProgress, setAdbProgress] = useState<{ percent: number; status: string }>({ percent: 0, status: "" });
+    const [showHelp, setShowHelp] = useState(false);
 
-    // Refresh targets list
     const refreshTargets = useCallback(async () => {
         try {
             const list = await ListSyncTargets();
-            setTargets(list || []);
-            if (list && list.length > 0) {
-                setSelectedId((curr) => (list.some((item) => item.id === curr) ? curr : list[0].id));
-            } else {
-                setSelectedId("");
-            }
+            const views = (list || []) as devices.SyncTargetView[];
+            setTargets(views);
+            setSelectedId((prev) => {
+                if (views.some((v) => v.id === prev)) return prev;
+                return views[0]?.id || "";
+            });
         } catch (err) {
             console.error("Failed to list sync targets:", err);
         }
     }, []);
 
-    // Check ADB installed
-    const checkAdb = useCallback(async () => {
-        try {
-            const installed = await IsPlatformToolsInstalled();
-            setAdbInstalled(installed);
-        } catch {
-            setAdbInstalled(false);
-        }
-    }, []);
-
     useEffect(() => {
-        void refreshTargets();
-        void checkAdb();
+        let mounted = true;
+        const pull = () => {
+            void ListSyncTargets().then((list) => {
+                if (!mounted) return;
+                const views = (list || []) as devices.SyncTargetView[];
+                setTargets(views);
+                setSelectedId((prev) => (views.some((v) => v.id === prev) ? prev : views[0]?.id || ""));
+            }).catch((err) => {
+                console.error("Failed to list sync targets:", err);
+            });
+        };
+        const check = () => {
+            void IsPlatformToolsInstalled().then((ok) => {
+                if (!mounted) return;
+                setAdbInstalled(ok);
+            }).catch(() => {
+                if (!mounted) return;
+                setAdbInstalled(false);
+            });
+        };
 
-        EventsOn("devices:changed", (updated: devices.SyncTargetView[]) => {
-            if (updated) {
-                setTargets(updated);
-                setSelectedId((curr) => (updated.some((item) => item.id === curr) ? curr : updated[0]?.id || ""));
-            }
-        });
+        pull();
+        check();
+
+        const handleDevices = () => {
+            pull();
+        };
+
+        EventsOn("devices:changed", handleDevices);
 
         EventsOn("sync:progress", (event: ProgressEvent) => {
             setSyncProgress(event);
-            if (event.phase === "starting" || event.phase === "transcoding" || event.phase === "transferring" || event.phase === "deleting") {
-                setSyncing(true);
-            } else if (event.phase === "done") {
+            if (event?.phase === "done" || event?.phase === "error" || event?.phase === "cancelled") {
                 setSyncing(false);
-                toast.success(t("translation.sync.statusDone"));
-                window.setTimeout(() => setSyncProgress(null), 3000);
-            } else if (event.phase === "cancelled") {
-                setSyncing(false);
-                toast.info(t("translation.sync.statusCancelled"));
-            } else if (event.phase === "error") {
-                setSyncing(false);
-                toast.error(event.name || t("translation.sync.statusError", { error: "Unknown" }));
+                if (event.phase === "done") {
+                    toast.success(t("translation.sync.statusDone"));
+                } else if (event.phase === "cancelled") {
+                    toast.info(t("translation.sync.statusCancelled"));
+                } else if (event.phase === "error") {
+                    toast.error(t("translation.sync.statusError", { error: event.error || "" }));
+                }
+                pull();
             }
         });
 
         EventsOn("platform-tools:progress", (data: { percent: number; status: string }) => {
-            setAdbDownloadProgress(data.percent);
-            setAdbDownloadStatus(data.status);
+            setAdbProgress(data);
             if (data.percent >= 100) {
                 setAdbDownloading(false);
                 setAdbInstalled(true);
                 toast.success(t("translation.sync.adbInstalled"));
-                void refreshTargets();
+                pull();
             }
         });
 
         return () => {
+            mounted = false;
             EventsOff("devices:changed");
             EventsOff("sync:progress");
             EventsOff("platform-tools:progress");
         };
-    }, [refreshTargets, checkAdb]);
+    }, []);
 
     const activeTarget = targets.find((t) => t.id === selectedId) || null;
 
-    // Load profile when active target changes
     useEffect(() => {
-        if (!selectedId) {
-            setProfile(null);
-            return;
+        let cancel = false;
+        if (!activeTarget) {
+            void Promise.resolve().then(() => {
+                if (!cancel) setProfile(null);
+            });
+            return () => {
+                cancel = true;
+            };
         }
-        void GetDeviceProfile(selectedId).then((p) => {
-            setProfile(p);
+        void GetDeviceProfile(activeTarget.id).then((prof) => {
+            if (cancel) return;
+            setProfile(prof ? devices.DeviceProfile.createFrom(prof) : null);
         }).catch((err) => {
-            console.error("Failed to get device profile:", err);
+            console.error("Failed to fetch profile:", err);
         });
-    }, [selectedId]);
+        return () => {
+            cancel = true;
+        };
+    }, [activeTarget]);
 
     const handleSaveProfile = async () => {
         if (!profile) return;
@@ -173,9 +186,64 @@ export function AndroidSyncPanel() {
         }
     };
 
+    const handleDownloadAdb = async () => {
+        setAdbDownloading(true);
+        try {
+            await DownloadPlatformTools();
+        } catch (err) {
+            setAdbDownloading(false);
+            toast.error(String(err));
+        }
+    };
+
+    const handlePreviewSync = async () => {
+        if (!activeTarget) return;
+        setPlanning(true);
+        try {
+            const p = await PlanSync(activeTarget.id);
+            setPlan(p ? syncengine.Plan.createFrom(p) : null);
+            setShowPlanDialog(true);
+        } catch (err) {
+            toast.error(String(err));
+        } finally {
+            setPlanning(false);
+        }
+    };
+
+    const handleStartSync = async () => {
+        if (!activeTarget) return;
+        setSyncing(true);
+        setShowPlanDialog(false);
+        try {
+            await StartSync(activeTarget.id);
+        } catch (err) {
+            setSyncing(false);
+            toast.error(String(err));
+        }
+    };
+
+    const handleResumeSync = async () => {
+        if (!activeTarget) return;
+        setSyncing(true);
+        try {
+            await ResumeSync(activeTarget.id);
+        } catch (err) {
+            setSyncing(false);
+            toast.error(String(err));
+        }
+    };
+
+    const handleCancelSync = async () => {
+        try {
+            await CancelSync();
+        } catch (err) {
+            toast.error(String(err));
+        }
+    };
+
     const handleAddFolder = async () => {
         try {
-            const folder = await SelectFolder();
+            const folder = await SelectFolder("");
             if (!folder) return;
             const target = await AddFolderTarget("", folder);
             toast.success(t("translation.sync.connected"));
@@ -191,67 +259,16 @@ export function AndroidSyncPanel() {
     const handleRemoveFolder = async (id: string) => {
         try {
             await RemoveFolderTarget(id);
+            toast.success(t("translation.sync.statusDone"));
             await refreshTargets();
         } catch (err) {
             toast.error(String(err));
         }
     };
 
-    const handleDownloadAdb = async () => {
-        setAdbDownloading(true);
-        setAdbDownloadProgress(0);
-        setAdbDownloadStatus("Starting download...");
-        try {
-            await DownloadPlatformTools();
-        } catch (err) {
-            setAdbDownloading(false);
-            toast.error(String(err));
-        }
-    };
-
-    const handlePreviewSync = async () => {
-        if (!activeTarget) return;
-        setPlanning(true);
-        try {
-            const previewPlan = await PlanSync(activeTarget.id);
-            setPlan(previewPlan);
-            setShowPlanDialog(true);
-        } catch (err) {
-            toast.error(String(err));
-        } finally {
-            setPlanning(false);
-        }
-    };
-
-    const handleStartSync = async () => {
-        if (!activeTarget) return;
-        setShowPlanDialog(false);
-        setSyncing(true);
-        try {
-            await StartSync(activeTarget.id);
-        } catch (err) {
-            setSyncing(false);
-            toast.error(String(err));
-        }
-    };
-
-    const handleCancelSync = async () => {
-        try {
-            await CancelSync();
-        } catch (err) {
-            toast.error(String(err));
-        }
-    };
-
-    const handleResumeSync = async () => {
-        if (!activeTarget) return;
-        setSyncing(true);
-        try {
-            await ResumeSync(activeTarget.id);
-        } catch (err) {
-            setSyncing(false);
-            toast.error(String(err));
-        }
+    const updateProfile = (patch: Partial<devices.DeviceProfile>) => {
+        if (!profile) return;
+        setProfile(devices.DeviceProfile.createFrom({ ...profile, ...patch }));
     };
 
     return (
@@ -268,26 +285,29 @@ export function AndroidSyncPanel() {
                         {t("translation.sync.addFolder")}
                     </Button>
                 </div>
-                <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-xs text-muted-foreground hover:text-foreground"
-                    onClick={() => setShowHelp((prev) => !prev)}
-                >
-                    <HelpCircle className="mr-1.5 size-3.5" />
-                    {t("translation.sync.usbHelpTitle")}
-                </Button>
+
+                <div className="flex items-center gap-2">
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowHelp(!showHelp)}
+                        className="text-xs text-muted-foreground"
+                    >
+                        <HelpCircle className="mr-1.5 size-3.5" />
+                        {t("translation.sync.usbHelpTitle")}
+                    </Button>
+                </div>
             </div>
 
-            {/* ADB Missing Notice Banner */}
-            {!adbInstalled && (
-                <div className="flex flex-col gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-foreground dark:text-amber-200">
-                    <div className="flex items-center justify-between gap-4">
-                        <div className="flex items-center gap-2.5">
-                            <AlertCircle className="size-4 shrink-0 text-amber-500" />
-                            <div>
-                                <p className="font-medium">{t("translation.sync.downloadAdb")}</p>
-                                <p className="text-xs text-muted-foreground">{t("translation.sync.downloadAdbHint")}</p>
+            {/* ADB Missing / Download Banner */}
+            {adbInstalled === false && (
+                <div className="flex flex-col gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-xs dark:bg-amber-950/20">
+                    <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-2.5">
+                            <AlertCircle className="mt-0.5 size-4 text-amber-600 dark:text-amber-400" />
+                            <div className="flex flex-col gap-1">
+                                <span className="font-semibold text-foreground">{t("translation.sync.downloadAdb")}</span>
+                                <span className="text-muted-foreground">{t("translation.sync.downloadAdbHint")}</span>
                             </div>
                         </div>
                         <Button
@@ -295,233 +315,220 @@ export function AndroidSyncPanel() {
                             variant="default"
                             disabled={adbDownloading}
                             onClick={() => void handleDownloadAdb()}
+                            className="shrink-0"
                         >
                             <Download className="mr-1.5 size-3.5" />
                             {adbDownloading ? t("translation.sync.downloadingAdb") : t("translation.sync.downloadAdb")}
                         </Button>
                     </div>
                     {adbDownloading && (
-                        <div className="mt-2 flex flex-col gap-1">
-                            <Progress value={adbDownloadProgress} className="h-1.5" />
-                            <div className="flex justify-between text-xs text-muted-foreground">
-                                <span>{adbDownloadStatus}</span>
-                                <span>{adbDownloadProgress}%</span>
-                            </div>
+                        <div className="mt-2 flex flex-col gap-1.5">
+                            <Progress value={adbProgress.percent} className="h-1.5 w-full" />
+                            <span className="font-mono text-[10px] text-muted-foreground">{adbProgress.status} ({adbProgress.percent}%)</span>
                         </div>
                     )}
                 </div>
             )}
 
-            {/* USB Setup Guide */}
+            {/* Setup Guide Accordion */}
             {showHelp && (
-                <div className="flex flex-col gap-2 rounded-lg border bg-muted/30 p-4 text-xs leading-relaxed text-muted-foreground">
-                    <div className="flex items-center justify-between pb-1">
-                        <span className="font-semibold text-foreground">{t("translation.sync.usbHelpTitle")}</span>
-                        <Button variant="ghost" size="icon-sm" onClick={() => setShowHelp(false)}>
-                            <X className="size-3.5" />
-                        </Button>
+                <div className="flex flex-col gap-2 rounded-lg border bg-muted/30 p-4 text-xs">
+                    <h3 className="font-semibold text-foreground">{t("translation.sync.usbHelpTitle")}</h3>
+                    <p className="text-muted-foreground">{t("translation.sync.usbHelpStep1")}</p>
+                    <p className="text-muted-foreground">{t("translation.sync.usbHelpStep2")}</p>
+                    <p className="text-muted-foreground">{t("translation.sync.usbHelpStep3")}</p>
+                    <div className="mt-2 border-t pt-2 text-muted-foreground">
+                        <span className="font-medium text-foreground">{t("translation.sync.usbHelpSyncthing")}</span>
                     </div>
-                    <p>{t("translation.sync.usbHelpStep1")}</p>
-                    <p>{t("translation.sync.usbHelpStep2")}</p>
-                    <p>{t("translation.sync.usbHelpStep3")}</p>
-                    <p className="mt-1 border-t pt-2 text-foreground/80">{t("translation.sync.usbHelpSyncthing")}</p>
                 </div>
             )}
 
-            {/* Target Select Tabs / Cards */}
+            {/* Device Targets Selector */}
             {targets.length === 0 ? (
-                <div className="rounded-lg border border-dashed py-12 text-center">
-                    <Smartphone className="mx-auto mb-3 size-8 text-muted-foreground opacity-50" />
-                    <p className="text-sm font-medium">{t("translation.sync.emptyDevices")}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">{t("translation.sync.emptyDevicesHint")}</p>
-                    <Button variant="outline" size="sm" className="mt-4" onClick={() => void handleAddFolder()}>
+                <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12 text-center">
+                    <Smartphone className="size-10 text-muted-foreground/60" />
+                    <h3 className="mt-3 text-sm font-semibold">{t("translation.sync.emptyDevices")}</h3>
+                    <p className="mt-1 max-w-sm text-xs text-muted-foreground">{t("translation.sync.emptyDevicesHint")}</p>
+                    <Button variant="outline" size="sm" onClick={() => void handleAddFolder()} className="mt-4">
                         <FolderPlus className="mr-1.5 size-3.5" />
                         {t("translation.sync.addFolder")}
                     </Button>
                 </div>
             ) : (
-                <div className="flex flex-col gap-6">
-                    {/* Device selector buttons if multiple */}
-                    {targets.length > 1 && (
-                        <div className="flex flex-wrap gap-2 border-b pb-2">
-                            {targets.map((tgt) => (
+                <div className="flex flex-col gap-4">
+                    {/* Device Selector Cards */}
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        {targets.map((tgt) => {
+                            const isSelected = tgt.id === selectedId;
+                            const usedPercent = tgt.totalBytes > 0
+                                ? Math.max(0, Math.min(100, ((tgt.totalBytes - tgt.freeBytes) / tgt.totalBytes) * 100))
+                                : 0;
+                            return (
                                 <button
                                     key={tgt.id}
                                     type="button"
                                     onClick={() => setSelectedId(tgt.id)}
                                     className={cn(
-                                        "flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                                        tgt.id === selectedId
-                                            ? "bg-primary text-primary-foreground"
-                                            : "bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground",
+                                        "flex flex-col gap-2.5 rounded-lg border p-3.5 text-left transition-colors cursor-pointer",
+                                        isSelected
+                                            ? "border-primary bg-primary/5 shadow-xs"
+                                            : "border-border bg-card hover:bg-muted/40",
                                     )}
                                 >
-                                    {tgt.kind === "adb" && <Smartphone className="size-3.5" />}
-                                    {tgt.kind === "massstorage" && <HardDrive className="size-3.5" />}
-                                    {tgt.kind === "folder" && <Folder className="size-3.5" />}
-                                    <span>{tgt.name || tgt.model || tgt.id}</span>
-                                </button>
-                            ))}
-                        </div>
-                    )}
-
-                    {activeTarget && profile && (
-                        <div className="flex flex-col gap-6">
-                            {/* Device Overview Card */}
-                            <div className="flex flex-col gap-4 rounded-lg border bg-card p-5">
-                                <div className="flex flex-wrap items-start justify-between gap-4">
-                                    <div className="flex items-center gap-3">
-                                        <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                                            {activeTarget.kind === "adb" && <Smartphone className="size-5" />}
-                                            {activeTarget.kind === "massstorage" && <HardDrive className="size-5" />}
-                                            {activeTarget.kind === "folder" && <Folder className="size-5" />}
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div className="flex items-center gap-2 min-w-0">
+                                            {tgt.kind === "adb" && <Smartphone className="size-4 shrink-0 text-primary" />}
+                                            {tgt.kind === "drive" && <HardDrive className="size-4 shrink-0 text-primary" />}
+                                            {tgt.kind === "folder" && <Folder className="size-4 shrink-0 text-primary" />}
+                                            <span className="font-semibold text-xs truncate">
+                                                {tgt.name || tgt.model || tgt.id}
+                                            </span>
                                         </div>
-                                        <div>
-                                            <div className="flex items-center gap-2">
-                                                <h2 className="text-base font-semibold">{activeTarget.name}</h2>
-                                                <span
-                                                    className={cn(
-                                                        "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium",
-                                                        activeTarget.connected
-                                                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                                                            : "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400",
-                                                    )}
-                                                >
-                                                    {activeTarget.connected
-                                                        ? t("translation.sync.connected")
-                                                        : t("translation.sync.offline")}
-                                                </span>
-                                            </div>
-                                            <p className="font-mono text-xs text-muted-foreground">{activeTarget.root}</p>
-                                        </div>
+                                        <span
+                                            className={cn(
+                                                "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                                                tgt.connected
+                                                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                                    : "bg-muted text-muted-foreground",
+                                            )}
+                                        >
+                                            {tgt.connected ? t("translation.sync.connected") : t("translation.sync.offline")}
+                                        </span>
                                     </div>
 
-                                    {activeTarget.kind === "folder" && (
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className="text-xs text-destructive hover:bg-destructive/10"
-                                            onClick={() => void handleRemoveFolder(activeTarget.id)}
-                                        >
-                                            <Trash2 className="mr-1.5 size-3.5" />
-                                            {t("translation.sync.removeTarget")}
-                                        </Button>
+                                    <div className="text-[11px] text-muted-foreground truncate">
+                                        {tgt.kind === "adb" && (tgt.model || t("translation.sync.kindAdb"))}
+                                        {tgt.kind === "drive" && (tgt.root || t("translation.sync.kindDrive"))}
+                                        {tgt.kind === "folder" && (tgt.root || t("translation.sync.kindFolder"))}
+                                    </div>
+
+                                    {/* Storage bar */}
+                                    {tgt.totalBytes > 0 && (
+                                        <div className="mt-1 flex flex-col gap-1">
+                                            <div className="flex justify-between text-[10px] text-muted-foreground font-mono">
+                                                <span>{formatBytes(tgt.freeBytes)} free</span>
+                                                <span>{formatBytes(tgt.totalBytes)}</span>
+                                            </div>
+                                            <Progress value={usedPercent} className="h-1" />
+                                        </div>
                                     )}
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    {/* Active Target Configuration Panel */}
+                    {activeTarget && (
+                        <div className="flex flex-col gap-5 rounded-lg border bg-card p-5">
+                            {/* Target Header */}
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-4">
+                                <div className="flex items-center gap-2.5">
+                                    {activeTarget.kind === "adb" && <Smartphone className="size-5 text-primary" />}
+                                    {activeTarget.kind === "drive" && <HardDrive className="size-5 text-primary" />}
+                                    {activeTarget.kind === "folder" && <Folder className="size-5 text-primary" />}
+                                    <div>
+                                        <h2 className="text-sm font-semibold">{activeTarget.name || activeTarget.model}</h2>
+                                        <p className="text-xs text-muted-foreground font-mono">{activeTarget.root || activeTarget.id}</p>
+                                    </div>
                                 </div>
 
-                                {activeTarget.totalBytes > 0 && (
-                                    <div className="flex flex-col gap-1.5">
-                                        <div className="flex justify-between text-xs text-muted-foreground">
-                                            <span>
-                                                {t("translation.sync.freeOf", {
-                                                    free: formatBytes(activeTarget.freeBytes),
-                                                    total: formatBytes(activeTarget.totalBytes),
-                                                })}
-                                            </span>
-                                            <span>
-                                                {Math.round(
-                                                    ((activeTarget.totalBytes - activeTarget.freeBytes) /
-                                                        activeTarget.totalBytes) *
-                                                        100,
-                                                )}
-                                                %
-                                            </span>
-                                        </div>
-                                        <Progress
-                                            value={
-                                                ((activeTarget.totalBytes - activeTarget.freeBytes) /
-                                                    activeTarget.totalBytes) *
-                                                100
-                                            }
-                                            className="h-2"
-                                        />
-                                    </div>
+                                {activeTarget.kind === "folder" && (
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => void handleRemoveFolder(activeTarget.id)}
+                                        className="text-destructive hover:bg-destructive/10"
+                                    >
+                                        <Trash2 className="mr-1.5 size-3.5" />
+                                        {t("translation.sync.removeTarget")}
+                                    </Button>
                                 )}
                             </div>
 
-                            {/* Settings Form */}
-                            <div className="flex flex-col gap-4 rounded-lg border bg-card p-5">
-                                <div className="flex items-center gap-2 border-b pb-3">
-                                    <Sliders className="size-4 text-muted-foreground" />
-                                    <h3 className="text-sm font-semibold">{t("translation.settings.title")}</h3>
-                                </div>
-
-                                <div className="grid gap-4 sm:grid-cols-2">
-                                    {/* Format Policy */}
-                                    <div className="flex flex-col gap-1.5">
-                                        <label className="text-xs font-medium">{t("translation.sync.formatPolicy")}</label>
-                                        <Select
-                                            value={profile.format_policy?.mode || "keep"}
-                                            onValueChange={(val) => {
-                                                setProfile({
-                                                    ...profile,
-                                                    format_policy: { ...profile.format_policy, mode: val },
-                                                });
-                                            }}
-                                        >
-                                            <SelectTrigger className="h-9 text-xs">
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="keep">{t("translation.sync.formatKeep")}</SelectItem>
-                                                <SelectItem value="opus">{t("translation.sync.formatOpus")}</SelectItem>
-                                                <SelectItem value="aac">{t("translation.sync.formatAac")}</SelectItem>
-                                                <SelectItem value="mp3">{t("translation.sync.formatMp3")}</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                        <p className="text-[11px] text-muted-foreground">
-                                            {profile.format_policy?.mode === "keep" && t("translation.sync.formatKeepDesc")}
-                                            {profile.format_policy?.mode === "opus" && t("translation.sync.formatOpusDesc")}
-                                            {profile.format_policy?.mode === "aac" && t("translation.sync.formatAacDesc")}
-                                            {profile.format_policy?.mode === "mp3" && t("translation.sync.formatMp3Desc")}
-                                        </p>
+                            {/* Profile & Formatting Settings */}
+                            {profile && (
+                                <div className="flex flex-col gap-4">
+                                    <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+                                        <Sliders className="size-3.5" />
+                                        <span>{t("translation.sync.profile")}</span>
                                     </div>
 
-                                    {/* Profile Layout */}
-                                    <div className="flex flex-col gap-1.5">
-                                        <label className="text-xs font-medium">{t("translation.sync.profile")}</label>
-                                        <Select
-                                            value={profile.profile_id || "poweramp"}
-                                            onValueChange={(val) => {
-                                                setProfile({ ...profile, profile_id: val });
-                                            }}
-                                        >
-                                            <SelectTrigger className="h-9 text-xs">
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="poweramp">{t("translation.sync.profilePoweramp")}</SelectItem>
-                                                <SelectItem value="mediastore">{t("translation.sync.profileMediaStore")}</SelectItem>
-                                                <SelectItem value="rockbox">{t("translation.sync.profileRockbox")}</SelectItem>
-                                                <SelectItem value="mediaserver">{t("translation.sync.profileMediaServer")}</SelectItem>
-                                            </SelectContent>
-                                        </Select>
+                                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                        {/* Format Policy */}
+                                        <div className="flex flex-col gap-1.5">
+                                            <label className="text-xs font-medium">{t("translation.sync.formatPolicy")}</label>
+                                            <Select
+                                                value={profile.format_policy?.mode || "keep"}
+                                                onValueChange={(val) => {
+                                                    updateProfile({
+                                                        format_policy: syncengine.FormatPolicy.createFrom({ mode: val }),
+                                                    });
+                                                }}
+                                            >
+                                                <SelectTrigger className="h-9 text-xs">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="keep">{t("translation.sync.formatKeep")}</SelectItem>
+                                                    <SelectItem value="opus">{t("translation.sync.formatOpus")}</SelectItem>
+                                                    <SelectItem value="aac">{t("translation.sync.formatAac")}</SelectItem>
+                                                    <SelectItem value="mp3">{t("translation.sync.formatMp3")}</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                            <p className="text-[11px] text-muted-foreground">
+                                                {profile.format_policy?.mode === "keep" && t("translation.sync.formatKeepDesc")}
+                                                {profile.format_policy?.mode === "opus" && t("translation.sync.formatOpusDesc")}
+                                                {profile.format_policy?.mode === "aac" && t("translation.sync.formatAacDesc")}
+                                                {profile.format_policy?.mode === "mp3" && t("translation.sync.formatMp3Desc")}
+                                            </p>
+                                        </div>
+
+                                        {/* Profile Layout */}
+                                        <div className="flex flex-col gap-1.5">
+                                            <label className="text-xs font-medium">{t("translation.sync.profile")}</label>
+                                            <Select
+                                                value={profile.profile_id || "poweramp"}
+                                                onValueChange={(val) => {
+                                                    updateProfile({ profile_id: val });
+                                                }}
+                                            >
+                                                <SelectTrigger className="h-9 text-xs">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="poweramp">{t("translation.sync.profilePoweramp")}</SelectItem>
+                                                    <SelectItem value="mediastore">{t("translation.sync.profileMediaStore")}</SelectItem>
+                                                    <SelectItem value="rockbox">{t("translation.sync.profileRockbox")}</SelectItem>
+                                                    <SelectItem value="mediaserver">{t("translation.sync.profileMediaServer")}</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        {/* Target Folder Root */}
+                                        <div className="flex flex-col gap-1.5 sm:col-span-2">
+                                            <label className="text-xs font-medium">{t("translation.sync.targetFolder")}</label>
+                                            <Input
+                                                value={profile.target_folder || ""}
+                                                onChange={(e) => updateProfile({ target_folder: e.target.value })}
+                                                className="h-9 text-xs font-mono"
+                                                placeholder="/sdcard/Music"
+                                            />
+                                        </div>
                                     </div>
 
-                                    {/* Target Folder Root */}
-                                    <div className="flex flex-col gap-1.5 sm:col-span-2">
-                                        <label className="text-xs font-medium">{t("translation.sync.targetFolder")}</label>
-                                        <Input
-                                            value={profile.target_folder || ""}
-                                            onChange={(e) => setProfile({ ...profile, target_folder: e.target.value })}
-                                            className="h-9 text-xs font-mono"
-                                            placeholder="/sdcard/Music"
-                                        />
+                                    <div className="flex justify-end pt-2">
+                                        <Button size="sm" variant="outline" onClick={() => void handleSaveProfile()}>
+                                            <Check className="mr-1.5 size-3.5" />
+                                            {t("translation.sync.saveSettings")}
+                                        </Button>
                                     </div>
                                 </div>
+                            )}
 
-                                <div className="flex justify-end pt-2">
-                                    <Button size="sm" variant="outline" onClick={() => void handleSaveProfile()}>
-                                        <Check className="mr-1.5 size-3.5" />
-                                        {t("translation.sync.saveSettings")}
-                                    </Button>
-                                </div>
-                            </div>
-
-                            {/* Sync Actions Bar */}
-                            <div className="flex flex-col gap-3 rounded-lg border bg-card p-5">
+                            {/* Plan & Sync Actions */}
+                            <div className="flex flex-col gap-3 border-t pt-4">
                                 <div className="flex flex-wrap items-center justify-between gap-3">
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex flex-wrap items-center gap-2">
                                         <Button
                                             variant="outline"
                                             size="sm"
@@ -539,6 +546,15 @@ export function AndroidSyncPanel() {
                                         >
                                             <Play className="mr-1.5 size-3.5" />
                                             {t("translation.sync.syncNow")}
+                                        </Button>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            disabled={syncing || !activeTarget.connected}
+                                            onClick={() => void handleResumeSync()}
+                                        >
+                                            <RotateCcw className="mr-1.5 size-3.5" />
+                                            {t("translation.sync.resume")}
                                         </Button>
                                     </div>
 
@@ -558,26 +574,30 @@ export function AndroidSyncPanel() {
                                                 {syncProgress.phase === "transcoding" && t("translation.sync.statusTranscoding")}
                                                 {syncProgress.phase === "transferring" && t("translation.sync.statusTransferring")}
                                                 {syncProgress.phase === "deleting" && t("translation.sync.statusCleaning")}
-                                                {syncProgress.phase === "starting" && t("translation.sync.statusStarting")}
                                                 {syncProgress.phase === "done" && t("translation.sync.statusDone")}
+                                                {syncProgress.phase === "starting" && t("translation.sync.statusStarting")}
                                                 {syncProgress.phase === "cancelled" && t("translation.sync.statusCancelled")}
-                                                {syncProgress.phase === "error" && t("translation.sync.statusError", { error: syncProgress.name })}
+                                                {syncProgress.phase === "error" && t("translation.sync.statusError", { error: syncProgress.error || "" })}
                                             </span>
-                                            {syncProgress.opTotal ? (
-                                                <span className="tabular-nums text-muted-foreground">
+                                            {syncProgress.opTotal && syncProgress.opTotal > 0 && (
+                                                <span className="font-mono text-[10px] text-muted-foreground">
                                                     {syncProgress.done || 0} / {syncProgress.opTotal}
                                                 </span>
-                                            ) : null}
+                                            )}
                                         </div>
-                                        {syncProgress.name && (
-                                            <p className="truncate font-mono text-[11px] text-muted-foreground">{syncProgress.name}</p>
-                                        )}
-                                        {syncProgress.opTotal ? (
+
+                                        {syncProgress.bytesTotal && syncProgress.bytesTotal > 0 && (
                                             <Progress
-                                                value={((syncProgress.done || 0) / syncProgress.opTotal) * 100}
-                                                className="h-1.5"
+                                                value={Math.round(((syncProgress.bytesDone || 0) / syncProgress.bytesTotal) * 100)}
+                                                className="h-1.5 w-full"
                                             />
-                                        ) : null}
+                                        )}
+
+                                        {syncProgress.name && (
+                                            <span className="font-mono text-[11px] text-muted-foreground truncate">
+                                                {syncProgress.name}
+                                            </span>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -586,9 +606,9 @@ export function AndroidSyncPanel() {
                 </div>
             )}
 
-            {/* Preview Plan Modal Dialog */}
+            {/* Plan Preview Modal */}
             <Dialog open={showPlanDialog} onOpenChange={setShowPlanDialog}>
-                <DialogContent className="sm:max-w-xl">
+                <DialogContent className="sm:max-w-2xl">
                     <DialogHeader>
                         <DialogTitle>{t("translation.sync.planTitle")}</DialogTitle>
                         <DialogDescription>
@@ -605,22 +625,22 @@ export function AndroidSyncPanel() {
                     {plan && (
                         <div className="flex max-h-[50vh] flex-col gap-3 overflow-y-auto pr-1 text-xs">
                             <div className="flex items-center justify-between rounded bg-muted/50 p-2 font-medium">
-                                <span>{t("translation.sync.planSize", { size: formatBytes(plan.freeNeeded || 0) })}</span>
+                                <span>{t("translation.sync.planSize", { size: formatBytes(plan.free_needed || 0) })}</span>
                                 <span>
                                     {t("translation.sync.freeOf", {
-                                        free: formatBytes(plan.freeAvailable || 0),
-                                        total: formatBytes(plan.freeAvailable || 0),
+                                        free: formatBytes(plan.free_available || 0),
+                                        total: formatBytes(plan.free_available || 0),
                                     })}
                                 </span>
                             </div>
 
-                            {plan.freeNeeded > plan.freeAvailable && plan.freeAvailable > 0 && (
+                            {plan.free_needed > plan.free_available && plan.free_available > 0 && (
                                 <div className="flex items-center gap-2 rounded bg-amber-500/10 p-2 text-amber-600 dark:text-amber-400">
                                     <AlertCircle className="size-4 shrink-0" />
                                     <span>
                                         {t("translation.sync.planSpaceWarning", {
-                                            free: formatBytes(plan.freeAvailable),
-                                            needed: formatBytes(plan.freeNeeded),
+                                            free: formatBytes(plan.free_available),
+                                            needed: formatBytes(plan.free_needed),
                                         })}
                                     </span>
                                 </div>
@@ -628,33 +648,49 @@ export function AndroidSyncPanel() {
 
                             {plan.groups && plan.groups.length > 0 ? (
                                 <div className="flex flex-col gap-2">
-                                    {plan.groups.slice(0, 100).map((grp, idx) => (
-                                        <div key={idx} className="flex flex-col rounded border p-2">
-                                            <div className="flex items-center justify-between font-semibold">
-                                                <span>{grp.album || "Unknown Album"}</span>
-                                                <span className="text-[10px] text-muted-foreground">{grp.artist}</span>
-                                            </div>
-                                            <div className="mt-1 flex flex-col gap-1 pl-2 text-[11px] text-muted-foreground">
-                                                {grp.ops?.map((op, oidx) => (
-                                                    <div key={oidx} className="flex items-center gap-2">
-                                                        <span
-                                                            className={cn(
-                                                                "font-mono font-bold text-[10px]",
-                                                                op.kind === "add" && "text-emerald-500",
-                                                                op.kind === "update" && "text-blue-500",
-                                                                op.kind === "move" && "text-amber-500",
-                                                                op.kind === "delete" && "text-rose-500",
-                                                                op.kind === "keep" && "text-muted-foreground",
-                                                            )}
-                                                        >
-                                                            {op.kind.toUpperCase()}
-                                                        </span>
-                                                        <span className="truncate">{op.remote_path}</span>
+                                    {plan.groups.slice(0, 100).map((grp, idx) => {
+                                        const groupOps = (plan.ops || []).filter((op) => op.album === grp.album);
+                                        return (
+                                            <div key={idx} className="flex flex-col rounded border p-2">
+                                                <div className="flex items-center justify-between font-semibold">
+                                                    <span>{grp.album || "Unknown Album"}</span>
+                                                    <div className="flex items-center gap-2 font-mono text-[11px]">
+                                                        {grp.adds > 0 && <span className="text-emerald-500">+{grp.adds}</span>}
+                                                        {grp.updates > 0 && <span className="text-blue-500">~{grp.updates}</span>}
+                                                        {grp.moves > 0 && <span className="text-amber-500">→{grp.moves}</span>}
+                                                        {grp.deletes > 0 && <span className="text-rose-500">-{grp.deletes}</span>}
+                                                        {grp.keeps > 0 && <span className="text-muted-foreground">={grp.keeps}</span>}
                                                     </div>
-                                                ))}
+                                                </div>
+                                                {groupOps.length > 0 && (
+                                                    <div className="mt-1 flex flex-col gap-1 pl-2 text-[11px] text-muted-foreground">
+                                                        {groupOps.slice(0, 5).map((op, oidx) => (
+                                                            <div key={oidx} className="flex items-center gap-2">
+                                                                <span
+                                                                    className={cn(
+                                                                        "font-mono font-bold text-[10px]",
+                                                                        op.kind === "add" && "text-emerald-500",
+                                                                        op.kind === "update" && "text-blue-500",
+                                                                        op.kind === "move" && "text-amber-500",
+                                                                        op.kind === "delete" && "text-rose-500",
+                                                                        op.kind === "keep" && "text-muted-foreground",
+                                                                    )}
+                                                                >
+                                                                    {op.kind.toUpperCase()}
+                                                                </span>
+                                                                <span className="truncate">{op.remote}</span>
+                                                            </div>
+                                                        ))}
+                                                        {groupOps.length > 5 && (
+                                                            <span className="text-[10px] text-muted-foreground/60 italic">
+                                                                + {groupOps.length - 5} more tracks...
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </div>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             ) : (
                                 <p className="py-6 text-center text-muted-foreground">{t("translation.sync.planEmpty")}</p>
@@ -668,14 +704,13 @@ export function AndroidSyncPanel() {
                         </div>
                     )}
 
-                    <DialogFooter>
+                    <DialogFooter className="gap-2">
                         <Button variant="outline" onClick={() => setShowPlanDialog(false)}>
                             {t("translation.common.cancel")}
                         </Button>
                         <Button
-                            variant="default"
+                            disabled={!activeTarget?.connected || syncing || (plan?.adds === 0 && plan?.updates === 0 && plan?.moves === 0 && plan?.deletes === 0)}
                             onClick={() => void handleStartSync()}
-                            disabled={!plan || (plan.adds === 0 && plan.updates === 0 && plan.moves === 0 && plan.deletes === 0)}
                         >
                             <Play className="mr-1.5 size-3.5" />
                             {t("translation.sync.syncNow")}
