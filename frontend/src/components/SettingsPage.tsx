@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { CommunitySourcesSettings, type CommunitySourcesHandle } from "@/components/CommunitySourcesSettings";
 import { SourceConnectionsSettings } from "@/components/SourceConnectionsSettings";
+import { ListeningConnectionsSettings } from "@/components/ListeningConnectionsSettings";
 import { useTranslation } from "react-i18next";
 import { flushSync } from "react-dom";
 import { Button } from "@/components/ui/button";
@@ -51,6 +52,7 @@ function withAutoQuality(settings: SettingsType, quality: "16" | "24" | "atmos")
 interface SettingsPageProps {
     onUnsavedChangesChange?: (hasUnsavedChanges: boolean) => void;
     onResetRequest?: (resetFn: () => void) => void;
+    onForYouToggle?: (enabled: boolean) => void;
 }
 const AUTO_CONVERT_BITRATES: SettingsType["autoConvertBitrate"][] = ["320k", "256k", "192k", "128k"];
 const LYRICS_TRANSLATION_LANGUAGES = [
@@ -108,7 +110,7 @@ const METADATA_TAG_OPTIONS: Array<{
     { key: "upc", labelKey: "literal.common.upc", example: "00602478398346" },
     { key: "comment", labelKey: "translation.settings.comment", example: "https://open.spotify.com/track/1CPZ5BxNNd0n0nF4Orb9JS" },
 ];
-export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: SettingsPageProps) {
+export function SettingsPage({ onUnsavedChangesChange, onResetRequest, onForYouToggle }: SettingsPageProps) {
     const { t } = useTranslation();
     const [savedSettings, setSavedSettings] = useState<SettingsType>(getSettings());
     const [tempSettings, setTempSettings] = useState<SettingsType>(savedSettings);
@@ -645,6 +647,8 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
             </div>
           </div>
         </section>
+
+        <ListeningConnectionsSettings onForYouToggle={onForYouToggle} />
       </div>
 
       <Dialog open={showCustomTidalApiDialog} onOpenChange={setShowCustomTidalApiDialog}>

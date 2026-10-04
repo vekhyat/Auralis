@@ -15,6 +15,7 @@ import {
     Square,
     Usb,
     X,
+    Sparkles,
 } from "lucide-react";
 import { WindowMinimise, WindowToggleMaximise, Quit } from "../../wailsjs/runtime/runtime";
 import { Menubar, MenubarContent, MenubarMenu, MenubarItem, MenubarTrigger, MenubarLabel, MenubarSeparator } from "@/components/ui/menubar";
@@ -44,10 +45,11 @@ interface TitleBarProps {
     currentPage: PageType;
     onPageChange: (page: DestinationPage | "debug") => void;
     queueCount?: number;
+    showForYou?: boolean;
     omnibar: OmnibarBinding;
 }
 
-export function TitleBar({ canGoBack = false, canGoForward = false, navigationDisabled = false, onBack, onForward, currentPage, onPageChange, queueCount = 0, omnibar }: TitleBarProps) {
+export function TitleBar({ canGoBack = false, canGoForward = false, navigationDisabled = false, onBack, onForward, currentPage, onPageChange, queueCount = 0, showForYou = false, omnibar }: TitleBarProps) {
     const { t } = useTranslation();
     const [isIssuesDialogOpen, setIsIssuesDialogOpen] = useState(false);
     const [hasIssueAgreement, setHasIssueAgreement] = useState(false);
@@ -64,14 +66,15 @@ export function TitleBar({ canGoBack = false, canGoForward = false, navigationDi
     };
     const destinationLabel: Record<DestinationPage, string> = {
         main: t("translation.sidebar.library"),
+        "for-you": t("translation.forYou.destination"),
         queue: t("translation.downloads.title"),
         history: t("translation.sidebar.history"),
         "library-health": t("translation.libraryHealth.title"),
         devices: t("translation.devices.destination"),
         settings: t("translation.sidebar.settings"),
     };
-    const destinationIcons = { main: Library, queue: Download, history: History, "library-health": Activity, devices: Usb, settings: Settings };
-    const destinations = PRIMARY_DESTINATIONS.map((page) => ({
+    const destinationIcons = { main: Library, "for-you": Sparkles, queue: Download, history: History, "library-health": Activity, devices: Usb, settings: Settings };
+    const destinations = PRIMARY_DESTINATIONS.filter((page) => page !== "for-you" || showForYou).map((page) => ({
         page,
         label: destinationLabel[page],
         active: currentPage === page,

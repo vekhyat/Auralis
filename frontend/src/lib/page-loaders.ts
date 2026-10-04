@@ -21,3 +21,7 @@ export function loadDevicesPage() {
 export function loadLibraryHealthPage() {
     return import("@/components/LibraryHealthPage").then((module) => ({ default: module.LibraryHealthPage }));
 }
+
+export function loadForYouPage() {
+    return import("@/components/ForYouPage").then((module) => ({ default: module.ForYouPage }));
+}

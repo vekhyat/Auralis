@@ -8,7 +8,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { getSettings, getSettingsWithDefaults, loadSettings, saveSettings, applyThemeMode } from "@/lib/settings";
 import { openExternal } from "@/lib/utils";
 import { fetchSpotifyMetadata } from "@/lib/api";
-import { OpenFolder, CheckFFmpegInstalled, DownloadFFmpeg, GetRecentFetches, SaveRecentFetches, ListIPods } from "../wailsjs/go/main/App";
+import { OpenFolder, CheckFFmpegInstalled, DownloadFFmpeg, GetRecentFetches, SaveRecentFetches, ListIPods, GetTasteSettings } from "../wailsjs/go/main/App";
 import { EventsOn, EventsOff, Quit } from "../wailsjs/runtime/runtime";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { TitleBar } from "@/components/TitleBar";
@@ -24,8 +24,8 @@ import { PlaylistInfo } from "@/components/PlaylistInfo";
 import { ArtistInfo } from "@/components/ArtistInfo";
 import { DownloadShelf } from "@/components/DownloadShelf";
 import { CooldownBanner } from "@/components/CooldownBanner";
-import { DebugLoggerPage, DevicesPage, HistoryPage, LibraryHealthPage, PageErrorBoundary, PageLoading, QueuePage, SettingsPage, } from "@/lazy-pages";
-import { loadDebugLoggerPage, loadDevicesPage, loadHistoryPage, loadLibraryHealthPage, loadQueuePage, loadSettingsPage, } from "@/lib/page-loaders";
+import { DebugLoggerPage, DevicesPage, ForYouPage, HistoryPage, LibraryHealthPage, PageErrorBoundary, PageLoading, QueuePage, SettingsPage, } from "@/lazy-pages";
+import { loadDebugLoggerPage, loadDevicesPage, loadForYouPage, loadHistoryPage, loadLibraryHealthPage, loadQueuePage, loadSettingsPage, } from "@/lib/page-loaders";
 import { createLazyPage } from "@/lib/lazy-page";
 import { planLegacyHistoryMigration, shouldDiscardLegacyHistory } from "@/lib/fetch-history-migration";
 import type { HistoryItem } from "@/components/FetchHistory";
@@ -226,6 +226,18 @@ function App() {
     const [pendingPageChange, setPendingPageChange] = useState<ShellPage | null>(null);
     const [showUnsavedChangesDialog, setShowUnsavedChangesDialog] = useState(false);
     const [resetSettingsFn, setResetSettingsFn] = useState<(() => void) | null>(null);
+    const [forYouEnabled, setForYouEnabled] = useState(false);
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            void GetTasteSettings().then((s) => {
+                if (s) {
+                    setForYouEnabled(s.for_you_enabled);
+                }
+            }).catch(() => {});
+        }, 0);
+        return () => window.clearTimeout(timer);
+    }, []);
     const ITEMS_PER_PAGE = 50;
     const CURRENT_VERSION = __APP_VERSION__;
     const download = useDownload();
@@ -819,6 +831,7 @@ function App() {
         queue: QueuePage,
         devices: DevicesPage,
         libraryHealth: LibraryHealthPage,
+        forYou: ForYouPage,
     }));
     const retryCurrentPage = () => {
         setPageAttempt((attempt) => attempt + 1);
@@ -836,6 +849,8 @@ function App() {
                     return { ...current, devices: createLazyPage(loadDevicesPage) };
                 case "library-health":
                     return { ...current, libraryHealth: createLazyPage(loadLibraryHealthPage) };
+                case "for-you":
+                    return { ...current, forYou: createLazyPage(loadForYouPage) };
                 default:
                     return current;
             }
@@ -846,8 +861,13 @@ function App() {
     </PageErrorBoundary>);
     const renderPage = () => {
         switch (currentPage) {
+            case "for-you":
+                return renderSecondary(<secondaryPages.forYou onDownloadUrl={(url: string) => void downloadFromUrl(url)} onSearch={(query: string) => {
+                    handlePageChange("main");
+                    omnibar.handleInputChange(query);
+                }} onNavigateToSettings={() => handlePageChange("settings")} />);
             case "settings":
-                return renderSecondary(<secondaryPages.settings onUnsavedChangesChange={setHasUnsavedSettings} onResetRequest={setResetSettingsFn}/>);
+                return renderSecondary(<secondaryPages.settings onUnsavedChangesChange={setHasUnsavedSettings} onResetRequest={setResetSettingsFn} onForYouToggle={setForYouEnabled}/>);
             case "debug":
                 return renderSecondary(<secondaryPages.debug />);
             case "devices":
@@ -925,6 +945,7 @@ function App() {
               onForward={handleTitleBarForward}
               currentPage={currentPage}
               onPageChange={handlePageChange}
+              showForYou={forYouEnabled}
               queueCount={queue.items.filter((item) => item.status === "pending" || item.status === "running").length}
               omnibar={{
                   value: smartSearchInput,

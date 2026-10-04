@@ -24,6 +24,7 @@ import (
 	"github.com/vekhyat/Auralis/backend/library"
 	"github.com/vekhyat/Auralis/backend/devices"
 	"github.com/vekhyat/Auralis/backend/syncengine"
+	"github.com/vekhyat/Auralis/backend/taste"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -47,6 +48,8 @@ type App struct {
 	activeSyncTargetID           string
 	activeSyncPlan               *syncengine.Plan
 	activeSyncPlanTargetID       string
+	tasteMu                      sync.Mutex
+	taste                        *taste.Service
 }
 
 type CurrentIPInfo struct {
@@ -382,6 +385,7 @@ func (a *App) shutdown(ctx context.Context) {
 		a.libraryScanCancel = nil
 	}
 	a.libraryScanMu.Unlock()
+	a.closeTaste()
 	a.stopIPodWatch()
 	a.stopSyncWatch()
 	backend.StopAcceptingDownloadsAndDrain()
