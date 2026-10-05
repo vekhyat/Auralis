@@ -45,6 +45,10 @@ func TestSpotifyConnectLoopbackFlow(t *testing.T) {
 			t.Errorf("authorize URL lacks PKCE: %s", authURL)
 		}
 		redirect := q.Get("redirect_uri")
+		callback, err := url.Parse(redirect)
+		if err != nil || callback.Hostname() != "127.0.0.1" || callback.Port() == "" || callback.Port() == "0" || callback.Path != "" {
+			t.Fatalf("callback must use the registered loopback root with a dynamically assigned port: %q", redirect)
+		}
 		go func() {
 			// A forged callback without our state must be ignored...
 			if resp, err := http.Get(redirect + "?code=evil&state=wrong"); err == nil {
@@ -68,6 +72,13 @@ func TestSpotifyConnectLoopbackFlow(t *testing.T) {
 	}
 	if refresh, err := store.Get(spotifyRefreshKey); err != nil || refresh != "rt" {
 		t.Fatalf("refresh token not stored: %q %v", refresh, err)
+	}
+}
+
+func TestSpotifyRegisteredRedirectUsesPortlessLoopback(t *testing.T) {
+	src := &SpotifyAPISource{}
+	if SpotifyRedirectURI != "http://127.0.0.1" || src.listenAddr() != "127.0.0.1:0" {
+		t.Fatal("Spotify registration and listener must support dynamic loopback ports")
 	}
 }
 
