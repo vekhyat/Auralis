@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/vekhyat/Auralis/backend/syncengine"
 )
@@ -55,6 +56,16 @@ func (t *Target) resolve(targetPath string) (string, error) {
 		return "", fmt.Errorf("target root is empty")
 	}
 	cleanRoot := path.Clean("/" + strings.Trim(t.Root, "/"))
+	if cleanRoot == "/" {
+		// Root is the whole device: every absolute path is inside it.
+		if targetPath == "" || targetPath == "/" {
+			return "/", nil
+		}
+		if strings.HasPrefix(targetPath, "/") {
+			return path.Clean(targetPath), nil
+		}
+		return path.Clean("/" + targetPath), nil
+	}
 	var cleanTarget string
 	if strings.HasPrefix(targetPath, "/") {
 		cleanTarget = path.Clean(targetPath)
@@ -81,10 +92,21 @@ func (t *Target) Info() syncengine.DeviceInfo {
 		Root:      t.Root,
 		Connected: true,
 	}
-	if free, err := t.FreeSpace(context.Background()); err == nil {
+	ctxInfo, cancel := ctxWithInfoTimeout()
+	defer cancel()
+	if free, err := t.FreeSpace(ctxInfo); err == nil {
 		info.FreeBytes = free
 	}
 	return info
+}
+
+// infoTimeout bounds the FreeSpace probe that Info() performs while
+// describing a target. Info is called on every sync-workspace open, so it
+// must never block on a stalled device.
+const infoCheckTimeout = 800 * time.Millisecond
+
+func ctxWithInfoTimeout() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), infoCheckTimeout)
 }
 
 // List walks root and returns every file below it using sync LIST.
@@ -110,12 +132,24 @@ func (t *Target) List(ctx context.Context, root string) ([]syncengine.RemoteEntr
 
 		entries, err := t.client.List(ctx, t.Serial, curr)
 		if err != nil {
-			// Directory might not exist yet; treat as empty
-			continue
+			// A directory that does not exist yet simply has no entries,
+			// but connection/authorization/transport errors must surface:
+			// swallowing them would make sync diff against an empty
+			// device and queue destructive "delete everything" operations.
+			if isMissingPathError(err) {
+				continue
+			}
+			return nil, fmt.Errorf("adb list %s: %w", curr, err)
 		}
 
 		for _, e := range entries {
 			if e.Name == "." || e.Name == ".." {
+				continue
+			}
+			if e.IsSymlink {
+				// Never follow phone-side links: a link pointing outside
+				// the music root would make the engine read or write
+				// files it does not manage.
 				continue
 			}
 			full := path.Join(curr, e.Name)
@@ -162,21 +196,59 @@ func (t *Target) Put(ctx context.Context, localPath, remotePath string, progress
 	if err != nil {
 		return err
 	}
-	// Send to a temporary name and rename once complete, so an interrupted
-	// transfer never leaves a truncated track or damages the previous copy.
-	part := resolved + partSuffix
-	if err := t.client.Send(ctx, t.Serial, localPath, part, 0o644, info.ModTime(), progress); err != nil {
-		_, _ = t.run(context.Background(), "rm -f "+QuoteArg(part))
+	// Refuse to stage through a remote parent that is a symlink (where the
+	// server reports link modes): the copy would land outside the root.
+	if err := t.checkRemoteHops(ctx, path.Dir(resolved)); err != nil {
 		return err
 	}
-	if _, err := t.run(ctx, "mv -f "+QuoteArg(part)+" "+QuoteArg(resolved)); err != nil {
+	// Send to a unique staging name and rename once complete, so an
+	// interrupted transfer never leaves a truncated track or damages the
+	// previous copy. A fixed suffix could collide with another transfer to
+	// the same path or be planted as a hijacked name.
+	staging := remoteStagingPath(resolved)
+	if err := t.client.Send(ctx, t.Serial, localPath, staging, 0o644, info.ModTime(), progress); err != nil {
+		_, _ = t.run(context.Background(), "rm -f "+QuoteArg(staging))
+		return err
+	}
+	if _, err := t.run(ctx, "mv -f "+QuoteArg(staging)+" "+QuoteArg(resolved)); err != nil {
 		return fmt.Errorf("adb rename: %w", err)
 	}
 	return nil
 }
 
-// partSuffix marks an in-progress transfer.
-const partSuffix = ".auralis-part"
+// remoteStagingPath derives a unique per-transfer staging path so two
+// concurrent Puts to the same destination never share a temp file.
+func remoteStagingPath(resolved string) string {
+	return fmt.Sprintf("%s.auralis-%d.part", resolved, time.Now().UnixNano())
+}
+
+// checkRemoteHops walks the parent chain of dir toward the root and fails
+// when the server reports any hop as a symlink. adbd often follows links,
+// so this is a best-effort guard, not a guarantee.
+func (t *Target) checkRemoteHops(ctx context.Context, dir string) error {
+	root := path.Clean(t.Root)
+	for dir != root && dir != "/" && dir != "." && dir != "" {
+		st, err := t.client.Stat(ctx, t.Serial, dir)
+		if err == nil && st != nil && st.IsSymlink {
+			return fmt.Errorf("remote parent %q is a symlink", dir)
+		}
+		dir = path.Dir(dir)
+	}
+	return nil
+}
+
+// isMissingPathError reports whether err is a "directory not found" failure
+// from adbd, as opposed to a transport, permission, or authorization error.
+func isMissingPathError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "no such file") ||
+		strings.Contains(msg, "not exist") ||
+		strings.Contains(msg, "enoent") ||
+		strings.Contains(msg, "not found")
+}
 
 // rcMarker carries the exit status back. The adb "shell:" service does not
 // report exit codes, so without it a failed mv or rm would look successful.
@@ -304,7 +376,7 @@ func (t *Target) StatSize(ctx context.Context, remotePath string) (int64, error)
 		return 0, err
 	}
 	if st == nil || st.Mode == 0 {
-		return 0, os.ErrNotExist
+		return 0, fmt.Errorf("stat %s: %w", resolved, os.ErrNotExist)
 	}
 	return st.Size, nil
 }

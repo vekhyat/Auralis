@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -58,7 +58,9 @@ func NewManifest(profileID string) *Manifest {
 	return &Manifest{Version: ManifestVersion, ProfileID: profileID, Entries: map[string]ManifestEntry{}}
 }
 
-// ReadManifest parses a manifest from r.
+// ReadManifest parses a manifest from r. Entries with unsafe remote paths
+// are dropped so a corrupt or hostile manifest can never drive the engine
+// outside the music root.
 func ReadManifest(r io.Reader) (*Manifest, error) {
 	var m Manifest
 	data, err := io.ReadAll(io.LimitReader(r, 64<<20))
@@ -71,6 +73,7 @@ func ReadManifest(r io.Reader) (*Manifest, error) {
 	if m.Entries == nil {
 		m.Entries = map[string]ManifestEntry{}
 	}
+	m.CleanUnsafe()
 	return &m, nil
 }
 
@@ -115,6 +118,21 @@ func (m *Manifest) SortedPaths() []string {
 // Set adds or replaces an entry.
 func (m *Manifest) Set(e ManifestEntry) { m.Entries[e.RemotePath] = e }
 
+// CleanUnsafe drops entries whose remote path or map key would escape the
+// music root, returning how many were removed. Keys are re-keyed to the
+// entry's RemotePath when they disagree so the map stays consistent.
+func (m *Manifest) CleanUnsafe() int {
+	removed := 0
+	for k, e := range m.Entries {
+		if ValidateRemoteRel(k) != nil || ValidateRemoteRel(e.RemotePath) != nil || k != e.RemotePath {
+			delete(m.Entries, k)
+			removed++
+			continue
+		}
+	}
+	return removed
+}
+
 // Remove deletes an entry.
 func (m *Manifest) Remove(rel string) { delete(m.Entries, rel) }
 
@@ -143,7 +161,9 @@ func LoadRemoteManifest(ctx context.Context, t SyncTarget, root string) (*Manife
 
 // WriteRemoteManifest uploads the manifest via the target's Put. Manifest
 // writes are infrequent (once per completed operation batch), so simplicity
-// beats streaming.
+// beats streaming. The local staging file is written atomically; the remote
+// Put itself must be atomic per transport (mass-storage and ADB use a
+// .auralis-part file plus rename).
 func WriteRemoteManifest(ctx context.Context, t SyncTarget, root string, m *Manifest) error {
 	data, err := m.Marshal()
 	if err != nil {
@@ -154,7 +174,7 @@ func WriteRemoteManifest(ctx context.Context, t SyncTarget, root string, m *Mani
 		return err
 	}
 	defer os.RemoveAll(dir)
-	tmp := path.Join(dir, "manifest.json")
+	tmp := filepath.Join(dir, "manifest.json")
 	if err := backend.WriteFileAtomic(tmp, data, 0o644); err != nil {
 		return err
 	}

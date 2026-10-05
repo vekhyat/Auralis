@@ -30,20 +30,30 @@ type Manager struct {
 	mu            sync.RWMutex
 	watchStop     chan struct{}
 	watchMu       sync.Mutex
+	loadErr       error
+	// Tests replace discovery so they never query real devices.
+	discoverADB    func(context.Context) ([]adb.Device, error)
+	discoverDrives func() ([]massstorage.Drive, error)
 	// adbStartTried rate-limits attempts to launch the adb server.
 	adbStartTried time.Time
 }
 
 // NewManager creates a Manager and loads stored configurations from the app directory.
 func NewManager() *Manager {
-	appDir, _ := backend.GetAppDir()
+	appDir, pathErr := backend.GetAppDir()
 	m := &Manager{
 		adbClient:     adb.NewClient(""),
 		profilesPath:  filepath.Join(appDir, "device_profiles.json"),
 		foldersPath:   filepath.Join(appDir, "folder_targets.json"),
 		profiles:      make(map[string]DeviceProfile),
 		folderTargets: make(map[string]FolderTarget),
+		loadErr:       pathErr,
 	}
+	m.discoverADB = func(ctx context.Context) ([]adb.Device, error) {
+		m.ensureADBServer(ctx)
+		return m.adbClient.Devices(ctx)
+	}
+	m.discoverDrives = massstorage.RemovableDrives
 	m.load()
 	return m
 }
@@ -58,7 +68,11 @@ func (m *Manager) load() {
 			for _, p := range list {
 				m.profiles[p.DeviceID] = p
 			}
+		} else {
+			m.loadErr = fmt.Errorf("read device profiles: %w", err)
 		}
+	} else if !os.IsNotExist(err) {
+		m.loadErr = err
 	}
 
 	if data, err := os.ReadFile(m.foldersPath); err == nil {
@@ -67,42 +81,53 @@ func (m *Manager) load() {
 			for _, ft := range list {
 				m.folderTargets[ft.ID] = ft
 			}
+		} else {
+			m.loadErr = fmt.Errorf("read folder targets: %w", err)
 		}
+	} else if !os.IsNotExist(err) {
+		m.loadErr = err
 	}
 }
 
-func (m *Manager) saveLocked() {
-	if m.profilesPath != "" {
-		_ = os.MkdirAll(filepath.Dir(m.profilesPath), 0o755)
-		list := make([]DeviceProfile, 0, len(m.profiles))
-		for _, p := range m.profiles {
-			list = append(list, p)
+func (m *Manager) saveLocked() error {
+	if m.loadErr != nil {
+		return m.loadErr
+	}
+	profiles := make([]DeviceProfile, 0, len(m.profiles))
+	for _, p := range m.profiles {
+		profiles = append(profiles, p)
+	}
+	sort.Slice(profiles, func(i, j int) bool { return profiles[i].DeviceID < profiles[j].DeviceID })
+	folders := make([]FolderTarget, 0, len(m.folderTargets))
+	for _, f := range m.folderTargets {
+		folders = append(folders, f)
+	}
+	sort.Slice(folders, func(i, j int) bool { return folders[i].ID < folders[j].ID })
+	for _, item := range []struct {
+		path  string
+		value any
+	}{{m.profilesPath, profiles}, {m.foldersPath, folders}} {
+		data, err := json.MarshalIndent(item.value, "", "  ")
+		if err != nil {
+			return err
 		}
-		if data, err := json.MarshalIndent(list, "", "  "); err == nil {
-			_ = os.WriteFile(m.profilesPath, data, 0o644)
+		if err := backend.WriteFileAtomic(item.path, data, 0o600); err != nil {
+			return err
 		}
 	}
-
-	if m.foldersPath != "" {
-		_ = os.MkdirAll(filepath.Dir(m.foldersPath), 0o755)
-		list := make([]FolderTarget, 0, len(m.folderTargets))
-		for _, ft := range m.folderTargets {
-			list = append(list, ft)
-		}
-		if data, err := json.MarshalIndent(list, "", "  "); err == nil {
-			_ = os.WriteFile(m.foldersPath, data, 0o644)
-		}
-	}
+	return nil
 }
 
 // ListTargets enumerates all currently available sync targets (ADB, removable, and folders).
 func (m *Manager) ListTargets(ctx context.Context) ([]SyncTargetView, error) {
+	if m.loadErr != nil {
+		return nil, m.loadErr
+	}
 	var views []SyncTargetView
 
 	// 1. ADB devices
-	m.ensureADBServer(ctx)
 	adbCtx, adbCancel := context.WithTimeout(ctx, 600*time.Millisecond)
-	adbDevs, _ := m.adbClient.Devices(adbCtx)
+	adbDevs, _ := m.discoverADB(adbCtx)
 	adbCancel()
 
 	for _, d := range adbDevs {
@@ -130,7 +155,7 @@ func (m *Manager) ListTargets(ctx context.Context) ([]SyncTargetView, error) {
 	}
 
 	// 2. Removable volumes
-	drives, _ := massstorage.RemovableDrives()
+	drives, _ := m.discoverDrives()
 	for _, dr := range drives {
 		if isIPodDrive(dr.Root) {
 			continue // iPods have their own sync flow on the Devices page
@@ -164,10 +189,11 @@ func (m *Manager) ListTargets(ctx context.Context) ([]SyncTargetView, error) {
 		id := "folder:" + f.ID
 		profile := m.getOrCreateProfileLocked(id, "folder", f.Name, f.Name, f.Path)
 		connected := false
+		root := profile.TargetFolder
 		var freeBytes int64
-		if info, err := os.Stat(f.Path); err == nil && info.IsDir() {
+		if info, err := os.Stat(root); err == nil && info.IsDir() {
 			connected = true
-			tgt := massstorage.New(id, f.Name, f.Path)
+			tgt := massstorage.New(id, f.Name, root)
 			if fb, err := tgt.FreeSpace(ctx); err == nil {
 				freeBytes = fb
 			}
@@ -177,7 +203,7 @@ func (m *Manager) ListTargets(ctx context.Context) ([]SyncTargetView, error) {
 			Name:      profile.FriendlyName,
 			Kind:      "folder",
 			Model:     f.Name,
-			Root:      f.Path,
+			Root:      root,
 			Connected: connected,
 			FreeBytes: freeBytes,
 			Profile:   profile,
@@ -242,7 +268,11 @@ func (m *Manager) getOrCreateProfileLocked(id, kind, name, model, root string) D
 
 // AddFolderTarget adds a manual sync folder target.
 func (m *Manager) AddFolderTarget(name, path string) (SyncTargetView, error) {
-	cleanPath := filepath.Clean(path)
+	cleanPath, err := filepath.Abs(path)
+	if err != nil {
+		return SyncTargetView{}, err
+	}
+	cleanPath = filepath.Clean(cleanPath)
 	info, err := os.Stat(cleanPath)
 	if err != nil || !info.IsDir() {
 		return SyncTargetView{}, fmt.Errorf("invalid directory path: %s", path)
@@ -266,7 +296,12 @@ func (m *Manager) AddFolderTarget(name, path string) (SyncTargetView, error) {
 	m.folderTargets[folderID] = ft
 	profile := DefaultProfileFor(targetID, "folder", name, name, cleanPath)
 	m.profiles[targetID] = profile
-	m.saveLocked()
+	if err := m.saveLocked(); err != nil {
+		delete(m.folderTargets, folderID)
+		delete(m.profiles, targetID)
+		m.mu.Unlock()
+		return SyncTargetView{}, err
+	}
 	m.mu.Unlock()
 
 	return SyncTargetView{
@@ -286,9 +321,19 @@ func (m *Manager) RemoveFolderTarget(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	oldFolder, hasFolder := m.folderTargets[folderID]
+	oldProfile, hasProfile := m.profiles[id]
 	delete(m.folderTargets, folderID)
 	delete(m.profiles, id)
-	m.saveLocked()
+	if err := m.saveLocked(); err != nil {
+		if hasFolder {
+			m.folderTargets[folderID] = oldFolder
+		}
+		if hasProfile {
+			m.profiles[id] = oldProfile
+		}
+		return err
+	}
 	return nil
 }
 
@@ -306,14 +351,35 @@ func (m *Manager) GetProfile(id string) DeviceProfile {
 func (m *Manager) SaveProfile(p DeviceProfile) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if _, ok := m.profiles[p.DeviceID]; !ok {
+		return fmt.Errorf("unknown device %s", p.DeviceID)
+	}
+	if err := validateProfile(p); err != nil {
+		return err
+	}
+	old := m.profiles[p.DeviceID]
 	m.profiles[p.DeviceID] = p
-	m.saveLocked()
+	if err := m.saveLocked(); err != nil {
+		m.profiles[p.DeviceID] = old
+		return err
+	}
 	return nil
 }
 
 // ResolveTarget creates a live syncengine.SyncTarget and returns its profile.
 func (m *Manager) ResolveTarget(id string) (syncengine.SyncTarget, library.Profile, syncengine.FormatPolicy, error) {
-	p := m.GetProfile(id)
+	if m.loadErr != nil {
+		return nil, library.Profile{}, syncengine.FormatPolicy{}, m.loadErr
+	}
+	m.mu.RLock()
+	p, exists := m.profiles[id]
+	m.mu.RUnlock()
+	if !exists {
+		return nil, library.Profile{}, syncengine.FormatPolicy{}, fmt.Errorf("unknown device %s", id)
+	}
+	if err := validateProfile(p); err != nil {
+		return nil, library.Profile{}, syncengine.FormatPolicy{}, err
+	}
 	libProfile := library.ProfileByID(p.ProfileID)
 
 	switch {
@@ -327,7 +393,7 @@ func (m *Manager) ResolveTarget(id string) (syncengine.SyncTarget, library.Profi
 		return tgt, libProfile, p.FormatPolicy, nil
 
 	case strings.HasPrefix(id, "drive:"):
-		drives, _ := massstorage.RemovableDrives()
+		drives, _ := m.discoverDrives()
 		var driveRoot string
 		for _, dr := range drives {
 			if "drive:"+dr.ID == id {
@@ -340,6 +406,9 @@ func (m *Manager) ResolveTarget(id string) (syncengine.SyncTarget, library.Profi
 		root := filepath.Join(driveRoot, "Music")
 		if p.TargetFolder != "" {
 			root = rebaseDrive(p.TargetFolder, driveRoot)
+		}
+		if rel, err := filepath.Rel(driveRoot, root); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, libProfile, p.FormatPolicy, fmt.Errorf("music folder must stay on the selected removable volume")
 		}
 		tgt := massstorage.New(id, p.FriendlyName, root)
 		tgt.Removable = true
@@ -381,7 +450,9 @@ func (m *Manager) StartWatch(ctx context.Context, onChange func([]SyncTargetView
 		defer ticker.Stop()
 
 		check := func() {
-			views, err := m.ListTargets(ctx)
+			pollCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			views, err := m.ListTargets(pollCtx)
 			if err != nil {
 				return
 			}
@@ -430,6 +501,7 @@ func computeSignature(views []SyncTargetView) string {
 		}
 		b.WriteByte('|')
 		b.WriteString(v.Root)
+		b.WriteString(v.Name)
 		b.WriteByte(';')
 	}
 	return b.String()

@@ -6,6 +6,7 @@ package syncengine
 import (
 	"context"
 	"io"
+	"path"
 	"strings"
 )
 
@@ -72,6 +73,53 @@ func JoinRemote(root, rel string) string {
 		return root
 	}
 	return root + "/" + rel
+}
+
+// ValidateRemoteRel reports whether rel is a safe root-relative slash path.
+// It rejects empty paths, absolute paths, backslashes, and any "." or ".."
+// component, so a validated rel joined under any root stays managed.
+func ValidateRemoteRel(rel string) error {
+	if rel == "" {
+		return errUnsafeRel("empty path")
+	}
+	if strings.Contains(rel, "\\") {
+		return errUnsafeRel("backslash in path")
+	}
+	if path.IsAbs(rel) || strings.HasPrefix(rel, "/") {
+		return errUnsafeRel("absolute path")
+	}
+	cleaned := path.Clean(rel)
+	if cleaned != rel {
+		return errUnsafeRel("unclean path")
+	}
+	for _, seg := range strings.Split(rel, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return errUnsafeRel("dot component")
+		}
+	}
+	return nil
+}
+
+type unsafeRelError struct{ msg string }
+
+func errUnsafeRel(msg string) error { return &unsafeRelError{msg: msg} }
+
+func (e *unsafeRelError) Error() string { return "unsafe remote path: " + e.msg }
+
+// IsUnsafeRel reports whether err came from ValidateRemoteRel.
+func IsUnsafeRel(err error) bool {
+	_, ok := err.(*unsafeRelError)
+	return ok
+}
+
+// JoinRemoteChecked joins root with rel after validating rel, guaranteeing
+// the result stays under root. It is the only way the executor addresses
+// the device.
+func JoinRemoteChecked(root, rel string) (string, error) {
+	if err := ValidateRemoteRel(rel); err != nil {
+		return "", err
+	}
+	return JoinRemote(root, rel), nil
 }
 
 // RemoteRel strips the music root prefix from an absolute remote path,

@@ -22,14 +22,23 @@ type TranscodeCache struct {
 
 func NewTranscodeCache(dir string) *TranscodeCache { return &TranscodeCache{Dir: dir} }
 
-// Key returns the cache filename for a track under a policy.
+// Key returns the cache filename for a track under a policy. The key binds
+// the source content hash, so a re-tag or re-encode (new hash) never hits a
+// stale cache entry. The extension is track-aware so ALAC-in-".m4a" keys
+// under the transcoded name.
 func (c *TranscodeCache) Key(track *SourceTrack, policy FormatPolicy) string {
 	sum := sha256.Sum256([]byte(track.Hash + "|" + policy.SettingsKey()))
-	return hex.EncodeToString(sum[:16]) + policy.RemoteExt(track.Ext)
+	return hex.EncodeToString(sum[:16]) + policy.RemoteExtForTrack(track)
 }
 
-// CachedPath returns the cached output path if present and newer than the source.
+// CachedPath returns the cached output path when a previous transcode for
+// the same (hash, settings) exists. Freshness needs no mtime check: the
+// key already contains the source hash, so changed sources map to
+// different keys.
 func (c *TranscodeCache) CachedPath(track *SourceTrack, policy FormatPolicy) (string, bool) {
+	if track.Hash == "" {
+		return "", false
+	}
 	p := filepath.Join(c.Dir, c.Key(track, policy))
 	info, err := os.Stat(p)
 	if err != nil || info.Size() == 0 {
@@ -40,10 +49,17 @@ func (c *TranscodeCache) CachedPath(track *SourceTrack, policy FormatPolicy) (st
 
 // Materialize returns the file to upload for a track: the cached transcode
 // when one exists, otherwise runs FFmpeg (or copies the original when the
-// policy keeps it) and caches the result.
+// policy keeps it) and caches the result. It honours ctx cancellation,
+// which kills the FFmpeg child. Tracks without a content hash are rejected
+// so two different files can never share one cache key. Losslessness is
+// decided per track (flag/codec before extension) so ALAC-in-".m4a" is
+// converted like any other lossless source.
 func (c *TranscodeCache) Materialize(ctx context.Context, track *SourceTrack, policy FormatPolicy) (string, error) {
-	if !policy.NeedsTranscode(track.Ext) {
+	if !policy.NeedsTranscodeTrack(track) {
 		return track.Path, nil
+	}
+	if track.Hash == "" {
+		return "", fmt.Errorf("transcode %s: missing content hash", track.Path)
 	}
 	if p, ok := c.CachedPath(track, policy); ok {
 		return p, nil
@@ -51,7 +67,7 @@ func (c *TranscodeCache) Materialize(ctx context.Context, track *SourceTrack, po
 	if err := os.MkdirAll(c.Dir, 0o755); err != nil {
 		return "", err
 	}
-	tmp, err := os.CreateTemp(c.Dir, ".transcode-*"+policy.RemoteExt(track.Ext))
+	tmp, err := os.CreateTemp(c.Dir, ".transcode-*"+policy.RemoteExtForTrack(track))
 	if err != nil {
 		return "", err
 	}
@@ -106,9 +122,14 @@ func transcodeTo(ctx context.Context, src, dst string, policy FormatPolicy) erro
 		}
 		return fmt.Errorf("ffmpeg: %w: %s", err, text)
 	}
-	// Missing art is not worth failing the sync over.
+	// A missing source image is not worth failing the sync over, but a
+	// failed WriteImage must fail the transcode: silently continuing
+	// would publish a file that pretends to carry preserved cover art.
 	if cover, err := taglib.ReadImage(src); err == nil && len(cover) > 0 {
-		_ = taglib.WriteImage(dst, cover)
+		if err := taglib.WriteImage(dst, cover); err != nil {
+			_ = os.Remove(dst)
+			return fmt.Errorf("preserve cover art: %w", err)
+		}
 	}
 	return nil
 }

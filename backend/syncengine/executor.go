@@ -1,7 +1,7 @@
 package syncengine
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -76,46 +76,131 @@ type journalRecord struct {
 }
 
 type journal struct {
+	mu   sync.Mutex
 	file *os.File
 	done map[int]bool
 }
 
+func (j *journal) isDone(i int) bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.done[i]
+}
+
+func (j *journal) markDone(i int) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.done[i] = true
+}
+
+func (j *journal) count() int {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return len(j.done)
+}
+
+// ErrStalePreview is returned when a source file changed after the plan
+// was previewed (size, mtime, or content hash no longer matches the
+// snapshotted track). The preview no longer describes the library, so the
+// caller must re-preview instead of syncing stale bytes.
+var ErrStalePreview = errors.New("source changed since preview")
+
+// ErrInsufficientSpace is returned by Run when the remaining work needs
+// more bytes than the device reports free. The check runs after journal
+// replay against unfinished operations only, so a resume never refuses
+// work that already fit, and FreeSpace errors propagate instead of being
+// swallowed: every transport implements FreeSpace, and the preview already
+// surfaces its failures before planning.
+var ErrInsufficientSpace = errors.New("insufficient free space on device")
+
+// manifestFlushInterval bounds how often Run re-uploads the device manifest
+// while operations complete.
+const manifestFlushInterval = 15 * time.Second
+
 // openJournal resumes the journal for planHash, replaying recorded effects
 // onto manifest, or starts a fresh one.
+//
+// A torn or corrupt line never aborts the replay: it is dropped while later
+// valid records still apply, and the file is rebuilt from the intact lines
+// (or the damaged tail truncated) before opening for append, so new records
+// always land on clean lines and replay on the next resume.
 func (e *Executor) openJournal(planHash string, manifest *Manifest) (*journal, error) {
 	j := &journal{done: map[int]bool{}}
 	if e.JournalPath == "" {
 		return j, nil
 	}
-	if f, err := os.Open(e.JournalPath); err == nil {
-		scanner := bufio.NewScanner(f)
-		scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	if data, err := os.ReadFile(e.JournalPath); err == nil {
 		matches := false
-		if scanner.Scan() {
+		validEnd := 0
+		dirty := false
+		var valid [][]byte
+		lines := bytes.Split(data, []byte{'\n'})
+		if len(lines) > 0 {
 			var header journalHeader
-			matches = json.Unmarshal(scanner.Bytes(), &header) == nil && header.PlanHash == planHash
+			if json.Unmarshal(lines[0], &header) == nil && header.PlanHash == planHash {
+				matches = true
+				validEnd = len(lines[0]) + 1
+				valid = append(valid, lines[0])
+				for _, line := range lines[1:] {
+					if len(line) == 0 {
+						continue // trailing newline: clean end of file
+					}
+					var rec journalRecord
+					if json.Unmarshal(line, &rec) != nil {
+						// Torn or corrupt line: skip it but keep
+						// replaying later valid records instead of
+						// abandoning the whole tail.
+						dirty = true
+						continue
+					}
+					j.done[rec.Index] = true
+					if rec.Remove != "" {
+						manifest.Remove(rec.Remove)
+					}
+					if rec.Set != nil {
+						manifest.Set(*rec.Set)
+					}
+					if rec.Skipped != "" {
+						e.Skipped = append(e.Skipped, rec.Skipped)
+					}
+					valid = append(valid, line)
+					validEnd += len(line) + 1
+				}
+				// A header without its newline (crash mid-write) still
+				// parses; cap the end at what is actually on disk.
+				if validEnd > len(data) {
+					validEnd = len(data)
+				}
+			}
 		}
-		for matches && scanner.Scan() {
-			var rec journalRecord
-			if json.Unmarshal(scanner.Bytes(), &rec) != nil {
-				break // torn last line from a crash
-			}
-			j.done[rec.Index] = true
-			if rec.Remove != "" {
-				manifest.Remove(rec.Remove)
-			}
-			if rec.Set != nil {
-				manifest.Set(*rec.Set)
-			}
-			if rec.Skipped != "" {
-				e.Skipped = append(e.Skipped, rec.Skipped)
-			}
-		}
-		f.Close()
 		if matches {
+			if dirty {
+				// Rebuild from the intact lines so later appends land on
+				// clean records instead of merging into damaged bytes.
+				rebuilt := append(bytes.Join(valid, []byte{'\n'}), '\n')
+				if err := os.WriteFile(e.JournalPath, rebuilt, 0o644); err != nil {
+					return nil, err
+				}
+			} else if validEnd < len(data) {
+				if err := os.Truncate(e.JournalPath, int64(validEnd)); err != nil {
+					return nil, err
+				}
+			}
 			file, err := os.OpenFile(e.JournalPath, os.O_APPEND|os.O_WRONLY, 0o644)
 			if err != nil {
 				return nil, err
+			}
+			// Ensure the next record starts on its own line even if the
+			// surviving tail lost its newline in the crash.
+			if needs, err := journalNeedsNewline(e.JournalPath); err == nil && needs {
+				if _, err := file.Write([]byte{'\n'}); err != nil {
+					file.Close()
+					return nil, err
+				}
+				if err := file.Sync(); err != nil {
+					file.Close()
+					return nil, err
+				}
 			}
 			j.file = file
 			return j, nil
@@ -135,12 +220,38 @@ func (e *Executor) openJournal(planHash string, manifest *Manifest) (*journal, e
 		file.Close()
 		return nil, err
 	}
+	if err := file.Sync(); err != nil {
+		file.Close()
+		return nil, err
+	}
 	j.file = file
 	return j, nil
 }
 
+// journalNeedsNewline reports whether the file at p is non-empty and does
+// not end with a newline.
+func journalNeedsNewline(p string) (bool, error) {
+	f, err := os.Open(p)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || info.Size() == 0 {
+		return false, err
+	}
+	tail := make([]byte, 1)
+	if _, err := f.ReadAt(tail, info.Size()-1); err != nil {
+		return false, err
+	}
+	return tail[0] != '\n', nil
+}
+
 // record applies an operation's manifest effect and appends it to the
-// journal. Callers hold e.mu.
+// journal, then flushes to disk. Callers hold e.mu; the journal's done set
+// has its own lock so copy workers can finish concurrently without racing
+// the dispatch loop. The Sync makes each record durable before the caller
+// proceeds, so a crash can lose at most the single in-flight operation.
 func (e *Executor) record(j *journal, manifest *Manifest, rec journalRecord) error {
 	if rec.Remove != "" {
 		manifest.Remove(rec.Remove)
@@ -151,7 +262,7 @@ func (e *Executor) record(j *journal, manifest *Manifest, rec journalRecord) err
 	if rec.Skipped != "" {
 		e.Skipped = append(e.Skipped, rec.Skipped)
 	}
-	j.done[rec.Index] = true
+	j.markDone(rec.Index)
 	if j.file == nil {
 		return nil
 	}
@@ -159,13 +270,26 @@ func (e *Executor) record(j *journal, manifest *Manifest, rec journalRecord) err
 	if err != nil {
 		return err
 	}
-	_, err = j.file.Write(append(line, '\n'))
-	return err
+	if _, err = j.file.Write(append(line, '\n')); err != nil {
+		return err
+	}
+	return j.file.Sync()
 }
 
 // Run executes the plan. It honours ctx cancellation, skips operations
 // already recorded in the journal, and keeps manifest in step with the
 // device. A nil manifest is treated as a device Auralis has never synced.
+//
+// Every operation's remote paths are validated to stay under Root before
+// anything is copied; an unsafe plan fails fast without touching the
+// device. The journal replays before any free-space decision, so a resume
+// accounts only unfinished work against live free space and refuses with
+// ErrInsufficientSpace before copying anything further. Copies run on a
+// fixed worker pool of size Concurrency (bounded concurrency), deletes run
+// serially afterwards, and cancellation via ctx stops new work while
+// letting in-flight copies settle. Re-running the exact Ops against the
+// final manifest is idempotent: copies re-Put identical bytes, completed
+// moves reconcile from the destination, and finished deletes are no-ops.
 func (e *Executor) Run(ctx context.Context, plan *Plan, manifest *Manifest) error {
 	if plan == nil {
 		return errors.New("nil plan")
@@ -179,6 +303,17 @@ func (e *Executor) Run(ctx context.Context, plan *Plan, manifest *Manifest) erro
 	if e.now == nil {
 		e.now = time.Now
 	}
+	for i, op := range plan.Ops {
+		if err := ValidateRemoteRel(op.Remote); err != nil {
+			return fmt.Errorf("op %d: invalid remote path: %w", i, err)
+		}
+		if op.Kind == OpMove || op.Kind == OpDelete {
+			if err := ValidateRemoteRel(op.Source); err != nil {
+				return fmt.Errorf("op %d: invalid source path: %w", i, err)
+			}
+		}
+	}
+	trashStamp := e.now().Unix()
 	j, err := e.openJournal(plan.Hash(), manifest)
 	if err != nil {
 		return fmt.Errorf("open sync journal: %w", err)
@@ -198,45 +333,153 @@ func (e *Executor) Run(ctx context.Context, plan *Plan, manifest *Manifest) erro
 			firstErr = err
 		}
 	}
+	var lastUpload time.Time
 	finish := func(i int, rec journalRecord, name string) {
 		rec.Index = i
 		e.mu.Lock()
 		err := e.record(j, manifest, rec)
-		done := len(j.done)
+		// Publish the device manifest on the first completed operation and
+		// then at most every manifestFlushInterval, serialized on the
+		// manifest lock. Uploading it after every file would re-send the
+		// whole manifest N times (quadratic over ADB); the local journal
+		// covers anything finished since the last upload.
+		var upErr error
+		if err == nil && e.now().Sub(lastUpload) >= manifestFlushInterval {
+			upErr = WriteRemoteManifest(ctx, e.Target, e.Root, manifest)
+			lastUpload = e.now()
+		}
+		done := j.count()
 		e.mu.Unlock()
 		if err != nil {
 			setErr(fmt.Errorf("write sync journal: %w", err))
+		} else if upErr != nil {
+			setErr(fmt.Errorf("upload manifest: %w", upErr))
 		}
 		e.emit(Progress{Phase: "progress", OpIndex: i, OpTotal: len(plan.Ops), Done: done, Name: name})
 	}
 
-	wg := sync.WaitGroup{}
-	sem := make(chan struct{}, e.Concurrency)
+	// Fixed worker pool: at most Concurrency copies/moves in flight and
+	// no goroutine per operation.
+	//
+	// Keeps whose remote file went missing (or whose size no longer matches
+	// the manifest entry) are re-copied here instead of falsely remaining
+	// managed: without this a file deleted on the device would stay in the
+	// manifest and in playlists while being gone.
+	repair := map[int]bool{}
+	if ss, ok := e.Target.(StatSize); ok {
+		for i := range plan.Ops {
+			op := plan.Ops[i]
+			if op.Kind != OpKeep || op.Track == nil || j.isDone(i) {
+				continue
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			entry := manifest.Entry(op.Remote)
+			if entry == nil {
+				repair[i] = true
+				continue
+			}
+			got, err := ss.StatSize(ctx, JoinRemote(e.Root, op.Remote))
+			if err != nil {
+				// errors.Is, not os.IsNotExist: the latter does not
+				// follow %w chains, so wrapped transport errors would
+				// misclassify as disconnects instead of missing files.
+				if errors.Is(err, os.ErrNotExist) {
+					repair[i] = true
+					continue
+				}
+				return fmt.Errorf("verify keep %s: %w", op.Remote, err)
+			}
+			if got != entry.Size {
+				repair[i] = true
+			}
+		}
+	}
+	var jobs []int
 	for i := range plan.Ops {
 		op := plan.Ops[i]
-		if j.done[i] || op.Kind == OpDelete || op.Kind == OpKeep {
+		if j.isDone(i) {
 			continue
 		}
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			select {
-			case sem <- struct{}{}:
-				defer func() { <-sem }()
-			case <-ctx.Done():
-				return
-			}
-			rec, err := e.runOp(ctx, op, manifest)
-			if err != nil {
-				if ctx.Err() == nil {
-					setErr(fmt.Errorf("%s %s: %w", op.Kind, op.Remote, err))
-				}
-				return
-			}
-			finish(i, rec, op.Remote)
-		}(i)
+		if op.Kind == OpDelete {
+			continue
+		}
+		if op.Kind == OpKeep && !repair[i] {
+			continue
+		}
+		jobs = append(jobs, i)
 	}
-	wg.Wait()
+	// Remaining-space check against live free space, after replay: only
+	// unfinished adds/updates and repair copies still need bytes, so a
+	// resume is refused only when what is left does not fit. This runs
+	// before any copy so a tight device never ends mid-sync half-written.
+	var remaining int64
+	for _, i := range jobs {
+		op := plan.Ops[i]
+		if op.Kind == OpAdd || op.Kind == OpUpdate || op.Kind == OpKeep {
+			remaining += op.Size
+		}
+	}
+	if remaining > 0 {
+		free, err := e.Target.FreeSpace(ctx)
+		if err != nil {
+			return fmt.Errorf("check free space: %w", err)
+		}
+		if free >= 0 && remaining > free {
+			return fmt.Errorf("%w: need %d bytes but only %d are free", ErrInsufficientSpace, remaining, free)
+		}
+	}
+	if len(jobs) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		workers := e.Concurrency
+		if workers > len(jobs) {
+			workers = len(jobs)
+		}
+		jobCh := make(chan int)
+		var wg sync.WaitGroup
+		for w := 0; w < workers; w++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for i := range jobCh {
+					if ctx.Err() != nil {
+						return
+					}
+					op := plan.Ops[i]
+					var rec journalRecord
+					var err error
+					if op.Kind == OpKeep {
+						// Repair copy for a keep whose remote is gone or
+						// wrong-sized; runCopy re-Puts and records the Set.
+						rec, err = e.runCopy(ctx, op)
+					} else {
+						rec, err = e.runOp(ctx, op, manifest)
+					}
+					if err != nil {
+						if ctx.Err() == nil {
+							setErr(fmt.Errorf("%s %s: %w", op.Kind, op.Remote, err))
+						}
+						continue
+					}
+					finish(i, rec, op.Remote)
+				}
+			}()
+		}
+		go func() {
+			defer close(jobCh)
+			for _, i := range jobs {
+				select {
+				case jobCh <- i:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+		wg.Wait()
+	}
 	if firstErr != nil {
 		return firstErr
 	}
@@ -248,13 +491,13 @@ func (e *Executor) Run(ctx context.Context, plan *Plan, manifest *Manifest) erro
 	// hard-delete unless opted in.
 	for i := range plan.Ops {
 		op := plan.Ops[i]
-		if j.done[i] || op.Kind != OpDelete {
+		if j.isDone(i) || op.Kind != OpDelete {
 			continue
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := e.runDelete(ctx, op); err != nil {
+		if err := e.runDelete(ctx, op, trashStamp); err != nil {
 			return fmt.Errorf("delete %s: %w", op.Remote, err)
 		}
 		finish(i, journalRecord{Remove: op.Remote}, op.Remote)
@@ -314,16 +557,42 @@ func (e *Executor) runCopy(ctx context.Context, op Operation) (journalRecord, er
 	if op.Track == nil {
 		return journalRecord{}, errors.New("missing track")
 	}
-	dst := JoinRemote(e.Root, op.Remote)
-	// An add targets a path the manifest does not own. If something is
-	// already there, it is the user's file: leave it alone.
-	if op.Kind == OpAdd && e.occupied(ctx, dst) {
-		e.emit(Progress{Phase: "skipped", Name: op.Remote})
-		return journalRecord{Skipped: op.Remote}, nil
+	dst, err := JoinRemoteChecked(e.Root, op.Remote)
+	if err != nil {
+		return journalRecord{}, err
 	}
-	local := op.Track.Path
+	// Validate the source against the previewed snapshot before touching
+	// the device: a file edited after planning must fail with a
+	// re-preview signal, never sync stale bytes.
+	tr := op.Track
+	srcInfo, err := os.Stat(tr.Path)
+	if err != nil {
+		return journalRecord{}, err
+	}
+	if srcInfo.Size() != tr.Size || !srcInfo.ModTime().Equal(tr.ModTime) {
+		return journalRecord{}, fmt.Errorf("%w: %s", ErrStalePreview, tr.Path)
+	}
+	// Re-hash the source and compare with the previewed hash. Scanners
+	// have hashed with both Unix seconds and UnixNano mtimes, so accept a
+	// match under either convention; anything else means the bytes the
+	// preview approved are no longer on disk.
+	fresh := false
+	for _, mtime := range []int64{srcInfo.ModTime().UnixNano(), srcInfo.ModTime().Unix()} {
+		h, err := HashSource(tr.Path, srcInfo.Size(), mtime)
+		if err != nil {
+			return journalRecord{}, err
+		}
+		if h == tr.Hash {
+			fresh = true
+			break
+		}
+	}
+	if !fresh {
+		return journalRecord{}, fmt.Errorf("%w: %s", ErrStalePreview, tr.Path)
+	}
+	local := tr.Path
 	if e.Materialize != nil {
-		produced, err := e.Materialize(ctx, op.Track)
+		produced, err := e.Materialize(ctx, tr)
 		if err != nil {
 			return journalRecord{}, err
 		}
@@ -332,6 +601,15 @@ func (e *Executor) runCopy(ctx context.Context, op Operation) (journalRecord, er
 	info, err := os.Stat(local)
 	if err != nil {
 		return journalRecord{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return journalRecord{}, err
+	}
+	// Unmanifested files belong to the user, including same-sized files.
+	// Never adopt them or replace them while recovering a journal.
+	if op.Kind == OpAdd && e.occupied(ctx, dst) {
+		e.emit(Progress{Phase: "skipped", Name: op.Remote})
+		return journalRecord{Skipped: op.Remote}, nil
 	}
 	e.emit(Progress{Phase: "copy", Name: op.Remote, Bytes: 0})
 	if err := e.Target.Put(ctx, local, dst, func(n int64) {
@@ -353,9 +631,48 @@ func (e *Executor) runCopy(ctx context.Context, op Operation) (journalRecord, er
 }
 
 func (e *Executor) runMove(ctx context.Context, op Operation, manifest *Manifest) (journalRecord, error) {
-	from := JoinRemote(e.Root, op.Source)
-	to := JoinRemote(e.Root, op.Remote)
+	from, err := JoinRemoteChecked(e.Root, op.Source)
+	if err != nil {
+		return journalRecord{}, err
+	}
+	to, err := JoinRemoteChecked(e.Root, op.Remote)
+	if err != nil {
+		return journalRecord{}, err
+	}
 	if e.occupied(ctx, to) {
+		// A crash between Move and its journal record leaves exactly this
+		// state: the source is gone and the destination holds the moved
+		// bytes. Reconcile the manifest instead of dropping the entry,
+		// which would orphan the destination, or re-moving, which would
+		// fail on the missing source.
+		if ss, ok := e.Target.(StatSize); ok {
+			e.mu.Lock()
+			old := manifest.Entry(op.Source)
+			e.mu.Unlock()
+			if old != nil {
+				if _, serr := ss.StatSize(ctx, from); serr != nil && errors.Is(serr, os.ErrNotExist) {
+					got, derr := ss.StatSize(ctx, to)
+					if derr == nil && got == old.Size {
+						rec := journalRecord{Remove: op.Source}
+						if op.Track != nil {
+							entry := SanitizedManifestEntry(op.Track, op.Remote, e.Profile.ID, e.ProfileVersion, e.Policy, old.Size)
+							rec.Set = &entry
+						}
+						e.emit(Progress{Phase: "move", Name: op.Remote})
+						return rec, nil
+					}
+					if derr != nil && !errors.Is(derr, os.ErrNotExist) {
+						return journalRecord{}, derr
+					}
+					return journalRecord{}, fmt.Errorf("move %s: source missing and destination does not match the moved file", op.Remote)
+				} else if serr != nil {
+					return journalRecord{}, serr
+				}
+			}
+		}
+		// Genuine collision: the source is still there and something else
+		// occupies the destination. Leave both alone and preserve the old
+		// manifest entry.
 		e.emit(Progress{Phase: "skipped", Name: op.Remote})
 		return journalRecord{Skipped: op.Remote}, nil
 	}
@@ -379,13 +696,23 @@ func (e *Executor) runMove(ctx context.Context, op Operation, manifest *Manifest
 	return rec, nil
 }
 
-func (e *Executor) runDelete(ctx context.Context, op Operation) error {
-	src := JoinRemote(e.Root, op.Remote)
+func (e *Executor) runDelete(ctx context.Context, op Operation, trashStamp int64) error {
+	src, err := JoinRemoteChecked(e.Root, op.Remote)
+	if err != nil {
+		return err
+	}
 	// A crash can leave the trash move done but unrecorded; a missing
-	// source is already gone.
+	// source is already gone. Only a not-exist StatSize error means
+	// missing — any other error (disconnect, cancel, permission)
+	// propagates instead of silently skipping the delete. Transports map
+	// their own "not found" onto os.ErrNotExist (compared with errors.Is,
+	// which follows %w chains, unlike os.IsNotExist).
 	if ss, ok := e.Target.(StatSize); ok {
 		if _, err := ss.StatSize(ctx, src); err != nil {
-			return nil
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return err
 		}
 	}
 	e.emit(Progress{Phase: "delete", Name: op.Remote})
@@ -393,7 +720,11 @@ func (e *Executor) runDelete(ctx context.Context, op Operation) error {
 		return e.Target.Delete(ctx, src)
 	}
 	// Keep the relative path so two "01. Intro.flac" files cannot collide.
-	trash := path.Join(TrashDirRel, fmt.Sprintf("%d", e.now().Unix()), op.Remote)
+	// The stamp is fixed per Run so one sync's trash lands in one folder.
+	trash, err := JoinRemoteChecked(TrashDirRel, path.Join(fmt.Sprintf("%d", trashStamp), op.Remote))
+	if err != nil {
+		return err
+	}
 	return e.Target.Move(ctx, src, JoinRemote(e.Root, trash))
 }
 

@@ -20,9 +20,9 @@ import (
 	"time"
 
 	"github.com/vekhyat/Auralis/backend"
+	"github.com/vekhyat/Auralis/backend/devices"
 	"github.com/vekhyat/Auralis/backend/devices/ipod"
 	"github.com/vekhyat/Auralis/backend/library"
-	"github.com/vekhyat/Auralis/backend/devices"
 	"github.com/vekhyat/Auralis/backend/syncengine"
 	"github.com/vekhyat/Auralis/backend/taste"
 
@@ -48,6 +48,7 @@ type App struct {
 	activeSyncTargetID           string
 	activeSyncPlan               *syncengine.Plan
 	activeSyncPlanTargetID       string
+	activeSyncSession            *syncSession
 	tasteMu                      sync.Mutex
 	taste                        *taste.Service
 }
