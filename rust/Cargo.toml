@@ -4,6 +4,8 @@ members = [
     "crates/auralis-core",
     "crates/auralis-config",
     "crates/auralis-store",
+    "crates/auralis-ffmpeg",
+    "crates/auralis-tagger",
 ]
 
 [workspace.package]
