@@ -1420,7 +1420,13 @@
       "reasonLikedTracks_one": "{{count}} parçasını beğendin",
       "reasonLikedTracks_other": "{{count}} parçasını beğendin",
       "reasonSimilarTo": "{{artist}} ile benzer",
-      "reasonMissingAlbum": "Henüz kütüphanende yok"
+      "reasonMissingAlbum": "Henüz kütüphanende yok",
+      "loading": "Öneriler yükleniyor…",
+      "loadError": "Önerileriniz yüklenemedi. Tekrar deneyin.",
+      "retry": "Tekrar dene",
+      "preparing": "Hazırlanıyor…",
+      "download": "İndir",
+      "moreActions": "{{title}} için diğer işlemler"
     },
     "connections": {
       "title": "Dinleme bağlantıları",
@@ -1452,7 +1458,7 @@
       "lastfmSavedToast": "Last.fm kaydedildi",
       "lastfmDisconnectedToast": "Last.fm bağlantısı kesildi",
       "importExportTitle": "Spotify veri dışa aktarımını içe aktar",
-      "importExportDesc": "Spotify gizlilik sayfasından \"Genişletilmiş akış geçmişi\"ni iste, ardından .zip ya da bir JSON dosyası seç. Spotify uygulaması gerekmez.",
+      "importExportDesc": "Spotify gizlilik sayfasından genişletilmiş dinleme geçmişinizi isteyin, ardından .zip dosyasını, bir JSON dosyasını veya çıkarılmış klasörü seçin. Spotify uygulaması gerekmez.",
       "selectExportFile": "Dışa aktarma dosyasını seç",
       "importingCount_one": "İçe aktarılıyor… {{count}} dinleme okundu",
       "importingCount_other": "İçe aktarılıyor… {{count}} dinleme okundu",
@@ -1472,7 +1478,16 @@
       "lastSyncedAt": "Son eşitleme: {{time}}",
       "neverSynced": "Hiç eşitlenmedi",
       "eventsCount_one": "{{count}} dinleme kaydı",
-      "eventsCount_other": "{{count}} dinleme kaydı"
+      "eventsCount_other": "{{count}} dinleme kaydı",
+      "loading": "Bağlantılar yükleniyor…",
+      "loadError": "Dinleme bağlantıları yüklenemedi. Tekrar deneyin.",
+      "retry": "Tekrar dene",
+      "cancelSync": "Eşitlemeyi iptal et",
+      "spotifyClientIdPlaceholder": "Spotify İstemci Kimliğinizi yapıştırın",
+      "lastfmUsernamePlaceholder": "Last.fm kullanıcı adınız",
+      "lastfmApiKeyPlaceholder": "Last.fm API anahtarınız",
+      "selectExportFolder": "Dışa aktarma klasörü seç",
+      "spotifyLoopbackHint": "Spotify bu geri döngü adresi için herhangi bir bağlantı noktasına izin verir. Auralis bağlanırken kullanılabilir bir bağlantı noktası seçer."
     }
   },
   "literal": {

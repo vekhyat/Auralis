@@ -1420,7 +1420,13 @@
       "reasonLikedTracks_one": "Понравилось треков: {{count}}",
       "reasonLikedTracks_other": "Понравилось треков: {{count}}",
       "reasonSimilarTo": "Похоже на {{artist}}",
-      "reasonMissingAlbum": "Пока нет в вашей библиотеке"
+      "reasonMissingAlbum": "Пока нет в вашей библиотеке",
+      "loading": "Загрузка рекомендаций…",
+      "loadError": "Не удалось загрузить ваши рекомендации. Попробуйте ещё раз.",
+      "retry": "Повторить",
+      "preparing": "Подготовка…",
+      "download": "Скачать",
+      "moreActions": "Другие действия для {{title}}"
     },
     "connections": {
       "title": "Подключения прослушиваний",
@@ -1452,7 +1458,7 @@
       "lastfmSavedToast": "Last.fm сохранён",
       "lastfmDisconnectedToast": "Last.fm отключён",
       "importExportTitle": "Импорт выгрузки данных Spotify",
-      "importExportDesc": "Запросите «Расширенную историю прослушивания» на странице конфиденциальности Spotify, затем выберите .zip или JSON-файл. Приложение Spotify не нужно.",
+      "importExportDesc": "Запросите расширенную историю прослушивания на странице конфиденциальности Spotify, затем выберите ZIP-архив, файл JSON или распакованную папку. Приложение Spotify не требуется.",
       "selectExportFile": "Выбрать файл выгрузки",
       "importingCount_one": "Импорт… прочитано прослушиваний: {{count}}",
       "importingCount_other": "Импорт… прочитано прослушиваний: {{count}}",
@@ -1472,7 +1478,16 @@
       "lastSyncedAt": "Последняя синхронизация: {{time}}",
       "neverSynced": "Ещё не синхронизировано",
       "eventsCount_one": "Событий прослушивания: {{count}}",
-      "eventsCount_other": "Событий прослушивания: {{count}}"
+      "eventsCount_other": "Событий прослушивания: {{count}}",
+      "loading": "Загрузка подключений…",
+      "loadError": "Не удалось загрузить подключения к истории прослушивания. Попробуйте ещё раз.",
+      "retry": "Повторить",
+      "cancelSync": "Отменить синхронизацию",
+      "spotifyClientIdPlaceholder": "Вставьте Client ID Spotify",
+      "lastfmUsernamePlaceholder": "Ваше имя пользователя Last.fm",
+      "lastfmApiKeyPlaceholder": "Ваш ключ API Last.fm",
+      "selectExportFolder": "Выбрать папку экспорта",
+      "spotifyLoopbackHint": "Spotify допускает любой порт для этого адреса обратной петли. При подключении Auralis выбирает свободный порт."
     }
   },
   "literal": {

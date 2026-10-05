@@ -1420,7 +1420,13 @@
       "reasonLikedTracks_one": "Bạn thích {{count}} bài trong album",
       "reasonLikedTracks_other": "Bạn thích {{count}} bài trong album",
       "reasonSimilarTo": "Tương tự {{artist}}",
-      "reasonMissingAlbum": "Chưa có trong thư viện của bạn"
+      "reasonMissingAlbum": "Chưa có trong thư viện của bạn",
+      "loading": "Đang tải gợi ý…",
+      "loadError": "Không thể tải gợi ý của bạn. Hãy thử lại.",
+      "retry": "Thử lại",
+      "preparing": "Đang chuẩn bị…",
+      "download": "Tải xuống",
+      "moreActions": "Thao tác khác cho {{title}}"
     },
     "connections": {
       "title": "Kết nối lịch sử nghe",
@@ -1452,7 +1458,7 @@
       "lastfmSavedToast": "Đã lưu Last.fm",
       "lastfmDisconnectedToast": "Đã ngắt kết nối Last.fm",
       "importExportTitle": "Nhập bản xuất dữ liệu Spotify",
-      "importExportDesc": "Yêu cầu \"Lịch sử phát mở rộng\" trên trang quyền riêng tư của Spotify, rồi chọn tệp .zip hoặc JSON. Không cần ứng dụng Spotify.",
+      "importExportDesc": "Yêu cầu lịch sử phát mở rộng trên trang quyền riêng tư của Spotify, rồi chọn tệp .zip, tệp JSON hoặc thư mục đã giải nén. Không cần ứng dụng Spotify.",
       "selectExportFile": "Chọn tệp xuất",
       "importingCount_one": "Đang nhập… đã đọc {{count}} lượt phát",
       "importingCount_other": "Đang nhập… đã đọc {{count}} lượt phát",
@@ -1472,7 +1478,16 @@
       "lastSyncedAt": "Đồng bộ lần cuối {{time}}",
       "neverSynced": "Chưa từng đồng bộ",
       "eventsCount_one": "{{count}} lượt nghe",
-      "eventsCount_other": "{{count}} lượt nghe"
+      "eventsCount_other": "{{count}} lượt nghe",
+      "loading": "Đang tải kết nối…",
+      "loadError": "Không thể tải kết nối lịch sử nghe. Hãy thử lại.",
+      "retry": "Thử lại",
+      "cancelSync": "Hủy đồng bộ",
+      "spotifyClientIdPlaceholder": "Dán Client ID Spotify của bạn",
+      "lastfmUsernamePlaceholder": "Tên người dùng Last.fm của bạn",
+      "lastfmApiKeyPlaceholder": "Khóa API Last.fm của bạn",
+      "selectExportFolder": "Chọn thư mục xuất dữ liệu",
+      "spotifyLoopbackHint": "Spotify cho phép mọi cổng cho địa chỉ vòng lặp cục bộ này. Auralis chọn một cổng khả dụng khi bạn kết nối."
     }
   },
   "literal": {

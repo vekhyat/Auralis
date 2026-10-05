@@ -1420,7 +1420,13 @@
       "reasonLikedTracks_one": "You liked {{count}} track from it",
       "reasonLikedTracks_other": "You liked {{count}} tracks from it",
       "reasonSimilarTo": "Similar to {{artist}}",
-      "reasonMissingAlbum": "Not in your library yet"
+      "reasonMissingAlbum": "Not in your library yet",
+      "loading": "Loading suggestions…",
+      "loadError": "Couldn’t load your suggestions. Try again.",
+      "retry": "Try again",
+      "preparing": "Preparing…",
+      "download": "Download",
+      "moreActions": "More actions for {{title}}"
     },
     "connections": {
       "title": "Listening connections",
@@ -1452,7 +1458,7 @@
       "lastfmSavedToast": "Last.fm saved",
       "lastfmDisconnectedToast": "Last.fm disconnected",
       "importExportTitle": "Import Spotify data export",
-      "importExportDesc": "Request \"Extended streaming history\" on Spotify's privacy page, then choose the .zip or a JSON file. No Spotify app needed.",
+      "importExportDesc": "Request “Extended streaming history” on Spotify’s privacy page, then choose the .zip, a JSON file, or the extracted folder. No Spotify app needed.",
       "selectExportFile": "Choose export file",
       "importingCount_one": "Importing… {{count}} play read",
       "importingCount_other": "Importing… {{count}} plays read",
@@ -1472,7 +1478,16 @@
       "lastSyncedAt": "Last synced {{time}}",
       "neverSynced": "Never synced",
       "eventsCount_one": "{{count}} listening event",
-      "eventsCount_other": "{{count}} listening events"
+      "eventsCount_other": "{{count}} listening events",
+      "loading": "Loading connections…",
+      "loadError": "Couldn’t load listening connections. Try again.",
+      "retry": "Try again",
+      "cancelSync": "Cancel sync",
+      "spotifyClientIdPlaceholder": "Paste your Spotify Client ID",
+      "lastfmUsernamePlaceholder": "Your Last.fm username",
+      "lastfmApiKeyPlaceholder": "Your Last.fm API key",
+      "selectExportFolder": "Choose export folder",
+      "spotifyLoopbackHint": "Spotify allows any port for this loopback address. Auralis selects an available port when you connect."
     }
   },
   "literal": {

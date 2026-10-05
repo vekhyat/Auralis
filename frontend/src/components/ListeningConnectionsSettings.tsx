@@ -7,6 +7,7 @@ import {
     ExternalLink,
     RefreshCw,
     FileUp,
+    FolderOpen,
     Key,
     User,
     Trash2,
@@ -15,7 +16,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Progress } from "@/components/ui/progress";
+import { TasteSyncStatus } from "@/components/TasteSyncStatus";
+import { useTasteSync, startTasteSync, cancelTasteSync, type TasteSyncProgress } from "@/hooks/useTasteSync";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { openExternal } from "@/lib/utils";
 import {
@@ -27,21 +29,11 @@ import {
     SetLastFMCredentials,
     DisconnectLastFM,
     SelectSpotifyExportFile,
+    SelectFolder,
     ImportSpotifyExport,
-    SyncTasteNow,
-    CancelTasteSync,
 } from "../../wailsjs/go/main/App";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import type { taste } from "../../wailsjs/go/models";
-
-interface SyncProgressEvent {
-    phase: string;
-    message: string;
-    current: number;
-    total: number;
-    done: boolean;
-    error?: string;
-}
 
 /** Mirrors taste.ImportProgress. */
 interface ImportProgressEvent {
@@ -49,15 +41,6 @@ interface ImportProgressEvent {
     message: string;
     count: number;
 }
-
-/** Labels for taste.SyncProgress phases (source IDs, then the build steps). */
-const SYNC_PHASE_KEYS: Record<string, string> = {
-    starting: "translation.connections.syncStarting",
-    spotify_api: "translation.connections.syncPhaseSpotify",
-    lastfm: "translation.connections.syncPhaseLastfm",
-    profile: "translation.connections.syncPhaseProfile",
-    gaps: "translation.connections.syncPhaseGaps",
-};
 
 interface ListeningConnectionsSettingsProps {
     onForYouToggle?: (enabled: boolean) => void;
@@ -67,6 +50,9 @@ export function ListeningConnectionsSettings({ onForYouToggle }: ListeningConnec
     const { t } = useTranslation();
     const [settings, setSettings] = useState<taste.Settings | null>(null);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState(false);
+    const [savingToggle, setSavingToggle] = useState(false);
+    const [savingClientId, setSavingClientId] = useState(false);
 
     // Form inputs
     const [spotifyClientId, setSpotifyClientId] = useState("");
@@ -77,8 +63,7 @@ export function ListeningConnectionsSettings({ onForYouToggle }: ListeningConnec
     const [isSavingLastfm, setIsSavingLastfm] = useState(false);
 
     // Sync state
-    const [syncing, setSyncing] = useState(false);
-    const [syncProgress, setSyncProgress] = useState<SyncProgressEvent | null>(null);
+    const { syncing, syncProgress } = useTasteSync();
 
     // Import state
     const [importing, setImporting] = useState(false);
@@ -88,14 +73,12 @@ export function ListeningConnectionsSettings({ onForYouToggle }: ListeningConnec
         try {
             const s = await GetTasteSettings();
             setSettings(s);
-            if (s.spotify_client_id) {
-                setSpotifyClientId(s.spotify_client_id);
-            }
-            if (s.lastfm_username) {
-                setLastfmUser(s.lastfm_username);
-            }
+            setSpotifyClientId(s.spotify_client_id || "");
+            setLastfmUser(s.lastfm_username || "");
+            setLoadError(false);
         } catch (err) {
             console.error("Failed to load taste settings:", err);
+            setLoadError(true);
         } finally {
             setLoading(false);
         }
@@ -106,13 +89,12 @@ export function ListeningConnectionsSettings({ onForYouToggle }: ListeningConnec
             void refreshSettings();
         }, 0);
 
-        const unsubSync = EventsOn("taste:sync-progress", (p: SyncProgressEvent) => {
-            setSyncProgress(p);
+        const unsubSync = EventsOn("taste:sync-progress", (p: TasteSyncProgress) => {
             if (p.done) {
-                setSyncing(false);
                 void refreshSettings();
                 if (p.phase === "cancelled") {
-                    return; // handleCancelSync already said so
+                    toast.info(t("translation.connections.syncCancelled"));
+                    return;
                 }
                 if (p.error) {
                     toast.error(t("translation.connections.syncError", { error: p.error }));
@@ -135,6 +117,7 @@ export function ListeningConnectionsSettings({ onForYouToggle }: ListeningConnec
     }, [refreshSettings, t]);
 
     const handleToggleForYou = async (checked: boolean) => {
+        setSavingToggle(true);
         try {
             await SetForYouEnabled(checked);
             setSettings((prev) => (prev ? { ...prev, for_you_enabled: checked } : null));
@@ -146,16 +129,21 @@ export function ListeningConnectionsSettings({ onForYouToggle }: ListeningConnec
             );
         } catch (err) {
             toast.error(String(err));
+        } finally {
+            setSavingToggle(false);
         }
     };
 
     const handleSaveSpotifyClientId = async () => {
+        setSavingClientId(true);
         try {
             await SetSpotifyClientID(spotifyClientId.trim());
             toast.success(t("translation.connections.clientIdSaved"));
             await refreshSettings();
         } catch (err) {
             toast.error(String(err));
+        } finally {
+            setSavingClientId(false);
         }
     };
 
@@ -189,6 +177,7 @@ export function ListeningConnectionsSettings({ onForYouToggle }: ListeningConnec
         setIsSavingLastfm(true);
         try {
             await SetLastFMCredentials(lastfmApiKey.trim(), lastfmUser.trim());
+            setLastfmApiKey("");
             toast.success(t("translation.connections.lastfmSavedToast"));
             await refreshSettings();
         } catch (err) {
@@ -209,12 +198,12 @@ export function ListeningConnectionsSettings({ onForYouToggle }: ListeningConnec
         }
     };
 
-    const handleImportExport = async () => {
+    const handleImportExport = async (folder = false) => {
+        setImportProgress(null);
+        setImporting(true);
         try {
-            const path = await SelectSpotifyExportFile();
+            const path = folder ? await SelectFolder("") : await SelectSpotifyExportFile();
             if (!path) return;
-            setImportProgress(null);
-            setImporting(true);
             const count = await ImportSpotifyExport(path);
             toast.success(t("translation.connections.importSuccess", { count }));
             await refreshSettings();
@@ -226,25 +215,26 @@ export function ListeningConnectionsSettings({ onForYouToggle }: ListeningConnec
     };
 
     const handleSyncNow = async () => {
-        setSyncing(true);
-        setSyncProgress({ phase: "starting", message: t("translation.connections.syncStarting"), current: 0, total: 100, done: false });
         try {
-            await SyncTasteNow();
+            await startTasteSync();
         } catch (err) {
-            setSyncing(false);
             toast.error(String(err));
         }
     };
 
-    const handleCancelSync = () => {
-        CancelTasteSync();
-        setSyncing(false);
-        toast.info(t("translation.connections.syncCancelled"));
+    const handleCancelSync = async () => {
+        try { await cancelTasteSync(); } catch (err) { toast.error(String(err)); }
     };
 
     if (loading) {
-        return null;
+        return <p role="status">{t("translation.connections.loading")}</p>;
     }
+
+    if (loadError) return <section className="space-y-3" role="alert">
+        <h2 className="text-sm font-semibold">{t("translation.connections.title")}</h2>
+        <p className="text-sm text-destructive">{t("translation.connections.loadError")}</p>
+        <Button variant="outline" size="sm" onClick={() => void refreshSettings()}>{t("translation.connections.retry")}</Button>
+    </section>;
 
     return (
         <section className="max-w-4xl space-y-6">
@@ -275,6 +265,7 @@ export function ListeningConnectionsSettings({ onForYouToggle }: ListeningConnec
                 <Switch
                     id="toggle-for-you"
                     checked={settings?.for_you_enabled ?? false}
+                    disabled={savingToggle}
                     onCheckedChange={handleToggleForYou}
                 />
             </div>
@@ -316,13 +307,14 @@ export function ListeningConnectionsSettings({ onForYouToggle }: ListeningConnec
                         </li>
                         <li>{t("translation.connections.spotifyGuideStep2")}</li>
                         <li>
-                            {t("translation.connections.spotifyGuideStep3")}:{" "}
+                            {t("translation.connections.spotifyGuideStep3")}: {" "}
                             <code className="bg-background px-1.5 py-0.5 rounded text-[11px] font-mono select-all">
-                                {settings?.spotify_redirect_uri}
+                                {settings?.spotify_redirect_uri || "http://127.0.0.1"}
                             </code>
                         </li>
                         <li>{t("translation.connections.spotifyGuideStep4")}</li>
                     </ol>
+                    <p>{t("translation.connections.spotifyLoopbackHint")}</p>
                 </div>
 
                 <div className="space-y-2">
@@ -333,9 +325,10 @@ export function ListeningConnectionsSettings({ onForYouToggle }: ListeningConnec
                         <Input
                             id="spotify-client-id"
                             type="text"
-                            placeholder="e.g. 1a2b3c4d5e6f7g8h9i0j..."
+                            placeholder={t("translation.connections.spotifyClientIdPlaceholder")}
                             value={spotifyClientId}
                             onChange={(e) => setSpotifyClientId(e.target.value)}
+                            disabled={isConnectingSpotify || savingClientId}
                             className="font-mono text-xs"
                         />
                         <Button
@@ -343,6 +336,7 @@ export function ListeningConnectionsSettings({ onForYouToggle }: ListeningConnec
                             variant="outline"
                             size="sm"
                             onClick={handleSaveSpotifyClientId}
+                            disabled={!spotifyClientId.trim() || savingClientId || isConnectingSpotify}
                         >
                             {t("translation.common.save")}
                         </Button>
@@ -365,7 +359,7 @@ export function ListeningConnectionsSettings({ onForYouToggle }: ListeningConnec
                         <Button
                             type="button"
                             size="sm"
-                            disabled={!spotifyClientId.trim() || isConnectingSpotify}
+                            disabled={!spotifyClientId.trim() || isConnectingSpotify || savingClientId}
                             onClick={handleConnectSpotify}
                         >
                             {isConnectingSpotify ? (
@@ -417,7 +411,7 @@ export function ListeningConnectionsSettings({ onForYouToggle }: ListeningConnec
                         <Input
                             id="lastfm-username"
                             type="text"
-                            placeholder="Your Last.fm username"
+                            placeholder={t("translation.connections.lastfmUsernamePlaceholder")}
                             value={lastfmUser}
                             onChange={(e) => setLastfmUser(e.target.value)}
                             className="text-xs"
@@ -431,7 +425,7 @@ export function ListeningConnectionsSettings({ onForYouToggle }: ListeningConnec
                         <Input
                             id="lastfm-api-key"
                             type="password"
-                            placeholder="Your Last.fm API Key"
+                            placeholder={t("translation.connections.lastfmApiKeyPlaceholder")}
                             value={lastfmApiKey}
                             onChange={(e) => setLastfmApiKey(e.target.value)}
                             className="font-mono text-xs"
@@ -443,7 +437,7 @@ export function ListeningConnectionsSettings({ onForYouToggle }: ListeningConnec
                     <Button
                         type="button"
                         size="sm"
-                        disabled={!lastfmUser.trim() || isSavingLastfm}
+                        disabled={!lastfmUser.trim() || !lastfmApiKey.trim() || isSavingLastfm}
                         onClick={handleSaveLastFM}
                     >
                         {isSavingLastfm ? (
@@ -487,23 +481,27 @@ export function ListeningConnectionsSettings({ onForYouToggle }: ListeningConnec
                     </div>
                 ) : null}
 
-                <div>
+                <div className="flex flex-wrap gap-2">
                     <Button
                         type="button"
                         variant="outline"
                         size="sm"
                         disabled={importing}
-                        onClick={handleImportExport}
+                        onClick={() => void handleImportExport()}
                     >
                         <FileUp className="size-3.5 mr-1.5" />
                         {t("translation.connections.selectExportFile")}
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" disabled={importing} onClick={() => void handleImportExport(true)}>
+                        <FolderOpen className="size-3.5 mr-1.5" />
+                        {t("translation.connections.selectExportFolder")}
                     </Button>
                 </div>
             </div>
 
             {/* Sync & Taste Stats */}
             <div className="rounded-lg border border-border p-4 bg-card space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                         <h3 className="text-sm font-semibold">{t("translation.connections.syncTitle")}</h3>
                         <p className="text-xs text-muted-foreground">
@@ -521,7 +519,7 @@ export function ListeningConnectionsSettings({ onForYouToggle }: ListeningConnec
                                 size="sm"
                                 onClick={handleCancelSync}
                             >
-                                {t("translation.common.cancel")}
+                                {t("translation.connections.cancelSync")}
                             </Button>
                         ) : (
                             <Button
@@ -538,19 +536,7 @@ export function ListeningConnectionsSettings({ onForYouToggle }: ListeningConnec
                 </div>
 
                 {syncing && syncProgress ? (
-                    <div className="space-y-2 bg-muted/40 p-3 rounded border border-border">
-                        <div className="flex justify-between text-xs">
-                            <span className="text-muted-foreground">{t(SYNC_PHASE_KEYS[syncProgress.phase] ?? "translation.connections.syncStarting")}</span>
-                            <span className="font-mono">{syncProgress.current} / {syncProgress.total}</span>
-                        </div>
-                        <Progress
-                            value={
-                                syncProgress.total > 0
-                                    ? Math.round((syncProgress.current / syncProgress.total) * 100)
-                                    : 25
-                            }
-                        />
-                    </div>
+                    <TasteSyncStatus progress={syncProgress} />
                 ) : null}
             </div>
         </section>

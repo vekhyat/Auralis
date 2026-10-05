@@ -1420,7 +1420,13 @@
       "reasonLikedTracks_one": "Je vindt {{count}} nummer ervan leuk",
       "reasonLikedTracks_other": "Je vindt {{count}} nummers ervan leuk",
       "reasonSimilarTo": "Vergelijkbaar met {{artist}}",
-      "reasonMissingAlbum": "Nog niet in je bibliotheek"
+      "reasonMissingAlbum": "Nog niet in je bibliotheek",
+      "loading": "Suggesties laden…",
+      "loadError": "Je suggesties konden niet worden geladen. Probeer het opnieuw.",
+      "retry": "Opnieuw proberen",
+      "preparing": "Voorbereiden…",
+      "download": "Downloaden",
+      "moreActions": "Meer acties voor {{title}}"
     },
     "connections": {
       "title": "Luisterverbindingen",
@@ -1452,7 +1458,7 @@
       "lastfmSavedToast": "Last.fm opgeslagen",
       "lastfmDisconnectedToast": "Last.fm ontkoppeld",
       "importExportTitle": "Spotify-gegevensexport importeren",
-      "importExportDesc": "Vraag de \"Uitgebreide streaminggeschiedenis\" aan op de privacypagina van Spotify en kies daarna de .zip of een JSON-bestand. Geen Spotify-app nodig.",
+      "importExportDesc": "Vraag de uitgebreide luistergeschiedenis aan op de privacypagina van Spotify en kies het .zip-bestand, een JSON-bestand of de uitgepakte map. Geen Spotify-app nodig.",
       "selectExportFile": "Exportbestand kiezen",
       "importingCount_one": "Importeren… {{count}} afspeling gelezen",
       "importingCount_other": "Importeren… {{count}} afspelingen gelezen",
@@ -1472,7 +1478,16 @@
       "lastSyncedAt": "Laatst gesynchroniseerd: {{time}}",
       "neverSynced": "Nooit gesynchroniseerd",
       "eventsCount_one": "{{count}} luistermoment",
-      "eventsCount_other": "{{count}} luistermomenten"
+      "eventsCount_other": "{{count}} luistermomenten",
+      "loading": "Verbindingen laden…",
+      "loadError": "Luisterverbindingen konden niet worden geladen. Probeer het opnieuw.",
+      "retry": "Opnieuw proberen",
+      "cancelSync": "Synchronisatie annuleren",
+      "spotifyClientIdPlaceholder": "Plak je Spotify-client-ID",
+      "lastfmUsernamePlaceholder": "Je Last.fm-gebruikersnaam",
+      "lastfmApiKeyPlaceholder": "Je Last.fm-API-sleutel",
+      "selectExportFolder": "Exportmap kiezen",
+      "spotifyLoopbackHint": "Spotify staat elke poort toe voor dit loopbackadres. Auralis kiest een beschikbare poort wanneer je verbinding maakt."
     }
   },
   "literal": {

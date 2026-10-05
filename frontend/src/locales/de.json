@@ -1420,7 +1420,13 @@
       "reasonLikedTracks_one": "{{count}} Titel daraus gefällt dir",
       "reasonLikedTracks_other": "{{count}} Titel daraus gefallen dir",
       "reasonSimilarTo": "Ähnlich wie {{artist}}",
-      "reasonMissingAlbum": "Noch nicht in deiner Mediathek"
+      "reasonMissingAlbum": "Noch nicht in deiner Mediathek",
+      "loading": "Vorschläge werden geladen…",
+      "loadError": "Deine Vorschläge konnten nicht geladen werden. Versuche es erneut.",
+      "retry": "Erneut versuchen",
+      "preparing": "Wird vorbereitet…",
+      "download": "Herunterladen",
+      "moreActions": "Weitere Aktionen für {{title}}"
     },
     "connections": {
       "title": "Hörverbindungen",
@@ -1452,7 +1458,7 @@
       "lastfmSavedToast": "Last.fm gespeichert",
       "lastfmDisconnectedToast": "Last.fm getrennt",
       "importExportTitle": "Spotify-Datenexport importieren",
-      "importExportDesc": "Fordere auf der Datenschutzseite von Spotify den „Erweiterten Streamingverlauf“ an und wähle dann die .zip- oder eine JSON-Datei. Keine Spotify-App nötig.",
+      "importExportDesc": "Fordere auf Spotifys Datenschutzseite den erweiterten Streamingverlauf an und wähle die ZIP-Datei, eine JSON-Datei oder den entpackten Ordner. Keine Spotify-App erforderlich.",
       "selectExportFile": "Exportdatei wählen",
       "importingCount_one": "Importiere … {{count}} Wiedergabe gelesen",
       "importingCount_other": "Importiere … {{count}} Wiedergaben gelesen",
@@ -1472,7 +1478,16 @@
       "lastSyncedAt": "Zuletzt synchronisiert: {{time}}",
       "neverSynced": "Noch nie synchronisiert",
       "eventsCount_one": "{{count}} Hörereignis",
-      "eventsCount_other": "{{count}} Hörereignisse"
+      "eventsCount_other": "{{count}} Hörereignisse",
+      "loading": "Verbindungen werden geladen…",
+      "loadError": "Die Hörverbindungen konnten nicht geladen werden. Versuche es erneut.",
+      "retry": "Erneut versuchen",
+      "cancelSync": "Synchronisierung abbrechen",
+      "spotifyClientIdPlaceholder": "Spotify-Client-ID einfügen",
+      "lastfmUsernamePlaceholder": "Dein Last.fm-Benutzername",
+      "lastfmApiKeyPlaceholder": "Dein Last.fm-API-Schlüssel",
+      "selectExportFolder": "Exportordner auswählen",
+      "spotifyLoopbackHint": "Spotify erlaubt jeden Port für diese Loopback-Adresse. Auralis wählt beim Verbinden einen freien Port."
     }
   },
   "literal": {

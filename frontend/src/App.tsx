@@ -228,6 +228,7 @@ function App() {
     const [showUnsavedChangesDialog, setShowUnsavedChangesDialog] = useState(false);
     const [resetSettingsFn, setResetSettingsFn] = useState<(() => void) | null>(null);
     const [forYouEnabled, setForYouEnabled] = useState(false);
+    const [settingsInitialSection, setSettingsInitialSection] = useState<"connections" | undefined>();
 
     useEffect(() => {
         const timer = window.setTimeout(() => {
@@ -666,7 +667,7 @@ function App() {
     const requestingDownloadsRef = useRef(new Set<string>());
     const downloadFromUrl = async (url: string) => {
         if (requestingDownloadsRef.current.has(url))
-            return;
+            return false;
         requestingDownloadsRef.current.add(url);
         setRequestingDownloads(new Set(requestingDownloadsRef.current));
         try {
@@ -676,11 +677,14 @@ function App() {
             if (queueRelease(data)) {
                 recordRecentFetch(url, data);
                 void metadata.saveToHistory(url, data);
+                return true;
             }
+            return false;
         }
         catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             toast.error(t("translation.downloads.couldntGet"), { description: translateMessage(message) });
+            return false;
         }
         finally {
             requestingDownloadsRef.current.delete(url);
@@ -865,12 +869,15 @@ function App() {
     const renderPage = () => {
         switch (currentPage) {
             case "for-you":
-                return renderSecondary(<secondaryPages.forYou onDownloadUrl={(url: string) => void downloadFromUrl(url)} onSearch={(query: string) => {
+                return renderSecondary(<secondaryPages.forYou onDownloadUrl={downloadFromUrl} onSearch={(query: string) => {
                     handlePageChange("main");
                     omnibar.handleInputChange(query);
-                }} onNavigateToSettings={() => handlePageChange("settings")} />);
+                }} onNavigateToSettings={() => {
+                    setSettingsInitialSection("connections");
+                    handlePageChange("settings");
+                }} />);
             case "settings":
-                return renderSecondary(<secondaryPages.settings onUnsavedChangesChange={setHasUnsavedSettings} onResetRequest={setResetSettingsFn} onForYouToggle={setForYouEnabled}/>);
+                return renderSecondary(<secondaryPages.settings initialSection={settingsInitialSection} onUnsavedChangesChange={setHasUnsavedSettings} onResetRequest={setResetSettingsFn} onForYouToggle={setForYouEnabled}/>);
             case "debug":
                 return renderSecondary(<secondaryPages.debug />);
             case "devices":
