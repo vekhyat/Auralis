@@ -148,8 +148,9 @@ func TestPutFailureKeepsPreviousCopy(t *testing.T) {
 	if got, _ := os.ReadFile(dst); string(got) != "old good copy" {
 		t.Fatalf("previous copy was damaged: %q", got)
 	}
-	if _, err := os.Stat(dst + partSuffix); !os.IsNotExist(err) {
-		t.Fatal("partial file left behind")
+	leftovers, _ := filepath.Glob(filepath.Join(root, "A", ".auralis-copy-*"))
+	if len(leftovers) != 0 {
+		t.Fatalf("temporary copies left behind: %v", leftovers)
 	}
 }
 

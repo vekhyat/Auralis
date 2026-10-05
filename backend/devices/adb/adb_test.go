@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -289,8 +290,17 @@ func TestTargetPutRenamesAndShellFailuresSurface(t *testing.T) {
 	if size, err := target.StatSize(ctx, "A/a.flac"); err != nil || size != 5 {
 		t.Fatalf("uploaded file not at its final name: size=%d err=%v", size, err)
 	}
-	if _, err := target.StatSize(ctx, "A/a.flac"+partSuffix); err == nil {
-		t.Fatal("partial upload name left behind")
+	// No staging file may remain after the mv.
+	server.mu.Lock()
+	var strays []string
+	for k := range server.files {
+		if strings.Contains(k, ".auralis-") {
+			strays = append(strays, k)
+		}
+	}
+	server.mu.Unlock()
+	if len(strays) != 0 {
+		t.Fatalf("staging files left behind: %v", strays)
 	}
 
 	// A failing mv must be reported, not silently treated as success.

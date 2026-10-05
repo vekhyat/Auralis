@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/vekhyat/Auralis/backend"
 	"github.com/vekhyat/Auralis/backend/syncengine"
 )
 
@@ -47,7 +48,9 @@ var (
 )
 
 // resolve validates and returns the absolute local path for targetPath,
-// ensuring that targetPath does not escape t.Root.
+// ensuring that targetPath does not escape t.Root and does not pass
+// through a symbolic link. A symlinked directory inside the root could
+// otherwise be used to read, write, or delete files outside the root.
 func (t *Target) resolve(targetPath string) (string, error) {
 	if t.Root == "" {
 		return "", fmt.Errorf("target root is empty")
@@ -61,7 +64,71 @@ func (t *Target) resolve(targetPath string) (string, error) {
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("path %q escapes target root %q", targetPath, t.Root)
 	}
+	if err := rejectSymlinkHops(cleanRoot, cleanTarget); err != nil {
+		return "", err
+	}
 	return cleanTarget, nil
+}
+
+// rejectSymlinkHops fails when the target root itself, any ancestor of
+// it, or any component between it and full path is a symbolic link or
+// junction. That covers roots that are junctions
+// (e.g. C:\Music -> D:\media\Music) as well as malicious components
+// inside the root; both aliases of the PC library would silently shift
+// every write outside the managed tree.
+func rejectSymlinkHops(root, full string) error {
+	// Root and its ancestors: walk upward until the filesystem root.
+	for dir := root; ; {
+		if err := checkNoLink(dir, "target root"); err != nil {
+			return err
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	rel, err := filepath.Rel(root, full)
+	if err != nil {
+		return err
+	}
+	if rel == "." || rel == "" {
+		return nil
+	}
+	cur := root
+	for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
+		if part == "" {
+			continue
+		}
+		cur = filepath.Join(cur, filepath.FromSlash(part))
+		info, err := os.Lstat(cur)
+		if err != nil {
+			// Nothing under a missing (or not-directory) component can
+			// exist yet; a dangling link would have been caught above.
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("path %q passes through symlink %q", full, cur)
+		}
+	}
+	return nil
+}
+
+func checkNoLink(dir, what string) error {
+	info, err := os.Lstat(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s %q is a symlink or junction", what, dir)
+	}
+	return nil
 }
 
 // Info describes the target for the device picker.
@@ -103,6 +170,15 @@ func (t *Target) List(ctx context.Context, root string) ([]syncengine.RemoteEntr
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if d.Type()&os.ModeSymlink != 0 {
+			// Files and directories reached through links are not
+			// managed: they may live outside the root. Leave them
+			// untouched instead of shadowing real entries.
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if d.IsDir() {
 			return nil
 		}
@@ -124,13 +200,10 @@ func (t *Target) List(ctx context.Context, root string) ([]syncengine.RemoteEntr
 	return out, nil
 }
 
-// partSuffix marks an in-progress copy. The file only takes its real name
-// once complete, so an interrupted sync never leaves a truncated track (or
-// destroys the previous good copy during an update).
-const partSuffix = ".auralis-part"
-
 // Put copies localPath to remotePath, creating parents, and reports the
-// cumulative byte count after every 64 KiB chunk.
+// cumulative byte count after every 64 KiB chunk. Transfers through
+// uniquely named temp files in the destination directory, so a crash
+// never leaves a truncated track at the final name.
 func (t *Target) Put(ctx context.Context, localPath, remotePath string, progress func(int64)) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -150,25 +223,38 @@ func (t *Target) Put(ctx context.Context, localPath, remotePath string, progress
 		return err
 	}
 	defer src.Close()
-	partPath := dstPath + partSuffix
-	dst, err := os.OpenFile(partPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	// Stage under a fresh, uniquely named temp file: a fixed temp path
+	// could be planted as a symlink to somewhere outside the root, and
+	// deleting/truncating it would touch a user-created file.
+	tmp, err := os.CreateTemp(filepath.Dir(dstPath), ".auralis-copy-*")
 	if err != nil {
 		return err
 	}
-	if err := copyWithProgress(ctx, dst, src, progress); err != nil {
-		dst.Close()
-		os.Remove(partPath)
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
 		return err
 	}
-	if err := dst.Close(); err != nil {
-		os.Remove(partPath)
+	if err := copyWithProgress(ctx, tmp, src, progress); err != nil {
+		tmp.Close()
 		return err
 	}
-	if err := os.Rename(partPath, dstPath); err != nil {
-		os.Remove(partPath)
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	// renameInto overwrites an existing managed file without the failure
+	// mode of a missing mid-state; our unique temp owns the data either way.
+	if err := renameInto(tmpName, dstPath); err != nil {
 		return err
 	}
 	return nil
+}
+
+// renameInto replaces a managed destination atomically, including on Windows.
+// The old file remains intact if the replacement fails.
+func renameInto(src, dst string) error {
+	return backend.MoveFileReplace(src, dst)
 }
 
 func copyWithProgress(ctx context.Context, dst io.Writer, src io.Reader, progress func(int64)) error {
@@ -217,28 +303,42 @@ func (t *Target) Move(ctx context.Context, from, to string) error {
 	if _, err := os.Stat(toPath); err == nil {
 		return fmt.Errorf("move destination %q already exists", to)
 	}
+	// Refuse to land on a dangling link at the destination.
+	if _, err := os.Lstat(toPath); err == nil {
+		return fmt.Errorf("move destination %q already exists", to)
+	}
 	if err := os.MkdirAll(filepath.Dir(toPath), 0o755); err != nil {
 		return err
 	}
 	if err := os.Rename(fromPath, toPath); err == nil {
 		return nil
 	}
+	// Cross-volume fallback: copy via a temp name and only replace the
+	// source once the copy has landed completely. Partial output must
+	// never appear under the final name.
 	src, err := os.Open(fromPath)
 	if err != nil {
 		return err
 	}
-	dst, err := os.OpenFile(toPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	defer src.Close()
+	dst, err := os.CreateTemp(filepath.Dir(toPath), ".auralis-copy-*")
 	if err != nil {
-		src.Close()
 		return err
 	}
-	_, cerr := io.Copy(dst, src)
-	src.Close()
+	tmpName := dst.Name()
+	defer os.Remove(tmpName)
+	cerr := copyWithProgress(ctx, dst, src, nil)
 	if werr := dst.Close(); cerr == nil {
 		cerr = werr
 	}
+	if cerr == nil && ctx.Err() != nil {
+		cerr = ctx.Err()
+	}
 	if cerr != nil {
 		return cerr
+	}
+	if err := renameInto(tmpName, toPath); err != nil {
+		return err
 	}
 	return os.Remove(fromPath)
 }

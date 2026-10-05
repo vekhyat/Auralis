@@ -35,6 +35,10 @@ type DirEntry struct {
 	Size  int64  `json:"size"`
 	Mtime int64  `json:"mtime"`
 	IsDir bool   `json:"is_dir"`
+	// IsSymlink is true when the entry itself is a link. Symlink targets
+	// must never be followed, otherwise a phone-side link could read or
+	// write files outside the managed music root.
+	IsSymlink bool `json:"is_symlink"`
 }
 
 // Client talks to the local ADB server over TCP.
@@ -53,6 +57,21 @@ func NewClient(addr string) *Client {
 func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 	var d net.Dialer
 	return d.DialContext(ctx, "tcp", c.Addr)
+}
+
+// watchConn closes conn as soon as ctx is cancelled, so a cancelled context
+// interrupts a sync read or write that would otherwise block until the
+// device answers. stop must be called when the caller is done.
+func watchConn(ctx context.Context, conn net.Conn) (stop func()) {
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			conn.Close()
+		case <-done:
+		}
+	}()
+	return func() { close(done) }
 }
 
 func writeHexMsg(w io.Writer, msg string) error {
@@ -269,6 +288,7 @@ func (c *Client) Stat(ctx context.Context, serial, remotePath string) (*DirEntry
 		return nil, err
 	}
 	defer conn.Close()
+	defer watchConn(ctx, conn)()
 
 	// Write STAT request: "STAT" (4B) + uint32(len) + path
 	pathBytes := []byte(remotePath)
@@ -292,15 +312,17 @@ func (c *Client) Stat(ctx context.Context, serial, remotePath string) (*DirEntry
 	size := binary.LittleEndian.Uint32(resp[8:12])
 	mtime := binary.LittleEndian.Uint32(resp[12:16])
 
-	// S_IFDIR is 0040000 = 0x4000
+	// S_IFDIR is 0040000 = 0x4000; S_IFMT masks the file-type bits.
 	isDir := (mode & 0o040000) != 0
+	isSymlink := (mode & 0o170000) == 0o120000
 
 	return &DirEntry{
-		Name:  remotePath,
-		Mode:  mode,
-		Size:  int64(size),
-		Mtime: int64(mtime),
-		IsDir: isDir,
+		Name:      remotePath,
+		Mode:      mode,
+		Size:      int64(size),
+		Mtime:     int64(mtime),
+		IsDir:     isDir,
+		IsSymlink: isSymlink,
 	}, nil
 }
 
@@ -311,6 +333,7 @@ func (c *Client) List(ctx context.Context, serial, dirPath string) ([]DirEntry, 
 		return nil, err
 	}
 	defer conn.Close()
+	defer watchConn(ctx, conn)()
 
 	pathBytes := []byte(dirPath)
 	req := make([]byte, 8+len(pathBytes))
@@ -358,11 +381,12 @@ func (c *Client) List(ctx context.Context, serial, dirPath string) ([]DirEntry, 
 			continue
 		}
 		entries = append(entries, DirEntry{
-			Name:  name,
-			Mode:  mode,
-			Size:  int64(size),
-			Mtime: int64(mtime),
-			IsDir: (mode & 0o040000) != 0,
+			Name:      name,
+			Mode:      mode,
+			Size:      int64(size),
+			Mtime:     int64(mtime),
+			IsDir:     (mode & 0o040000) != 0,
+			IsSymlink: (mode & 0o170000) == 0o120000,
 		})
 	}
 
@@ -384,6 +408,7 @@ func (c *Client) Send(ctx context.Context, serial, localPath, remotePath string,
 		return err
 	}
 	defer conn.Close()
+	defer watchConn(ctx, conn)()
 
 	if mode == 0 {
 		mode = 0o644
@@ -466,6 +491,7 @@ func (c *Client) Recv(ctx context.Context, serial, remotePath string, w io.Write
 		return err
 	}
 	defer conn.Close()
+	defer watchConn(ctx, conn)()
 
 	pathBytes := []byte(remotePath)
 	req := make([]byte, 8+len(pathBytes))
