@@ -44,15 +44,19 @@ interface ImportProgressEvent {
 
 interface ListeningConnectionsSettingsProps {
     onForYouToggle?: (enabled: boolean) => void;
+    onReady?: () => void;
 }
 
-export function ListeningConnectionsSettings({ onForYouToggle }: ListeningConnectionsSettingsProps) {
+export function ListeningConnectionsSettings({ onForYouToggle, onReady }: ListeningConnectionsSettingsProps) {
     const { t } = useTranslation();
     const [settings, setSettings] = useState<taste.Settings | null>(null);
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState(false);
     const [savingToggle, setSavingToggle] = useState(false);
     const [savingClientId, setSavingClientId] = useState(false);
+    useEffect(() => {
+        if (!loading) onReady?.();
+    }, [loading, onReady]);
 
     // Form inputs
     const [spotifyClientId, setSpotifyClientId] = useState("");

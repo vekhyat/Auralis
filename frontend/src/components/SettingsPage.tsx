@@ -117,7 +117,7 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, onForYouT
     const [tempSettings, setTempSettings] = useState<SettingsType>(savedSettings);
     const communitySourcesRef = useRef<CommunitySourcesHandle>(null);
     const connectionsRef = useRef<HTMLDivElement>(null);
-    useEffect(() => {
+    const focusConnections = useCallback(() => {
         if (initialSection === "connections") {
             connectionsRef.current?.scrollIntoView({ block: "start" });
             connectionsRef.current?.focus({ preventScroll: true });
@@ -657,7 +657,7 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, onForYouT
         </section>
 
         <div ref={connectionsRef} tabIndex={-1} className="scroll-mt-8">
-          <ListeningConnectionsSettings onForYouToggle={onForYouToggle} />
+          <ListeningConnectionsSettings onForYouToggle={onForYouToggle} onReady={focusConnections} />
         </div>
       </div>
 
