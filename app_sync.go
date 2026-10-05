@@ -398,7 +398,7 @@ func readDeviceManifest(ctx context.Context, target syncengine.SyncTarget) (*syn
 func readDeviceState(ctx context.Context, target syncengine.SyncTarget) (*syncengine.Manifest, []syncengine.RemoteEntry, error) {
 	entries, err := target.List(ctx, target.Info().Root)
 	if err != nil {
-		if !os.IsNotExist(err) {
+		if !errors.Is(err, os.ErrNotExist) {
 			return nil, nil, fmt.Errorf("list device: %w", err)
 		}
 		return nil, entries, nil

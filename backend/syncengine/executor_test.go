@@ -269,3 +269,38 @@ func TestPlanDisambiguatesCollidingPaths(t *testing.T) {
 		t.Fatalf("adds = %d, want %d", plan.Adds, len(tracks))
 	}
 }
+
+// manifestCountingTarget counts uploads of the device manifest.
+type manifestCountingTarget struct {
+	*memTarget
+	manifestPuts int
+}
+
+func (m *manifestCountingTarget) Put(ctx context.Context, localPath, remotePath string, progress func(int64)) error {
+	if strings.HasSuffix(remotePath, "/.auralis/manifest.json") {
+		m.manifestPuts++
+	}
+	return m.memTarget.Put(ctx, localPath, remotePath, progress)
+}
+
+func TestExecutorThrottlesManifestUploads(t *testing.T) {
+	// Re-uploading the whole manifest per file is quadratic over ADB. With
+	// a frozen clock the manifest goes up once early and once at the end.
+	tracks := setupLibrary(t)
+	target := &manifestCountingTarget{memTarget: newMemTarget()}
+	profile := library.ProfileByID(library.ProfileMediaStore)
+	manifest := NewManifest(profile.ID)
+	plan := PlanSelect(PlanOptions{Tracks: tracks, Profile: profile, ProfileVersion: 1, Policy: FormatPolicy{Mode: "keep"}, Manifest: manifest, FreeBytes: 1 << 40})
+	frozen := time.Unix(1_700_000_000, 0)
+	ex := &Executor{
+		Target: target, Root: "/music", Profile: profile, ProfileVersion: 1,
+		Policy: FormatPolicy{Mode: "keep"}, JournalPath: filepath.Join(t.TempDir(), "journal.json"),
+		Concurrency: 1, now: func() time.Time { return frozen },
+	}
+	if err := ex.Run(context.Background(), plan, manifest); err != nil {
+		t.Fatal(err)
+	}
+	if target.manifestPuts != 2 {
+		t.Fatalf("manifest uploads = %d, want 2 (first operation and final)", target.manifestPuts)
+	}
+}

@@ -113,6 +113,10 @@ var ErrStalePreview = errors.New("source changed since preview")
 // surfaces its failures before planning.
 var ErrInsufficientSpace = errors.New("insufficient free space on device")
 
+// manifestFlushInterval bounds how often Run re-uploads the device manifest
+// while operations complete.
+const manifestFlushInterval = 15 * time.Second
+
 // openJournal resumes the journal for planHash, replaying recorded effects
 // onto manifest, or starts a fresh one.
 //
@@ -329,18 +333,20 @@ func (e *Executor) Run(ctx context.Context, plan *Plan, manifest *Manifest) erro
 			firstErr = err
 		}
 	}
+	var lastUpload time.Time
 	finish := func(i int, rec journalRecord, name string) {
 		rec.Index = i
 		e.mu.Lock()
 		err := e.record(j, manifest, rec)
-		// Publish the device manifest after every completed operation,
-		// serialized on the manifest lock. A crash between the copy and
-		// this upload still leaves the file recoverable (size-matched
-		// adds reconcile instead of skipping), and a crash anywhere later
-		// resumes from a manifest that already names finished work.
+		// Publish the device manifest on the first completed operation and
+		// then at most every manifestFlushInterval, serialized on the
+		// manifest lock. Uploading it after every file would re-send the
+		// whole manifest N times (quadratic over ADB); the local journal
+		// covers anything finished since the last upload.
 		var upErr error
-		if err == nil {
+		if err == nil && e.now().Sub(lastUpload) >= manifestFlushInterval {
 			upErr = WriteRemoteManifest(ctx, e.Target, e.Root, manifest)
+			lastUpload = e.now()
 		}
 		done := j.count()
 		e.mu.Unlock()
