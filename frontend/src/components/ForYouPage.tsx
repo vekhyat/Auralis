@@ -254,7 +254,7 @@ export function ForYouPage({ onDownloadUrl, onSearch, onNavigateToSettings }: Fo
     }
 
     return (
-        <div className="mx-auto w-full max-w-[1600px] p-8 space-y-8">
+        <div className="mx-auto w-full max-w-[1600px] space-y-8">
             {/* Header & Controls */}
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-4">
                 <div>
