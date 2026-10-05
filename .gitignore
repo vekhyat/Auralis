@@ -28,6 +28,10 @@ pnpm-debug.log*
 .yarn
 *.tsbuildinfo
 
+# Rust
+rust/target/
+target/
+
 # IDE / Editors
 .vscode/
 .idea/
@@ -48,21 +52,3 @@ desktop.ini
 # Logs
 *.log
 logs/
-
-# Temporary files
-tmp/
-temp/
-*.tmp
-*.bak
-*.old
-_tmp_*
-
-# Local agent / scratch
-.grok/
-
-# Test files
-test
-
-# Build notes (optional - uncomment if you don't want to commit)
-# BUILD_NOTES.md
-push.bat

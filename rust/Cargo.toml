@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/auralis-core",
+    "crates/auralis-config",
+    "crates/auralis-store",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Auralis Contributors"]
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+tempfile = "3.17"
+tokio = { version = "1.43", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+sha2 = "0.10"
+hex = "0.4"
+regex = "1.11"
+which = "7.0"
+lofty = "0.25"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
