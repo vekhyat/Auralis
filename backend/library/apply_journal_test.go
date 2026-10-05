@@ -284,3 +284,97 @@ func TestUndoRestoresMultiValueTag(t *testing.T) {
 		t.Fatalf("expected both album artists restored, got %q", got)
 	}
 }
+
+func TestBuildPlanCarriesOldTagValues(t *testing.T) {
+	root := t.TempDir()
+	album := filepath.Join(root, "Artist", "Album")
+	if err := os.MkdirAll(album, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	flac := filepath.Join(album, "01. Song.flac")
+	makeAudioFile(t, flac, map[string]string{"title": "Song", "artist": "Artist", "album": "Album"})
+
+	scan, err := ScanLibrary(context.Background(), root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := ProfileByID(ProfilePoweramp)
+	issues := DetectAll(scan, profile)
+	plan := BuildPlan(scan, profile, issues)
+	var sawAlbumArtist bool
+	for _, op := range plan.Operations {
+		if op.Type != "tags" || op.Set["ALBUMARTIST"] == "" {
+			continue
+		}
+		sawAlbumArtist = true
+		if op.Old == nil {
+			t.Fatalf("operation is missing the old value for the preview: %+v", op)
+		}
+		if _, ok := op.Old["ALBUMARTIST"]; !ok {
+			t.Fatalf("old values do not cover the changed key: %+v", op.Old)
+		}
+	}
+	if !sawAlbumArtist {
+		t.Fatalf("expected an ALBUMARTIST fix in %d operations: %+v\ntrack=%+v\nissues=%+v", len(plan.Operations), plan.Operations, scan.Tracks, issues)
+	}
+}
+
+func TestPlanRetagsAndMovesOneFileInOneBatch(t *testing.T) {
+	// ALBUMARTIST, TRACKNUMBER and PATH all fix this file. The tag writes
+	// must merge into one operation, run before the move, and the move must
+	// target the path built from the fixed tags ("03. Song", not "Song").
+	root := t.TempDir()
+	album := filepath.Join(root, "Artist", "Album")
+	if err := os.MkdirAll(album, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(album, "03 Song.flac")
+	makeAudioFile(t, src, map[string]string{"title": "Song", "artist": "Artist", "album": "Album"})
+
+	scan, err := ScanLibrary(context.Background(), root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := ProfileByID(ProfilePoweramp)
+	plan := BuildPlan(scan, profile, DetectAll(scan, profile))
+	var tagOps int
+	for _, op := range plan.Operations {
+		if op.Type == "tags" && op.Path == src {
+			tagOps++
+			if op.Set["ALBUMARTIST"] != "Artist" || op.Set["TRACKNUMBER"] == "" {
+				t.Fatalf("tag fixes were not merged: %+v", op)
+			}
+		}
+	}
+	if tagOps != 1 {
+		t.Fatalf("want one tag operation for the file, got %d: %+v", tagOps, plan.Operations)
+	}
+
+	journal := filepath.Join(t.TempDir(), "journal.jsonl")
+	result, err := Apply(context.Background(), root, journal, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Errors) != 0 {
+		t.Fatalf("apply errors: %v", result.Errors)
+	}
+	dest := filepath.Join(album, "03. Song.flac")
+	tags, err := taglib.ReadTags(dest)
+	if err != nil {
+		t.Fatalf("file not at the fixed-tag path: %v", err)
+	}
+	if firstTag(tags, "ALBUMARTIST") != "Artist" || firstTag(tags, "TRACKNUMBER") != "3" {
+		t.Fatalf("tags not written: %v", tags)
+	}
+
+	if _, err := UndoLast(journal); err != nil {
+		t.Fatal(err)
+	}
+	tags, err = taglib.ReadTags(src)
+	if err != nil {
+		t.Fatalf("undo did not restore the original path: %v", err)
+	}
+	if _, ok := tags["ALBUMARTIST"]; ok {
+		t.Fatalf("undo left ALBUMARTIST behind: %v", tags)
+	}
+}

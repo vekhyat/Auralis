@@ -3,6 +3,8 @@ package library
 import (
 	"sort"
 	"strings"
+
+	"go.senan.xyz/taglib"
 )
 
 // Severity classifies how loudly a rule should be reported.
@@ -121,19 +123,71 @@ func BuildPlan(scan *Scan, profile Profile, issues []Issue) *Plan {
 	}
 	plan := &Plan{}
 	seen := map[string]bool{}
-	for ruleID, ruleIssues := range byRule {
+	// Every tag fix for one file becomes one operation: Apply refuses a file
+	// that changed since the scan, so a second write would always fail.
+	tagOps := map[string]int{}
+	// Sort so a plan does not depend on map iteration order.
+	ruleIDs := make([]string, 0, len(byRule))
+	for ruleID := range byRule {
+		ruleIDs = append(ruleIDs, ruleID)
+	}
+	// PATH runs last, against the tags the plan is about to write, so a file
+	// whose album artist or track number is fixed moves to its final path.
+	sort.Slice(ruleIDs, func(i, j int) bool {
+		if (ruleIDs[i] == pathRule.ID) != (ruleIDs[j] == pathRule.ID) {
+			return ruleIDs[j] == pathRule.ID
+		}
+		return ruleIDs[i] < ruleIDs[j]
+	})
+	for _, ruleID := range ruleIDs {
 		rule := RuleByID(ruleID)
 		if rule == nil || rule.Fix == nil {
 			continue
 		}
-		for _, op := range rule.Fix(scan, profile, ruleIssues) {
-			key := op.Type + "|" + op.Path + "|" + op.NewPath
+		ruleScan := scan
+		if ruleID == pathRule.ID {
+			ruleScan = projectTags(scan, plan.Operations)
+		}
+		for _, op := range rule.Fix(ruleScan, profile, byRule[ruleID]) {
+			if op.Type == "tags" {
+				if i, ok := tagOps[op.Path]; ok {
+					mergeTagOps(&plan.Operations[i], op)
+					continue
+				}
+				tagOps[op.Path] = len(plan.Operations)
+			}
+			key := operationKey(op)
 			if seen[key] {
 				continue
 			}
 			seen[key] = true
 			plan.Operations = append(plan.Operations, op)
 		}
+	}
+	// Read the current tag values so the preview shows a real before/after
+	// diff. A file that cannot be read simply has no old value shown.
+	for i := range plan.Operations {
+		op := &plan.Operations[i]
+		if op.Type != "tags" || len(op.Set) == 0 {
+			continue
+		}
+		tags, err := taglib.ReadTags(op.Path)
+		if err != nil {
+			continue
+		}
+		old := map[string]string{}
+		byUpper := map[string]string{}
+		for key := range tags {
+			byUpper[strings.ToUpper(key)] = key
+		}
+		for _, key := range append(keysOf(op.Set), op.Delete...) {
+			if actual, ok := byUpper[strings.ToUpper(key)]; ok {
+				old[key] = firstTag(tags, actual)
+			} else {
+				old[key] = ""
+			}
+		}
+		op.Old = old
 	}
 	// A move that would overwrite another planned destination is unsafe.
 	dests := map[string]int{}
@@ -146,14 +200,104 @@ func BuildPlan(scan *Scan, profile Profile, issues []Issue) *Plan {
 			dests[strings.ToLower(op.NewPath)]++
 		}
 	}
-	sort.Slice(plan.Operations, func(i, j int) bool {
+	// Retag before moving, so a file's tag fix still finds it at the scanned
+	// path, and remove folders last, after moves may have emptied them.
+	sort.SliceStable(plan.Operations, func(i, j int) bool {
 		a, b := plan.Operations[i], plan.Operations[j]
-		if a.Type != b.Type {
-			return a.Type < b.Type
+		if opOrder[a.Type] != opOrder[b.Type] {
+			return opOrder[a.Type] < opOrder[b.Type]
 		}
 		return a.Path < b.Path
 	})
 	return plan
+}
+
+var opOrder = map[string]int{"tags": 0, "move": 1, "rmdir": 2}
+
+// projectTags returns a copy of scan with the planned tag writes applied to
+// the fields a path template reads. Tracks are copied; scan is not changed.
+func projectTags(scan *Scan, ops []Operation) *Scan {
+	projected := *scan
+	projected.Tracks = append([]Track(nil), scan.Tracks...)
+	byPath := make(map[string]*Track, len(projected.Tracks))
+	for i := range projected.Tracks {
+		byPath[projected.Tracks[i].Path] = &projected.Tracks[i]
+	}
+	for _, op := range ops {
+		t := byPath[op.Path]
+		if op.Type != "tags" || op.Error != "" || t == nil {
+			continue
+		}
+		for key, value := range op.Set {
+			switch strings.ToUpper(key) {
+			case "ALBUMARTIST":
+				t.AlbumArtist = value
+			case "TRACKNUMBER":
+				t.TrackNumber, _ = splitNumberTotal(value)
+			case "DISCNUMBER":
+				t.DiscNumber, _ = splitNumberTotal(value)
+			case "DISCTOTAL":
+				t.DiscTotal = parseLeadingInt(value)
+			}
+		}
+		if raw := op.Set["DISCNUMBER"]; strings.Contains(raw, "/") {
+			_, t.DiscTotal = splitNumberTotal(raw)
+		}
+	}
+	return &projected
+}
+
+// mergeTagOps folds src into dst, which fix the same file. Two rules that
+// want different values for one tag make the operation unsafe to apply.
+func mergeTagOps(dst *Operation, src Operation) {
+	if dst.Set == nil {
+		dst.Set = map[string]string{}
+	}
+	for key, value := range src.Set {
+		if prev, ok := dst.Set[key]; ok && prev != value {
+			dst.Error = "conflicting fixes for " + key
+			continue
+		}
+		dst.Set[key] = value
+	}
+	for _, key := range src.Delete {
+		if _, set := dst.Set[key]; !set && !containsFold(dst.Delete, key) {
+			dst.Delete = append(dst.Delete, key)
+		}
+	}
+	if src.Reason != "" && !strings.Contains(dst.Reason, src.Reason) {
+		dst.Reason += "; " + src.Reason
+	}
+}
+
+func containsFold(values []string, want string) bool {
+	for _, v := range values {
+		if strings.EqualFold(v, want) {
+			return true
+		}
+	}
+	return false
+}
+
+// operationKey identifies an operation for plan de-duplication. The tag
+// values are part of the key: two rules can legitimately write different
+// tags to the same file.
+func operationKey(op Operation) string {
+	keys := keysOf(op.Set)
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString(op.Type)
+	b.WriteString("|")
+	b.WriteString(op.Path)
+	b.WriteString("|")
+	b.WriteString(op.NewPath)
+	for _, key := range keys {
+		b.WriteString("|")
+		b.WriteString(key)
+		b.WriteString("=")
+		b.WriteString(op.Set[key])
+	}
+	return b.String()
 }
 
 // TrackByPath finds a scanned track by its absolute path.
@@ -214,4 +358,3 @@ func mostCommon(counts map[string]int) string {
 	}
 	return best
 }
-

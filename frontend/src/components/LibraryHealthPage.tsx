@@ -866,8 +866,8 @@ export function LibraryHealthPage() {
                                             >
                                                 <div className="flex items-center justify-between font-mono">
                                                     <Badge variant="outline" className="text-[10px] uppercase font-mono">
-                                                        {op.type === "set_tags" && t("translation.libraryHealth.diffTags")}
-                                                        {op.type === "rename" && t("translation.libraryHealth.diffMove")}
+                                                        {op.type === "tags" && t("translation.libraryHealth.diffTags")}
+                                                        {op.type === "move" && t("translation.libraryHealth.diffMove")}
                                                         {op.type === "rmdir" && t("translation.libraryHealth.diffRmdir")}
                                                     </Badge>
                                                     <span className="text-[11px] text-muted-foreground truncate max-w-xs">
@@ -875,18 +875,24 @@ export function LibraryHealthPage() {
                                                     </span>
                                                 </div>
 
-                                                {op.type === "set_tags" && op.set && (
+                                                {op.type === "tags" && op.set && (
                                                     <div className="font-mono text-[11px] bg-background/60 p-2 rounded border border-border/50 divide-y divide-border/30">
                                                         {Object.entries(op.set).map(([tag, val]) => (
-                                                            <div key={tag} className="py-1 flex items-center justify-between">
+                                                            <div key={tag} className="py-1 flex items-center justify-between gap-2">
                                                                 <span className="font-semibold text-muted-foreground">{tag}:</span>
-                                                                <span className="text-emerald-500 truncate max-w-sm">"{String(val)}"</span>
+                                                                <span className="flex items-center gap-1.5 min-w-0">
+                                                                    {op.old && tag in op.old && (
+                                                                        <span className="text-destructive line-through truncate max-w-[40%]">{op.old[tag] ? String(op.old[tag]) : t("translation.libraryHealth.diffUnset")}</span>
+                                                                    )}
+                                                                    <span aria-hidden="true" className="text-muted-foreground">→</span>
+                                                                    <span className="text-emerald-500 truncate max-w-[40%]">{String(val)}</span>
+                                                                </span>
                                                             </div>
                                                         ))}
                                                     </div>
                                                 )}
 
-                                                {op.type === "rename" && (
+                                                {op.type === "move" && (
                                                     <div className="font-mono text-[11px] bg-background/60 p-2 rounded border border-border/50 flex flex-col gap-1">
                                                         <div className="text-destructive truncate">
                                                             - {op.path}
@@ -906,7 +912,7 @@ export function LibraryHealthPage() {
                                         ))
                                     ) : (
                                         <div className="py-6 text-center text-xs text-muted-foreground font-mono">
-                                            No operations to apply.
+                                            {t("translation.libraryHealth.previewEmpty")}
                                         </div>
                                     )}
                                 </div>

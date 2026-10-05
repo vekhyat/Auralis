@@ -19,9 +19,13 @@ type Operation struct {
 	Path    string            `json:"path"`
 	NewPath string            `json:"new_path,omitempty"`
 	Set     map[string]string `json:"set,omitempty"` // tag key -> new value
-	Delete  []string          `json:"delete,omitempty"`
-	Reason  string            `json:"reason"`
-	Error   string            `json:"error,omitempty"`
+	// Old holds the tag values currently on disk for the same keys, so the
+	// preview can show a real before/after diff. Apply recomputes them at
+	// write time for the journal.
+	Old    map[string]string `json:"old,omitempty"`
+	Delete []string          `json:"delete,omitempty"`
+	Reason string            `json:"reason"`
+	Error  string            `json:"error,omitempty"`
 	// Size and ModTime capture the file state at scan time; Apply refuses
 	// to touch a file that changed since.
 	Size    int64 `json:"size"`
@@ -53,6 +57,9 @@ func Apply(ctx context.Context, root, journalPath string, plan *Plan) (*ApplyRes
 		return nil, fmt.Errorf("library root is required")
 	}
 	result := &ApplyResult{BatchID: uuid.NewString(), Errors: []string{}}
+	// Files retagged in this batch no longer match their scan stamp; the
+	// check already passed before that write.
+	written := map[string]bool{}
 	for i := range plan.Operations {
 		if err := ctx.Err(); err != nil {
 			return result, err
@@ -70,11 +77,17 @@ func Apply(ctx context.Context, root, journalPath string, plan *Plan) (*ApplyRes
 			result.Errors = append(result.Errors, op.Path+": path is outside the library root")
 			continue
 		}
+		if written[op.Path] {
+			op.Size, op.ModTime = 0, 0
+		}
 		entry, err := applyOne(op)
 		if err != nil {
 			result.Skipped++
 			result.Errors = append(result.Errors, op.Path+": "+err.Error())
 			continue
+		}
+		if op.Type == "tags" {
+			written[op.Path] = true
 		}
 		entry.BatchID = result.BatchID
 		entry.Time = time.Now().UTC().Format(time.RFC3339)
