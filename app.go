@@ -20,8 +20,8 @@ import (
 	"time"
 
 	"github.com/vekhyat/Auralis/backend"
-	"github.com/vekhyat/Auralis/backend/devices/ipod"
 	"github.com/vekhyat/Auralis/backend/devices"
+	"github.com/vekhyat/Auralis/backend/devices/ipod"
 	"github.com/vekhyat/Auralis/backend/syncengine"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -42,6 +42,7 @@ type App struct {
 	activeSyncTargetID           string
 	activeSyncPlan               *syncengine.Plan
 	activeSyncPlanTargetID       string
+	activeSyncSession            *syncSession
 }
 
 type CurrentIPInfo struct {
