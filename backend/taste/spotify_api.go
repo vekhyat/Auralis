@@ -24,11 +24,9 @@ const (
 	spotifyClientIDKey  = "spotify.client_id"
 	spotifyScopeRequest = "user-top-read user-library-read user-read-recently-played user-follow-read playlist-read-private"
 
-	// SpotifyRedirectPort is fixed because Spotify only accepts redirect
-	// URIs registered exactly in the user's developer app.
-	SpotifyRedirectPort = 43821
-	// SpotifyRedirectURI is what users register in their Spotify app.
-	SpotifyRedirectURI = "http://127.0.0.1:43821/callback"
+	// Spotify permits a dynamically assigned port for registered loopback IP
+	// literals. Keep the callback at the root to match this registered URI.
+	SpotifyRedirectURI = "http://127.0.0.1"
 )
 
 // SpotifyAPISource is a TasteSource backed by the official Spotify Web API
@@ -84,7 +82,7 @@ func (s *SpotifyAPISource) listenAddr() string {
 	if s.ListenAddr != "" {
 		return s.ListenAddr
 	}
-	return fmt.Sprintf("127.0.0.1:%d", SpotifyRedirectPort)
+	return "127.0.0.1:0"
 }
 
 // sameHost reports whether a pagination link points at the API host, so the
@@ -173,14 +171,18 @@ func (s *SpotifyAPISource) Connect(ctx context.Context) error {
 
 	listener, err := net.Listen("tcp", s.listenAddr())
 	if err != nil {
-		return fmt.Errorf("spotify connect: port %d is in use by another program: %w", SpotifyRedirectPort, err)
+		return fmt.Errorf("spotify connect: could not open loopback listener: %w", err)
 	}
 	defer listener.Close()
-	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", listener.Addr().(*net.TCPAddr).Port)
+	redirectURI := fmt.Sprintf("http://127.0.0.1:%d", listener.Addr().(*net.TCPAddr).Port)
 
 	callbackCh := make(chan callbackResult, 1)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
 		q := r.URL.Query()
 		// Anything without our state did not come from this sign-in, so it
 		// is ignored rather than allowed to end the flow.

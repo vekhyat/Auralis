@@ -1544,7 +1544,13 @@
       "reasonLikedTracks_one": "Você curtiu {{count}} faixa dele",
       "reasonLikedTracks_other": "Você curtiu {{count}} faixas dele",
       "reasonSimilarTo": "Semelhante a {{artist}}",
-      "reasonMissingAlbum": "Ainda não está na sua biblioteca"
+      "reasonMissingAlbum": "Ainda não está na sua biblioteca",
+      "loading": "Carregando sugestões…",
+      "loadError": "Não foi possível carregar suas sugestões. Tente novamente.",
+      "retry": "Tentar novamente",
+      "preparing": "Preparando…",
+      "download": "Baixar",
+      "moreActions": "Mais ações para {{title}}"
     },
     "connections": {
       "title": "Conexões de audição",
@@ -1576,7 +1582,7 @@
       "lastfmSavedToast": "Last.fm salvo",
       "lastfmDisconnectedToast": "Last.fm desconectado",
       "importExportTitle": "Importar exportação de dados do Spotify",
-      "importExportDesc": "Solicite o \"Histórico de streaming estendido\" na página de privacidade do Spotify e depois escolha o .zip ou um arquivo JSON. Não precisa de app do Spotify.",
+      "importExportDesc": "Solicite o histórico de streaming estendido na página de privacidade do Spotify e escolha o arquivo .zip, um arquivo JSON ou a pasta extraída. Não é necessário um app do Spotify.",
       "selectExportFile": "Escolher arquivo de exportação",
       "importingCount_one": "Importando… {{count}} reprodução lida",
       "importingCount_other": "Importando… {{count}} reproduções lidas",
@@ -1596,7 +1602,17 @@
       "lastSyncedAt": "Última sincronização: {{time}}",
       "neverSynced": "Nunca sincronizado",
       "eventsCount_one": "{{count}} evento de audição",
-      "eventsCount_other": "{{count}} eventos de audição"
+      "eventsCount_other": "{{count}} eventos de audição",
+      "loading": "Carregando conexões…",
+      "loadError": "Não foi possível carregar as conexões de escuta. Tente novamente.",
+      "retry": "Tentar novamente",
+      "cancelSync": "Cancelar sincronização",
+      "spotifyClientIdPlaceholder": "Cole seu Client ID do Spotify",
+      "lastfmUsernamePlaceholder": "Seu nome de usuário do Last.fm",
+      "lastfmApiKeyPlaceholder": "Sua chave de API do Last.fm",
+      "selectExportFolder": "Escolher pasta de exportação",
+      "spotifyLoopbackHint": "O Spotify permite qualquer porta para este endereço de loopback. O Auralis escolhe uma porta disponível ao conectar.",
+      "save": "Salvar"
     }
   },
   "literal": {

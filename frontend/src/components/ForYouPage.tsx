@@ -20,6 +20,8 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { CoverArt } from "@/components/ArtworkCard";
+import { TasteSyncStatus } from "@/components/TasteSyncStatus";
+import { useTasteSync, startTasteSync, cancelTasteSync, type TasteSyncProgress } from "@/hooks/useTasteSync";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import {
     GetTasteShelves,
@@ -28,13 +30,12 @@ import {
     BanTasteArtist,
     PinTasteArtist,
     UnpinTasteArtist,
-    SyncTasteNow,
 } from "../../wailsjs/go/main/App";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import type { taste } from "../../wailsjs/go/models";
 
 interface ForYouPageProps {
-    onDownloadUrl: (url: string) => void;
+    onDownloadUrl: (url: string) => Promise<boolean>;
     /** Artists from Last.fm have no Spotify ID, so they open a search. */
     onSearch: (query: string) => void;
     onNavigateToSettings?: () => void;
@@ -74,22 +75,16 @@ function downloadUrl(item: taste.Item): string | null {
     return null;
 }
 
-interface SyncProgressEvent {
-    phase: string;
-    message: string;
-    current: number;
-    total: number;
-    done: boolean;
-    error?: string;
-}
-
 export function ForYouPage({ onDownloadUrl, onSearch, onNavigateToSettings }: ForYouPageProps) {
     const { t } = useTranslation();
     const [shelves, setShelves] = useState<TasteShelf[]>([]);
     const [summary, setSummary] = useState<taste.Summary | null>(null);
     const [loading, setLoading] = useState(true);
-    const [syncing, setSyncing] = useState(false);
+    const { syncing, syncProgress } = useTasteSync();
+    const [loadError, setLoadError] = useState(false);
     const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
+    const [queuedIds, setQueuedIds] = useState<Set<string>>(new Set());
+    const [downloadingShelf, setDownloadingShelf] = useState(false);
 
     const loadData = useCallback(async () => {
         try {
@@ -105,8 +100,10 @@ export function ForYouPage({ onDownloadUrl, onSearch, onNavigateToSettings }: Fo
                 }))
             );
             setSummary(summaryData || null);
+            setLoadError(false);
         } catch (err) {
             console.error("Failed to load taste shelves:", err);
+            setLoadError(true);
         } finally {
             setLoading(false);
         }
@@ -117,9 +114,8 @@ export function ForYouPage({ onDownloadUrl, onSearch, onNavigateToSettings }: Fo
             void loadData();
         }, 0);
 
-        const unsubSync = EventsOn("taste:sync-progress", (p: SyncProgressEvent) => {
+        const unsubSync = EventsOn("taste:sync-progress", (p: TasteSyncProgress) => {
             if (p.done) {
-                setSyncing(false);
                 if (p.error) {
                     toast.error(t("translation.connections.syncError", { error: p.error }));
                 }
@@ -144,36 +140,39 @@ export function ForYouPage({ onDownloadUrl, onSearch, onNavigateToSettings }: Fo
         return t(key, { artist: item.reason_arg || item.artist, count: Number(item.reason_arg) || 0 });
     };
 
-    const handleDownloadItem = (item: taste.Item) => {
+    const handleDownloadItem = async (item: taste.Item): Promise<boolean> => {
         const url = downloadUrl(item);
         if (!url) {
             onSearch(item.artist);
-            return;
+            return false;
         }
         setDownloadingIds((prev) => new Set(prev).add(item.id));
-        onDownloadUrl(url);
-        toast.success(
-            t("translation.forYou.downloading", {
-                title: item.title,
-                artist: item.artist,
-            })
-        );
-        setTimeout(() => {
+        try {
+            const accepted = await onDownloadUrl(url);
+            if (accepted) setQueuedIds((prev) => new Set(prev).add(item.id));
+            return accepted;
+        } finally {
             setDownloadingIds((prev) => {
                 const next = new Set(prev);
                 next.delete(item.id);
                 return next;
             });
-        }, 1500);
+        }
     };
 
-    const handleDownloadShelf = (shelf: TasteShelf) => {
-        const urls = shelf.items.map(downloadUrl).filter((url): url is string => url !== null);
-        if (urls.length === 0) return;
-        urls.forEach(onDownloadUrl);
-        toast.success(
+    const handleDownloadShelf = async (shelf: TasteShelf) => {
+        setDownloadingShelf(true);
+        let count = 0;
+        try {
+            for (const item of shelf.items) {
+                if (downloadUrl(item) && await handleDownloadItem(item)) count++;
+            }
+        } finally {
+            setDownloadingShelf(false);
+        }
+        if (count > 0) toast.success(
             t("translation.forYou.shelfEnqueued", {
-                count: urls.length,
+                count,
                 shelf: shelfTitle(shelf),
             })
         );
@@ -231,13 +230,15 @@ export function ForYouPage({ onDownloadUrl, onSearch, onNavigateToSettings }: Fo
     };
 
     const handleSync = async () => {
-        setSyncing(true);
         try {
-            await SyncTasteNow();
+            await startTasteSync();
         } catch (err) {
-            setSyncing(false);
             toast.error(String(err));
         }
+    };
+
+    const handleCancelSync = async () => {
+        try { await cancelTasteSync(); } catch (err) { toast.error(String(err)); }
     };
 
     const hasAnyItems = shelves.some((s) => s.items && s.items.length > 0);
@@ -245,20 +246,21 @@ export function ForYouPage({ onDownloadUrl, onSearch, onNavigateToSettings }: Fo
 
     if (loading) {
         return (
-            <div className="flex min-h-[400px] items-center justify-center">
+            <div className="flex min-h-[400px] items-center justify-center gap-2" role="status">
                 <RefreshCw className="size-6 animate-spin text-muted-foreground" />
+                <span>{t("translation.forYou.loading")}</span>
             </div>
         );
     }
 
     return (
-        <div className="mx-auto w-full max-w-[1600px] px-6 py-8 space-y-8">
+        <div className="mx-auto w-full max-w-[1600px] space-y-8">
             {/* Header & Controls */}
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-4">
                 <div>
                     <div className="flex items-center gap-2">
                         <Sparkles className="size-6 text-primary" />
-                        <h1 className="text-2xl font-semibold tracking-tight">
+                        <h1 className="text-[32px] font-semibold tracking-tight">
                             {t("translation.forYou.title")}
                         </h1>
                     </div>
@@ -276,8 +278,9 @@ export function ForYouPage({ onDownloadUrl, onSearch, onNavigateToSettings }: Fo
                         className="gap-1.5"
                     >
                         <RefreshCw className={`size-3.5 ${syncing ? "animate-spin" : ""}`} />
-                        {t("translation.forYou.sync")}
+                        {t("translation.connections.syncNow")}
                     </Button>
+                    {syncing ? <Button variant="outline" size="sm" onClick={handleCancelSync}>{t("translation.connections.cancelSync")}</Button> : null}
                     {onNavigateToSettings ? (
                         <Button
                             variant="outline"
@@ -292,11 +295,17 @@ export function ForYouPage({ onDownloadUrl, onSearch, onNavigateToSettings }: Fo
                 </div>
             </div>
 
+            {syncing && syncProgress ? <TasteSyncStatus progress={syncProgress} /> : null}
+            {loadError ? <div className="flex flex-wrap items-center gap-3" role="alert">
+                <p className="text-sm text-destructive">{t("translation.forYou.loadError")}</p>
+                <Button variant="outline" size="sm" onClick={() => void loadData()}>{t("translation.forYou.retry")}</Button>
+            </div> : null}
+
             {/* Layout: Main Shelves + Taste Side Panel */}
             <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
                 {/* Shelves Column */}
                 <div className="xl:col-span-3 space-y-10">
-                    {!hasAnyItems ? (
+                    {!hasAnyItems && !loadError ? (
                         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/40 p-12 text-center">
                             <Sparkles className="size-12 text-muted-foreground/60 mb-4" strokeWidth={1.5} />
                             <h2 className="text-lg font-semibold">{t("translation.forYou.emptyTitle")}</h2>
@@ -332,6 +341,7 @@ export function ForYouPage({ onDownloadUrl, onSearch, onNavigateToSettings }: Fo
                                             variant="ghost"
                                             size="sm"
                                             onClick={() => handleDownloadShelf(shelf)}
+                                            disabled={downloadingShelf || downloadingIds.size > 0}
                                             className="h-7 text-xs text-muted-foreground hover:text-foreground gap-1.5"
                                         >
                                             <Download className="size-3.5" />
@@ -343,25 +353,25 @@ export function ForYouPage({ onDownloadUrl, onSearch, onNavigateToSettings }: Fo
                                         {shelf.items.map((item) => (
                                             <div
                                                 key={item.id}
-                                                className="group relative flex flex-col justify-between rounded-xl border border-border/50 bg-card p-2.5 transition-all duration-200 hover:-translate-y-1 hover:border-border hover:shadow-sm motion-reduce:transform-none"
+                                                className="group flex flex-col justify-between rounded-xl border border-border/50 bg-card p-2.5 transition-transform duration-200 hover:-translate-y-1 motion-reduce:transform-none"
                                             >
                                                 <div className="space-y-2">
                                                     <div className="relative aspect-square w-full overflow-hidden rounded-lg">
                                                         <CoverArt
                                                             src={item.image}
-                                                            className="size-full object-cover transition-transform duration-200 group-hover:scale-105"
+                                                            className="size-full object-cover"
                                                         />
                                                     </div>
 
                                                     <div className="space-y-0.5">
                                                         <div
-                                                            className="truncate text-xs font-semibold text-foreground"
+                                                            className="truncate text-sm font-semibold text-foreground"
                                                             title={item.title}
                                                         >
                                                             {item.title}
                                                         </div>
                                                         <div
-                                                            className="truncate text-[11px] text-muted-foreground"
+                                                            className="truncate text-xs text-muted-foreground"
                                                             title={item.artist}
                                                         >
                                                             {item.artist}
@@ -370,7 +380,7 @@ export function ForYouPage({ onDownloadUrl, onSearch, onNavigateToSettings }: Fo
 
                                                     {reasonText(item) ? (
                                                         <div
-                                                            className="inline-block max-w-full truncate rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                                                            className="text-xs text-muted-foreground"
                                                             title={reasonText(item)}
                                                         >
                                                             {reasonText(item)}
@@ -380,17 +390,18 @@ export function ForYouPage({ onDownloadUrl, onSearch, onNavigateToSettings }: Fo
 
                                                 <div className="mt-3 flex items-center justify-between gap-1 pt-2 border-t border-border/40">
                                                     <Button
-                                                        variant="secondary"
+                                                        variant="default"
                                                         size="sm"
-                                                        disabled={downloadingIds.has(item.id)}
+                                                        disabled={downloadingShelf || downloadingIds.has(item.id)}
                                                         onClick={() => handleDownloadItem(item)}
                                                         className="h-7 flex-1 text-xs gap-1 font-normal"
                                                     >
                                                         {downloadUrl(item) ? <Download className="size-3" /> : <Search className="size-3" />}
                                                         {downloadingIds.has(item.id)
-                                                            ? t("translation.forYou.queued")
+                                                            ? t("translation.forYou.preparing")
+                                                            : queuedIds.has(item.id) ? t("translation.forYou.queued")
                                                             : downloadUrl(item)
-                                                                ? t("translation.common.download")
+                                                                ? t("translation.forYou.download")
                                                                 : t("translation.forYou.findArtist")}
                                                     </Button>
 
@@ -399,7 +410,7 @@ export function ForYouPage({ onDownloadUrl, onSearch, onNavigateToSettings }: Fo
                                                             <Button
                                                                 variant="ghost"
                                                                 size="icon"
-                                                                aria-label={t("translation.common.more")}
+                                                                aria-label={t("translation.forYou.moreActions", { title: item.title })}
                                                                 className="size-7 text-muted-foreground hover:text-foreground"
                                                             >
                                                                 <MoreVertical className="size-3.5" />
@@ -470,7 +481,7 @@ export function ForYouPage({ onDownloadUrl, onSearch, onNavigateToSettings }: Fo
                                                     {artist}
                                                 </span>
                                             </div>
-                                            <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity">
+                                            <div className="flex items-center gap-1">
                                                 {pinned.has(artist.toLowerCase()) ? (
                                                     <button
                                                         type="button"

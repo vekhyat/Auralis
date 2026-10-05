@@ -53,6 +53,7 @@ interface SettingsPageProps {
     onUnsavedChangesChange?: (hasUnsavedChanges: boolean) => void;
     onResetRequest?: (resetFn: () => void) => void;
     onForYouToggle?: (enabled: boolean) => void;
+    initialSection?: "connections";
 }
 const AUTO_CONVERT_BITRATES: SettingsType["autoConvertBitrate"][] = ["320k", "256k", "192k", "128k"];
 const LYRICS_TRANSLATION_LANGUAGES = [
@@ -110,11 +111,18 @@ const METADATA_TAG_OPTIONS: Array<{
     { key: "upc", labelKey: "literal.common.upc", example: "00602478398346" },
     { key: "comment", labelKey: "translation.settings.comment", example: "https://open.spotify.com/track/1CPZ5BxNNd0n0nF4Orb9JS" },
 ];
-export function SettingsPage({ onUnsavedChangesChange, onResetRequest, onForYouToggle }: SettingsPageProps) {
+export function SettingsPage({ onUnsavedChangesChange, onResetRequest, onForYouToggle, initialSection }: SettingsPageProps) {
     const { t } = useTranslation();
     const [savedSettings, setSavedSettings] = useState<SettingsType>(getSettings());
     const [tempSettings, setTempSettings] = useState<SettingsType>(savedSettings);
     const communitySourcesRef = useRef<CommunitySourcesHandle>(null);
+    const connectionsRef = useRef<HTMLDivElement>(null);
+    const focusConnections = useCallback(() => {
+        if (initialSection === "connections") {
+            connectionsRef.current?.scrollIntoView({ block: "start" });
+            connectionsRef.current?.focus({ preventScroll: true });
+        }
+    }, [initialSection]);
     const [communitySourcesDirty, setCommunitySourcesDirty] = useState(false);
     const [showResetConfirm, setShowResetConfirm] = useState(false);
     const [showMetadataAdvanced, setShowMetadataAdvanced] = useState(false);
@@ -648,7 +656,9 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, onForYouT
           </div>
         </section>
 
-        <ListeningConnectionsSettings onForYouToggle={onForYouToggle} />
+        <div ref={connectionsRef} tabIndex={-1} className="scroll-mt-8">
+          <ListeningConnectionsSettings onForYouToggle={onForYouToggle} onReady={focusConnections} />
+        </div>
       </div>
 
       <Dialog open={showCustomTidalApiDialog} onOpenChange={setShowCustomTidalApiDialog}>

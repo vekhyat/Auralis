@@ -1544,7 +1544,13 @@
       "reasonLikedTracks_one": "Kamu menyukai {{count}} lagu darinya",
       "reasonLikedTracks_other": "Kamu menyukai {{count}} lagu darinya",
       "reasonSimilarTo": "Mirip {{artist}}",
-      "reasonMissingAlbum": "Belum ada di pustakamu"
+      "reasonMissingAlbum": "Belum ada di pustakamu",
+      "loading": "Memuat saran…",
+      "loadError": "Saran Anda tidak dapat dimuat. Coba lagi.",
+      "retry": "Coba lagi",
+      "preparing": "Menyiapkan…",
+      "download": "Unduh",
+      "moreActions": "Tindakan lainnya untuk {{title}}"
     },
     "connections": {
       "title": "Koneksi dengar",
@@ -1576,7 +1582,7 @@
       "lastfmSavedToast": "Last.fm disimpan",
       "lastfmDisconnectedToast": "Last.fm diputuskan",
       "importExportTitle": "Impor ekspor data Spotify",
-      "importExportDesc": "Minta \"Riwayat streaming lengkap\" di halaman privasi Spotify, lalu pilih file .zip atau JSON. Tidak perlu aplikasi Spotify.",
+      "importExportDesc": "Minta riwayat streaming lengkap di halaman privasi Spotify, lalu pilih berkas .zip, berkas JSON, atau folder hasil ekstraksi. Tidak memerlukan aplikasi Spotify.",
       "selectExportFile": "Pilih file ekspor",
       "importingCount_one": "Mengimpor… {{count}} putaran terbaca",
       "importingCount_other": "Mengimpor… {{count}} putaran terbaca",
@@ -1596,7 +1602,17 @@
       "lastSyncedAt": "Terakhir disinkronkan {{time}}",
       "neverSynced": "Belum pernah disinkronkan",
       "eventsCount_one": "{{count}} riwayat dengar",
-      "eventsCount_other": "{{count}} riwayat dengar"
+      "eventsCount_other": "{{count}} riwayat dengar",
+      "loading": "Memuat koneksi…",
+      "loadError": "Koneksi riwayat dengar tidak dapat dimuat. Coba lagi.",
+      "retry": "Coba lagi",
+      "cancelSync": "Batalkan sinkronisasi",
+      "spotifyClientIdPlaceholder": "Tempel Client ID Spotify Anda",
+      "lastfmUsernamePlaceholder": "Nama pengguna Last.fm Anda",
+      "lastfmApiKeyPlaceholder": "Kunci API Last.fm Anda",
+      "selectExportFolder": "Pilih folder ekspor",
+      "spotifyLoopbackHint": "Spotify mengizinkan port apa pun untuk alamat loopback ini. Auralis memilih port yang tersedia saat Anda terhubung.",
+      "save": "Simpan"
     }
   },
   "literal": {

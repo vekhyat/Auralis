@@ -1544,7 +1544,13 @@
       "reasonLikedTracks_one": "Ti piace {{count}} brano di questo album",
       "reasonLikedTracks_other": "Ti piacciono {{count}} brani di questo album",
       "reasonSimilarTo": "Simile a {{artist}}",
-      "reasonMissingAlbum": "Non ancora nella tua libreria"
+      "reasonMissingAlbum": "Non ancora nella tua libreria",
+      "loading": "Caricamento dei suggerimenti…",
+      "loadError": "Impossibile caricare i tuoi suggerimenti. Riprova.",
+      "retry": "Riprova",
+      "preparing": "Preparazione…",
+      "download": "Scarica",
+      "moreActions": "Altre azioni per {{title}}"
     },
     "connections": {
       "title": "Connessioni di ascolto",
@@ -1576,7 +1582,7 @@
       "lastfmSavedToast": "Last.fm salvato",
       "lastfmDisconnectedToast": "Last.fm disconnesso",
       "importExportTitle": "Importa l'esportazione dati di Spotify",
-      "importExportDesc": "Richiedi la \"Cronologia di streaming estesa\" nella pagina della privacy di Spotify, poi scegli lo .zip o un file JSON. Non serve un'app Spotify.",
+      "importExportDesc": "Richiedi la cronologia di ascolto estesa nella pagina della privacy di Spotify, poi scegli il file .zip, un file JSON o la cartella estratta. Non serve un’app Spotify.",
       "selectExportFile": "Scegli il file esportato",
       "importingCount_one": "Importazione… {{count}} ascolto letto",
       "importingCount_other": "Importazione… {{count}} ascolti letti",
@@ -1596,7 +1602,17 @@
       "lastSyncedAt": "Ultima sincronizzazione: {{time}}",
       "neverSynced": "Mai sincronizzato",
       "eventsCount_one": "{{count}} ascolto",
-      "eventsCount_other": "{{count}} ascolti"
+      "eventsCount_other": "{{count}} ascolti",
+      "loading": "Caricamento delle connessioni…",
+      "loadError": "Impossibile caricare le connessioni di ascolto. Riprova.",
+      "retry": "Riprova",
+      "cancelSync": "Annulla sincronizzazione",
+      "spotifyClientIdPlaceholder": "Incolla il tuo Client ID di Spotify",
+      "lastfmUsernamePlaceholder": "Il tuo nome utente Last.fm",
+      "lastfmApiKeyPlaceholder": "La tua chiave API Last.fm",
+      "selectExportFolder": "Scegli cartella di esportazione",
+      "spotifyLoopbackHint": "Spotify consente qualsiasi porta per questo indirizzo di loopback. Auralis sceglie una porta disponibile quando ti connetti.",
+      "save": "Salva"
     }
   },
   "literal": {
