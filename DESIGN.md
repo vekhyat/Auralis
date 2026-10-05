@@ -145,6 +145,33 @@ behavior. The current broader Go suite fails TestAntraAmazonResolvePassesGranted
 in existing Amazon mirror code. New workflow copy falls back to English in other
 locales; existing translations and key IDs remain.
 
+For You preserves the incumbent artwork-library direction in Operate mode for
+the native desktop app. The shell supplies the 32px content inset and quiet
+chrome; this surface adds no floating navigation or replacement visual world.
+It is off by default and becomes a normal destination after enabling it in
+Connections. Artwork-led shelves show translated suggestion reasons. Card and
+shelf Download actions use the existing persistent queue; artists without a
+downloadable ID open catalog search. More menus dismiss an item, pin an artist,
+or ban an artist. A small taste summary shows artists, genres, event count, and
+last sync. The settings shortcut and empty-state action deep-link to Connections.
+
+Connections keeps optional, read-only listening-service credentials encrypted
+locally. Spotify setup uses the operator's own Client ID, the registered portless
+redirect `http://127.0.0.1`, and a dynamic loopback port during authorization.
+Last.fm requires an API key and username. Spotify export import accepts a folder,
+ZIP, or JSON file. For You and Connections share translated sync phases,
+progress, and Cancel; the active state survives navigation until the backend's
+completion or cancellation event settles it.
+
+For You verification: 39 frontend tests, locale-key parity, type checking, lint,
+targeted Go tests, and build passed. Twenty-two simulated-browser interaction
+checks cover 1440x900, 1200x720, and 1402x876, including queue acceptance,
+settings navigation, shared sync/cancel, imports, and preference actions. This
+scope does not verify live OAuth or native transfers. Captures are recorded in
+`.impeccable/review/for-you-1440.png`, `for-you-1200.png`, `for-you-1402.png`,
+and `connections-1402.png` under the same directory; they document implemented
+output, not an approved comp.
+
 ## Do's and Don'ts
 
 - Do use prominent real artwork for browsing and compact rows for tracks.

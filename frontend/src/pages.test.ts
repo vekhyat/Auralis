@@ -15,15 +15,15 @@ const HIDDEN_TOOL_PAGES = [
     "enrich",
 ] as const satisfies readonly PageType[];
 
-test("titlebar destinations are library, queue, history, devices, and settings", () => {
-    assert.deepEqual([...PRIMARY_DESTINATIONS], ["main", "queue", "history", "devices", "settings"]);
+test("titlebar destinations are library, for you, queue, history, library health, devices, and settings", () => {
+    assert.deepEqual([...PRIMARY_DESTINATIONS], ["main", "for-you", "queue", "history", "library-health", "devices", "settings"]);
 });
 
 test("tool pages are not shell routes", () => {
     for (const page of HIDDEN_TOOL_PAGES) {
         assert.equal(isShellPage(page), false);
     }
-    for (const page of ["main", "queue", "history", "devices", "settings", "debug"] as const) {
+    for (const page of ["main", "for-you", "queue", "history", "library-health", "devices", "settings", "debug"] as const) {
         assert.equal(isShellPage(page), true);
         assert.equal(PRIMARY_DESTINATIONS.includes(page as typeof PRIMARY_DESTINATIONS[number]) || page === "debug", true);
     }

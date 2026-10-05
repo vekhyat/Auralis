@@ -59,6 +59,7 @@ _tmp_*
 
 # Local agent / scratch
 .grok/
+.impeccable/review/
 
 # Test files
 test

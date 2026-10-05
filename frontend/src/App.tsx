@@ -8,7 +8,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { getSettings, getSettingsWithDefaults, loadSettings, saveSettings, applyThemeMode } from "@/lib/settings";
 import { openExternal } from "@/lib/utils";
 import { fetchSpotifyMetadata } from "@/lib/api";
-import { OpenFolder, CheckFFmpegInstalled, DownloadFFmpeg, GetRecentFetches, SaveRecentFetches, ListIPods } from "../wailsjs/go/main/App";
+import { OpenFolder, CheckFFmpegInstalled, DownloadFFmpeg, GetRecentFetches, SaveRecentFetches, ListIPods, GetTasteSettings } from "../wailsjs/go/main/App";
 import { EventsOn, EventsOff, Quit } from "../wailsjs/runtime/runtime";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { TitleBar } from "@/components/TitleBar";
@@ -24,8 +24,8 @@ import { PlaylistInfo } from "@/components/PlaylistInfo";
 import { ArtistInfo } from "@/components/ArtistInfo";
 import { DownloadShelf } from "@/components/DownloadShelf";
 import { CooldownBanner } from "@/components/CooldownBanner";
-import { DebugLoggerPage, DevicesPage, HistoryPage, PageErrorBoundary, PageLoading, QueuePage, SettingsPage, } from "@/lazy-pages";
-import { loadDebugLoggerPage, loadDevicesPage, loadHistoryPage, loadQueuePage, loadSettingsPage, } from "@/lib/page-loaders";
+import { DebugLoggerPage, DevicesPage, ForYouPage, HistoryPage, LibraryHealthPage, PageErrorBoundary, PageLoading, QueuePage, SettingsPage, } from "@/lazy-pages";
+import { loadDebugLoggerPage, loadDevicesPage, loadForYouPage, loadHistoryPage, loadLibraryHealthPage, loadQueuePage, loadSettingsPage, } from "@/lib/page-loaders";
 import { createLazyPage } from "@/lib/lazy-page";
 import { planLegacyHistoryMigration, shouldDiscardLegacyHistory } from "@/lib/fetch-history-migration";
 import type { HistoryItem } from "@/components/FetchHistory";
@@ -209,7 +209,6 @@ function App() {
     const { t } = useTranslation();
     const [currentPage, setCurrentPage] = useState<ShellPage>("main");
     const [pageAttempt, setPageAttempt] = useState(0);
-    const [ipodConnected, setIpodConnected] = useState(false);
     const [spotifyUrl, setSpotifyUrl] = useState("");
     const [smartSearchInput, setSmartSearchInput] = useState("");
     const [selectedTracks, setSelectedTracks] = useState<string[]>([]);
@@ -227,6 +226,22 @@ function App() {
     const [pendingPageChange, setPendingPageChange] = useState<ShellPage | null>(null);
     const [showUnsavedChangesDialog, setShowUnsavedChangesDialog] = useState(false);
     const [resetSettingsFn, setResetSettingsFn] = useState<(() => void) | null>(null);
+    const registerSettingsReset = useCallback((reset: () => void) => {
+        setResetSettingsFn(() => reset);
+    }, []);
+    const [forYouEnabled, setForYouEnabled] = useState(false);
+    const [settingsInitialSection, setSettingsInitialSection] = useState<"connections" | undefined>();
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            void GetTasteSettings().then((s) => {
+                if (s) {
+                    setForYouEnabled(s.for_you_enabled);
+                }
+            }).catch(() => {});
+        }, 0);
+        return () => window.clearTimeout(timer);
+    }, []);
     const ITEMS_PER_PAGE = 50;
     const CURRENT_VERSION = __APP_VERSION__;
     const download = useDownload();
@@ -273,7 +288,6 @@ function App() {
         EventsOn("ipod:devices", (devices: Array<{ id?: string; name?: string }> | null) => {
             sawEvent = true;
             const list = Array.isArray(devices) ? devices : [];
-            setIpodConnected(list.length > 0);
             if (first) {
                 first = false;
                 remember(list);
@@ -289,7 +303,6 @@ function App() {
         void ListIPods().then((devices) => {
             if (sawEvent) return;
             const list = Array.isArray(devices) ? devices : [];
-            setIpodConnected(list.length > 0);
             remember(list);
             first = false;
         }).catch(() => {});
@@ -297,9 +310,6 @@ function App() {
             EventsOff("ipod:devices");
         };
     }, []);
-    if (!ipodConnected && currentPage === "devices") {
-        setCurrentPage("main");
-    }
     const [isFFmpegInstalled, setIsFFmpegInstalled] = useState<boolean | null>(null);
     const [isInstallingFFmpeg, setIsInstallingFFmpeg] = useState(false);
     const [ffmpegInstallProgress, setFfmpegInstallProgress] = useState(0);
@@ -654,7 +664,7 @@ function App() {
     const requestingDownloadsRef = useRef(new Set<string>());
     const downloadFromUrl = async (url: string) => {
         if (requestingDownloadsRef.current.has(url))
-            return;
+            return false;
         requestingDownloadsRef.current.add(url);
         setRequestingDownloads(new Set(requestingDownloadsRef.current));
         try {
@@ -664,11 +674,14 @@ function App() {
             if (queueRelease(data)) {
                 recordRecentFetch(url, data);
                 void metadata.saveToHistory(url, data);
+                return true;
             }
+            return false;
         }
         catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             toast.error(t("translation.downloads.couldntGet"), { description: translateMessage(message) });
+            return false;
         }
         finally {
             requestingDownloadsRef.current.delete(url);
@@ -792,6 +805,7 @@ function App() {
             return;
         }
         setCurrentPage(page);
+        if (page !== "settings") setSettingsInitialSection(undefined);
     };
     const handlePageChange = (page: ShellPage) => {
         if (currentPage === "settings" && hasUnsavedSettings && page !== "settings") {
@@ -824,6 +838,8 @@ function App() {
         history: HistoryPage,
         queue: QueuePage,
         devices: DevicesPage,
+        libraryHealth: LibraryHealthPage,
+        forYou: ForYouPage,
     }));
     const retryCurrentPage = () => {
         setPageAttempt((attempt) => attempt + 1);
@@ -839,6 +855,10 @@ function App() {
                     return { ...current, queue: createLazyPage(loadQueuePage) };
                 case "devices":
                     return { ...current, devices: createLazyPage(loadDevicesPage) };
+                case "library-health":
+                    return { ...current, libraryHealth: createLazyPage(loadLibraryHealthPage) };
+                case "for-you":
+                    return { ...current, forYou: createLazyPage(loadForYouPage) };
                 default:
                     return current;
             }
@@ -849,12 +869,22 @@ function App() {
     </PageErrorBoundary>);
     const renderPage = () => {
         switch (currentPage) {
+            case "for-you":
+                return renderSecondary(<secondaryPages.forYou onDownloadUrl={downloadFromUrl} onSearch={(query: string) => {
+                    handlePageChange("main");
+                    omnibar.handleInputChange(query);
+                }} onNavigateToSettings={() => {
+                    setSettingsInitialSection("connections");
+                    handlePageChange("settings");
+                }} />);
             case "settings":
-                return renderSecondary(<secondaryPages.settings onUnsavedChangesChange={setHasUnsavedSettings} onResetRequest={setResetSettingsFn}/>);
+                return renderSecondary(<secondaryPages.settings initialSection={settingsInitialSection} onUnsavedChangesChange={setHasUnsavedSettings} onResetRequest={registerSettingsReset} onForYouToggle={setForYouEnabled}/>);
             case "debug":
                 return renderSecondary(<secondaryPages.debug />);
             case "devices":
                 return renderSecondary(<secondaryPages.devices />);
+            case "library-health":
+                return renderSecondary(<secondaryPages.libraryHealth />);
             case "history":
                 return renderSecondary(<secondaryPages.history onHistorySelect={(item) => {
                         setSmartSearchInput("");
@@ -926,7 +956,7 @@ function App() {
               onForward={handleTitleBarForward}
               currentPage={currentPage}
               onPageChange={handlePageChange}
-              showDevices={ipodConnected}
+              showForYou={forYouEnabled}
               queueCount={queue.items.filter((item) => item.status === "pending" || item.status === "running").length}
               omnibar={{
                   value: smartSearchInput,
@@ -943,6 +973,7 @@ function App() {
                   },
               }}
             />
+
 
             <main
               data-page={currentPage}
