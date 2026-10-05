@@ -3,6 +3,7 @@ import { t } from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
@@ -12,6 +13,7 @@ import {
     CancelSync,
     DownloadPlatformTools,
     GetDeviceProfile,
+    HasInterruptedSync,
     IsPlatformToolsInstalled,
     ListSyncTargets,
     PlanSync,
@@ -39,6 +41,9 @@ import {
     Trash2,
     X,
 } from "lucide-react";
+import { SelectionRulesEditor } from "./sync/SelectionRulesEditor";
+import type { ProgressEvent } from "./sync/types";
+import { validateRecentDays, validateTargetFolder } from "./sync/validation";
 
 function formatBytes(value: number): string {
     if (!value || value <= 0) return "0 MB";
@@ -46,18 +51,6 @@ function formatBytes(value: number): string {
     if (gb >= 10) return `${Math.round(gb)} GB`;
     if (gb >= 1) return `${gb.toFixed(1)} GB`;
     return `${Math.max(1, Math.round(value / (1024 * 1024)))} MB`;
-}
-
-/** Mirrors syncengine.Progress. Copy events omit the op counts, so the
- * panel merges events instead of replacing them. */
-interface ProgressEvent {
-    phase: string;
-    op_total?: number;
-    done?: number;
-    bytes?: number;
-    name?: string;
-    skipped?: number;
-    error?: string;
 }
 
 const PHASE_LABELS: Record<string, string> = {
@@ -72,19 +65,53 @@ const PHASE_LABELS: Record<string, string> = {
     cancelled: "translation.sync.statusCancelled",
 };
 
+function getProfileSnapshot(p: devices.DeviceProfile | null, targetRoot: string = ""): string {
+    if (!p) return "";
+    return JSON.stringify({
+        root: targetRoot,
+        folder: p.target_folder || "",
+        mode: p.format_policy?.mode || "keep",
+        profile_id: p.profile_id || "poweramp",
+        rules: {
+            whole_library: p.selection_rules?.whole_library ?? true,
+            artists: [...(p.selection_rules?.artists || [])].sort(),
+            albums: [...(p.selection_rules?.albums || [])].sort(),
+            playlists: [...(p.selection_rules?.playlists || [])].sort(),
+            recent_days: p.selection_rules?.recent_days || 0,
+        },
+    });
+}
+
 export function AndroidSyncPanel() {
     const [targets, setTargets] = useState<devices.SyncTargetView[]>([]);
     const [selectedId, setSelectedId] = useState<string>("");
     const [profile, setProfile] = useState<devices.DeviceProfile | null>(null);
     const [plan, setPlan] = useState<syncengine.Plan | null>(null);
+    const [lastPlannedSnapshot, setLastPlannedSnapshot] = useState<string>("");
     const [showPlanDialog, setShowPlanDialog] = useState(false);
     const [planning, setPlanning] = useState(false);
     const [syncing, setSyncing] = useState(false);
+    const [hasInterruptedSync, setHasInterruptedSync] = useState(false);
     const [syncProgress, setSyncProgress] = useState<ProgressEvent | null>(null);
     const [adbInstalled, setAdbInstalled] = useState<boolean | null>(null);
     const [adbDownloading, setAdbDownloading] = useState(false);
     const [adbProgress, setAdbProgress] = useState<{ percent: number; status: string }>({ percent: 0, status: "" });
     const [showHelp, setShowHelp] = useState(false);
+
+    const activeTarget = targets.find((t) => t.id === selectedId) || null;
+
+    const checkInterrupted = useCallback(async (targetId: string) => {
+        if (!targetId) {
+            setHasInterruptedSync(false);
+            return;
+        }
+        try {
+            const has = await HasInterruptedSync(targetId);
+            setHasInterruptedSync(Boolean(has));
+        } catch {
+            setHasInterruptedSync(false);
+        }
+    }, []);
 
     const refreshTargets = useCallback(async () => {
         try {
@@ -95,10 +122,16 @@ export function AndroidSyncPanel() {
                 if (views.some((v) => v.id === prev)) return prev;
                 return views[0]?.id || "";
             });
+            if (views.length > 0) {
+                const nextId = views.some((v) => v.id === selectedId) ? selectedId : views[0].id;
+                void checkInterrupted(nextId);
+            } else {
+                setHasInterruptedSync(false);
+            }
         } catch (err) {
             console.error("Failed to list sync targets:", err);
         }
-    }, []);
+    }, [checkInterrupted, selectedId]);
 
     useEffect(() => {
         let mounted = true;
@@ -129,8 +162,6 @@ export function AndroidSyncPanel() {
             pull();
         };
 
-        // Use the returned unsubscribers: EventsOff would also remove other
-        // components' listeners for the same event.
         const unsubscribers = [EventsOn("devices:changed", handleDevices)];
 
         unsubscribers.push(EventsOn("sync:progress", (event: ProgressEvent) => {
@@ -147,6 +178,9 @@ export function AndroidSyncPanel() {
                     toast.error(t("translation.sync.statusError", { error: event.error || "" }));
                 }
                 pull();
+                if (selectedId) {
+                    void checkInterrupted(selectedId);
+                }
             }
         }));
 
@@ -164,15 +198,18 @@ export function AndroidSyncPanel() {
             mounted = false;
             unsubscribers.forEach((unsubscribe) => unsubscribe());
         };
-    }, []);
-
-    const activeTarget = targets.find((t) => t.id === selectedId) || null;
+    }, [checkInterrupted, selectedId]);
 
     useEffect(() => {
         let cancel = false;
         if (!activeTarget) {
             void Promise.resolve().then(() => {
-                if (!cancel) setProfile(null);
+                if (!cancel) {
+                    setProfile(null);
+                    setPlan(null);
+                    setLastPlannedSnapshot("");
+                    setHasInterruptedSync(false);
+                }
             });
             return () => {
                 cancel = true;
@@ -180,19 +217,54 @@ export function AndroidSyncPanel() {
         }
         void GetDeviceProfile(activeTarget.id).then((prof) => {
             if (cancel) return;
-            setProfile(prof ? devices.DeviceProfile.createFrom(prof) : null);
+            if (prof) {
+                const loaded = devices.DeviceProfile.createFrom(prof);
+                if (!loaded.selection_rules) {
+                    loaded.selection_rules = syncengine.Selection.createFrom({
+                        whole_library: true,
+                        artists: [],
+                        albums: [],
+                        playlists: [],
+                        recent_days: 0,
+                    });
+                }
+                setProfile(loaded);
+            } else {
+                setProfile(null);
+            }
+            setPlan(null);
+            setLastPlannedSnapshot("");
+            void checkInterrupted(activeTarget.id);
         }).catch((err) => {
             console.error("Failed to fetch profile:", err);
         });
         return () => {
             cancel = true;
         };
-    }, [activeTarget]);
+    }, [activeTarget, checkInterrupted]);
+
+    const isAdb = activeTarget?.kind === "adb";
+    const folderValidation = profile ? validateTargetFolder(profile.target_folder || "", isAdb) : { valid: true };
+    const recentValidation = profile?.selection_rules ? validateRecentDays(profile.selection_rules.recent_days || 0) : { valid: true };
+    const isConfigValid = folderValidation.valid && recentValidation.valid;
+
+    const currentSnapshot = getProfileSnapshot(profile, activeTarget?.root || activeTarget?.id);
+    const isPlanStale = Boolean(plan && lastPlannedSnapshot && lastPlannedSnapshot !== currentSnapshot);
 
     const handleSaveProfile = async () => {
         if (!profile) return;
+        if (!isConfigValid) {
+            if (!folderValidation.valid && folderValidation.errorKey) {
+                toast.error(t(folderValidation.errorKey));
+            } else if (!recentValidation.valid && recentValidation.errorKey) {
+                toast.error(t(recentValidation.errorKey));
+            }
+            return;
+        }
         try {
             await SaveDeviceProfile(profile);
+            setPlan(null);
+            setLastPlannedSnapshot("");
             toast.success(t("translation.sync.settingsSaved"));
             await refreshTargets();
         } catch (err) {
@@ -211,11 +283,20 @@ export function AndroidSyncPanel() {
     };
 
     const handlePreviewSync = async () => {
-        if (!activeTarget) return;
+        if (!activeTarget || !isConfigValid) {
+            if (!folderValidation.valid && folderValidation.errorKey) {
+                toast.error(t(folderValidation.errorKey));
+            }
+            return;
+        }
         setPlanning(true);
         try {
+            if (profile) {
+                await SaveDeviceProfile(profile);
+            }
             const p = await PlanSync(activeTarget.id);
             setPlan(p ? syncengine.Plan.createFrom(p) : null);
+            setLastPlannedSnapshot(getProfileSnapshot(profile, activeTarget.root || activeTarget.id));
             setShowPlanDialog(true);
         } catch (err) {
             toast.error(String(err));
@@ -225,7 +306,11 @@ export function AndroidSyncPanel() {
     };
 
     const handleStartSync = async () => {
-        if (!activeTarget) return;
+        if (!activeTarget || !isConfigValid) return;
+        if (!plan || isPlanStale) {
+            await handlePreviewSync();
+            return;
+        }
         setSyncProgress({ phase: "starting" });
         setSyncing(true);
         setShowPlanDialog(false);
@@ -234,6 +319,9 @@ export function AndroidSyncPanel() {
         } catch (err) {
             setSyncing(false);
             toast.error(String(err));
+            if (activeTarget) {
+                void checkInterrupted(activeTarget.id);
+            }
         }
     };
 
@@ -246,6 +334,7 @@ export function AndroidSyncPanel() {
         } catch (err) {
             setSyncing(false);
             toast.error(String(err));
+            void checkInterrupted(activeTarget.id);
         }
     };
 
@@ -266,6 +355,18 @@ export function AndroidSyncPanel() {
             await refreshTargets();
             if (target?.id) {
                 setSelectedId(target.id);
+            }
+        } catch (err) {
+            toast.error(String(err));
+        }
+    };
+
+    const handleBrowseTargetFolder = async () => {
+        if (!profile) return;
+        try {
+            const selected = await SelectFolder(profile.target_folder || "");
+            if (selected) {
+                updateProfile({ target_folder: selected });
             }
         } catch (err) {
             toast.error(String(err));
@@ -359,6 +460,29 @@ export function AndroidSyncPanel() {
                 </div>
             )}
 
+            {/* Interrupted Sync Alert Banner */}
+            {hasInterruptedSync && !syncing && activeTarget && (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/40 bg-primary/10 p-3.5 text-xs">
+                    <div className="flex items-start gap-2.5">
+                        <RotateCcw className="mt-0.5 size-4 text-primary shrink-0" />
+                        <div className="flex flex-col gap-0.5">
+                            <span className="font-semibold text-foreground">{t("translation.sync.resumableFound")}</span>
+                            <span className="text-muted-foreground">{t("translation.sync.resumableFoundDesc")}</span>
+                        </div>
+                    </div>
+                    <Button
+                        size="sm"
+                        variant="default"
+                        disabled={!activeTarget.connected}
+                        onClick={() => void handleResumeSync()}
+                        className="shrink-0"
+                    >
+                        <RotateCcw className="mr-1.5 size-3.5" />
+                        {t("translation.sync.resume")}
+                    </Button>
+                </div>
+            )}
+
             {/* Device Targets Selector */}
             {targets.length === 0 ? (
                 <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12 text-center">
@@ -373,7 +497,11 @@ export function AndroidSyncPanel() {
             ) : (
                 <div className="flex flex-col gap-4">
                     {/* Device Selector Cards */}
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    <div
+                        role="region"
+                        aria-label={t("translation.sync.ariaDeviceList")}
+                        className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
+                    >
                         {targets.map((tgt) => {
                             const isSelected = tgt.id === selectedId;
                             const usedPercent = tgt.totalBytes > 0
@@ -384,6 +512,7 @@ export function AndroidSyncPanel() {
                                     key={tgt.id}
                                     type="button"
                                     onClick={() => setSelectedId(tgt.id)}
+                                    aria-pressed={isSelected}
                                     className={cn(
                                         "flex flex-col gap-2.5 rounded-lg border p-3.5 text-left transition-colors cursor-pointer",
                                         isSelected
@@ -435,7 +564,11 @@ export function AndroidSyncPanel() {
 
                     {/* Active Target Configuration Panel */}
                     {activeTarget && (
-                        <div className="flex flex-col gap-5 rounded-lg border bg-card p-5">
+                        <div
+                            role="region"
+                            aria-label={t("translation.sync.ariaTargetProfile")}
+                            className="flex flex-col gap-5 rounded-lg border bg-card p-5"
+                        >
                             {/* Target Header */}
                             <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-4">
                                 <div className="flex items-center gap-2.5">
@@ -463,7 +596,7 @@ export function AndroidSyncPanel() {
 
                             {/* Profile & Formatting Settings */}
                             {profile && (
-                                <div className="flex flex-col gap-4">
+                                <div className="flex flex-col gap-5">
                                     <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
                                         <Sliders className="size-3.5" />
                                         <span>{t("translation.sync.profile")}</span>
@@ -472,7 +605,9 @@ export function AndroidSyncPanel() {
                                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                         {/* Format Policy */}
                                         <div className="flex flex-col gap-1.5">
-                                            <label className="text-xs font-medium">{t("translation.sync.formatPolicy")}</label>
+                                            <Label htmlFor="sync-format-select" className="text-xs font-medium">
+                                                {t("translation.sync.formatPolicy")}
+                                            </Label>
                                             <Select
                                                 value={profile.format_policy?.mode || "keep"}
                                                 onValueChange={(val) => {
@@ -480,8 +615,9 @@ export function AndroidSyncPanel() {
                                                         format_policy: syncengine.FormatPolicy.createFrom({ mode: val }),
                                                     });
                                                 }}
+                                                disabled={syncing}
                                             >
-                                                <SelectTrigger className="h-9 text-xs">
+                                                <SelectTrigger id="sync-format-select" className="h-9 text-xs">
                                                     <SelectValue />
                                                 </SelectTrigger>
                                                 <SelectContent>
@@ -501,14 +637,17 @@ export function AndroidSyncPanel() {
 
                                         {/* Profile Layout */}
                                         <div className="flex flex-col gap-1.5">
-                                            <label className="text-xs font-medium">{t("translation.sync.profile")}</label>
+                                            <Label htmlFor="sync-profile-select" className="text-xs font-medium">
+                                                {t("translation.sync.profile")}
+                                            </Label>
                                             <Select
                                                 value={profile.profile_id || "poweramp"}
                                                 onValueChange={(val) => {
                                                     updateProfile({ profile_id: val });
                                                 }}
+                                                disabled={syncing}
                                             >
-                                                <SelectTrigger className="h-9 text-xs">
+                                                <SelectTrigger id="sync-profile-select" className="h-9 text-xs">
                                                     <SelectValue />
                                                 </SelectTrigger>
                                                 <SelectContent>
@@ -520,20 +659,80 @@ export function AndroidSyncPanel() {
                                             </Select>
                                         </div>
 
-                                        {/* Target Folder Root */}
+                                        {/* Target Folder Root with Managed Root Containment */}
                                         <div className="flex flex-col gap-1.5 sm:col-span-2">
-                                            <label className="text-xs font-medium">{t("translation.sync.targetFolder")}</label>
-                                            <Input
-                                                value={profile.target_folder || ""}
-                                                onChange={(e) => updateProfile({ target_folder: e.target.value })}
-                                                className="h-9 text-xs font-mono"
-                                                placeholder="/sdcard/Music"
-                                            />
+                                            <div className="flex items-center justify-between">
+                                                <Label htmlFor="sync-target-folder" className="text-xs font-medium">
+                                                    {t("translation.sync.targetFolder")}
+                                                </Label>
+                                                {!folderValidation.valid && folderValidation.errorKey && (
+                                                    <span className="text-[11px] text-destructive flex items-center gap-1 font-medium">
+                                                        <AlertCircle className="size-3" />
+                                                        {t(folderValidation.errorKey)}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <Input
+                                                    id="sync-target-folder"
+                                                    value={profile.target_folder || ""}
+                                                    onChange={(e) => updateProfile({ target_folder: e.target.value })}
+                                                    disabled={syncing}
+                                                    className={cn(
+                                                        "h-9 text-xs font-mono",
+                                                        !folderValidation.valid && "border-destructive focus-visible:ring-destructive",
+                                                    )}
+                                                    placeholder={isAdb ? "/sdcard/Music" : "D:\\Music"}
+                                                />
+                                                {activeTarget.kind !== "adb" && (
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="sm"
+                                                        disabled={syncing}
+                                                        onClick={() => void handleBrowseTargetFolder()}
+                                                        className="h-9 px-3 text-xs shrink-0"
+                                                    >
+                                                        {t("translation.sync.browseFolder")}
+                                                    </Button>
+                                                )}
+                                            </div>
+                                            <p className="text-[11px] text-muted-foreground">
+                                                {isAdb
+                                                    ? t("translation.sync.targetFolderHintAdb")
+                                                    : t("translation.sync.targetFolderHintDrive")}
+                                            </p>
                                         </div>
                                     </div>
 
-                                    <div className="flex justify-end pt-2">
-                                        <Button size="sm" variant="outline" onClick={() => void handleSaveProfile()}>
+                                    {/* Selection Rules: Whole Library, Artists, Albums, Playlists (.m3u8), and Recent Window */}
+                                    <SelectionRulesEditor
+                                        rules={profile.selection_rules || syncengine.Selection.createFrom({
+                                            whole_library: true,
+                                            artists: [],
+                                            albums: [],
+                                            playlists: [],
+                                            recent_days: 0,
+                                        })}
+                                        onChange={(rules) => updateProfile({ selection_rules: rules })}
+                                        disabled={syncing}
+                                    />
+
+                                    <div className="flex items-center justify-between pt-1">
+                                        <div className="text-xs text-muted-foreground">
+                                            {isPlanStale && (
+                                                <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-medium">
+                                                    <AlertCircle className="size-3.5" />
+                                                    {t("translation.sync.previewStaleNotice")}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={syncing || !isConfigValid}
+                                            onClick={() => void handleSaveProfile()}
+                                        >
                                             <Check className="mr-1.5 size-3.5" />
                                             {t("translation.sync.saveSettings")}
                                         </Button>
@@ -548,25 +747,25 @@ export function AndroidSyncPanel() {
                                         <Button
                                             variant="outline"
                                             size="sm"
-                                            disabled={planning || syncing}
+                                            disabled={planning || syncing || !isConfigValid}
                                             onClick={() => void handlePreviewSync()}
                                         >
                                             <RefreshCw className={cn("mr-1.5 size-3.5", planning && "animate-spin")} />
-                                            {t("translation.sync.preview")}
+                                            {planning ? t("translation.sync.previewing") : t("translation.sync.preview")}
                                         </Button>
                                         <Button
-                                            variant="default"
+                                            variant={isPlanStale ? "outline" : "default"}
                                             size="sm"
-                                            disabled={planning || syncing || !activeTarget.connected}
-                                            onClick={() => void handlePreviewSync()}
+                                            disabled={planning || syncing || !activeTarget.connected || !isConfigValid}
+                                            onClick={() => void handleStartSync()}
                                         >
                                             <Play className="mr-1.5 size-3.5" />
                                             {t("translation.sync.syncNow")}
                                         </Button>
                                         <Button
-                                            variant="outline"
+                                            variant={hasInterruptedSync ? "default" : "outline"}
                                             size="sm"
-                                            disabled={syncing || !activeTarget.connected}
+                                            disabled={syncing || !activeTarget.connected || !hasInterruptedSync}
                                             onClick={() => void handleResumeSync()}
                                         >
                                             <RotateCcw className="mr-1.5 size-3.5" />
@@ -584,7 +783,11 @@ export function AndroidSyncPanel() {
 
                                 {/* Active Progress Bar */}
                                 {syncProgress && (
-                                    <div className="mt-2 flex flex-col gap-2 rounded-md bg-muted/40 p-3 text-xs">
+                                    <div
+                                        role="status"
+                                        aria-label={t("translation.sync.ariaProgress")}
+                                        className="mt-2 flex flex-col gap-2 rounded-md bg-muted/40 p-3 text-xs"
+                                    >
                                         <div className="flex items-center justify-between">
                                             <span className="font-medium text-foreground">
                                                 {syncProgress.phase === "error"
@@ -602,6 +805,7 @@ export function AndroidSyncPanel() {
                                             <Progress
                                                 value={Math.round(((syncProgress.done || 0) / syncProgress.op_total) * 100)}
                                                 className="h-1.5 w-full"
+                                                aria-label={t("translation.sync.ariaProgress")}
                                             />
                                         ) : null}
 
@@ -622,7 +826,14 @@ export function AndroidSyncPanel() {
             <Dialog open={showPlanDialog} onOpenChange={setShowPlanDialog}>
                 <DialogContent className="sm:max-w-2xl">
                     <DialogHeader>
-                        <DialogTitle>{t("translation.sync.planTitle")}</DialogTitle>
+                        <div className="flex items-center gap-2">
+                            <DialogTitle>{t("translation.sync.planTitle")}</DialogTitle>
+                            {isPlanStale && (
+                                <span className="rounded bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                                    {t("translation.sync.previewStaleBadge")}
+                                </span>
+                            )}
+                        </div>
                         <DialogDescription>
                             {plan &&
                                 t("translation.sync.planSummary", {
@@ -639,9 +850,8 @@ export function AndroidSyncPanel() {
                             <div className="flex items-center justify-between rounded bg-muted/50 p-2 font-medium">
                                 <span>{t("translation.sync.planSize", { size: formatBytes(plan.free_needed || 0) })}</span>
                                 <span>
-                                    {t("translation.sync.freeOf", {
+                                    {t("translation.sync.planFree", {
                                         free: formatBytes(plan.free_available || 0),
-                                        total: formatBytes(plan.free_available || 0),
                                     })}
                                 </span>
                             </div>

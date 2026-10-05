@@ -106,6 +106,7 @@ export function DevicesPage() {
     const [progress, setProgress] = useState<ProgressEvent | null>(null);
     const [doctorState, setDoctorState] = useState<DoctorView>({ scope: "", epoch: 0, reportScope: "", reportEpoch: -1, report: null });
     const [confirm, setConfirm] = useState<"remove" | "rebuild" | null>(null);
+    const [activeTab, setActiveTab] = useState<string>("android");
     const [scopeEpoch, setScopeEpoch] = useState<{ key: string; epoch: number }>({ key: "", epoch: 0 });
     const listRequests = useRef<{ ticket: number; stopped: boolean; pull: () => Promise<void> }>({
         ticket: 0,
@@ -309,10 +310,10 @@ export function DevicesPage() {
         <div className="mx-auto flex max-w-3xl flex-col gap-6">
             <header className="flex flex-col gap-1">
                 <h1 className="text-lg font-semibold tracking-tight">{t("translation.devices.title")}</h1>
-                <p className="max-w-2xl text-sm text-muted-foreground">{t("translation.devices.intro")}</p>
+                <p className="max-w-2xl text-sm text-muted-foreground">{activeTab === "android" ? t("translation.sync.intro") : t("translation.devices.intro")}</p>
             </header>
 
-            <Tabs defaultValue={devices.length > 0 ? "ipod" : "android"} className="w-full">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 <TabsList className="mb-4">
                     <TabsTrigger value="android">{t("translation.sync.tabAndroid")}</TabsTrigger>
                     <TabsTrigger value="ipod">{t("translation.sync.tabIpod")}</TabsTrigger>
