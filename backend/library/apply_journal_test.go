@@ -284,3 +284,37 @@ func TestUndoRestoresMultiValueTag(t *testing.T) {
 		t.Fatalf("expected both album artists restored, got %q", got)
 	}
 }
+
+func TestBuildPlanCarriesOldTagValues(t *testing.T) {
+	root := t.TempDir()
+	album := filepath.Join(root, "Artist", "Album")
+	if err := os.MkdirAll(album, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	flac := filepath.Join(album, "01. Song.flac")
+	makeAudioFile(t, flac, map[string]string{"title": "Song", "artist": "Artist", "album": "Album"})
+
+	scan, err := ScanLibrary(context.Background(), root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := ProfileByID(ProfilePoweramp)
+	issues := DetectAll(scan, profile)
+	plan := BuildPlan(scan, profile, issues)
+	var sawAlbumArtist bool
+	for _, op := range plan.Operations {
+		if op.Type != "tags" || op.Set["ALBUMARTIST"] == "" {
+			continue
+		}
+		sawAlbumArtist = true
+		if op.Old == nil {
+			t.Fatalf("operation is missing the old value for the preview: %+v", op)
+		}
+		if _, ok := op.Old["ALBUMARTIST"]; !ok {
+			t.Fatalf("old values do not cover the changed key: %+v", op.Old)
+		}
+	}
+	if !sawAlbumArtist {
+		t.Fatalf("expected an ALBUMARTIST fix in %d operations: %+v\ntrack=%+v\nissues=%+v", len(plan.Operations), plan.Operations, scan.Tracks, issues)
+	}
+}

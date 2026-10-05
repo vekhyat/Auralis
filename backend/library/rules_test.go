@@ -286,3 +286,30 @@ func TestOrphanEmptyFolder(t *testing.T) {
 		t.Fatalf("expected empty folder issue, got %+v", issues)
 	}
 }
+
+func TestBuildPlanKeepsTagOpsFromDifferentRules(t *testing.T) {
+	// ALBUMARTIST and TRACKNUMBER both fix the same file. Both operations must
+	// survive de-duplication, and the result must not depend on map order.
+	scan := &Scan{Root: `C:\music`, Tracks: []Track{
+		{Path: `C:\music\A\L\01. x.flac`, RelPath: "A/L/01. x.flac", Format: "flac", Artist: "A", Album: "L"},
+	}}
+	profile := ProfileByID(ProfilePoweramp)
+	for i := 0; i < 20; i++ {
+		plan := BuildPlan(scan, profile, DetectAll(scan, profile))
+		var sawAlbumArtist, sawTrack bool
+		for _, op := range plan.Operations {
+			if op.Type != "tags" {
+				continue
+			}
+			if op.Set["ALBUMARTIST"] != "" {
+				sawAlbumArtist = true
+			}
+			if op.Set["TRACKNUMBER"] != "" {
+				sawTrack = true
+			}
+		}
+		if !sawAlbumArtist || !sawTrack {
+			t.Fatalf("plan %d lost an operation: %+v", i, plan.Operations)
+		}
+	}
+}

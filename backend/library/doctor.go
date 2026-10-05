@@ -3,6 +3,8 @@ package library
 import (
 	"sort"
 	"strings"
+
+	"go.senan.xyz/taglib"
 )
 
 // Severity classifies how loudly a rule should be reported.
@@ -121,19 +123,50 @@ func BuildPlan(scan *Scan, profile Profile, issues []Issue) *Plan {
 	}
 	plan := &Plan{}
 	seen := map[string]bool{}
-	for ruleID, ruleIssues := range byRule {
+	// Sort so a plan does not depend on map iteration order.
+	ruleIDs := make([]string, 0, len(byRule))
+	for ruleID := range byRule {
+		ruleIDs = append(ruleIDs, ruleID)
+	}
+	sort.Strings(ruleIDs)
+	for _, ruleID := range ruleIDs {
 		rule := RuleByID(ruleID)
 		if rule == nil || rule.Fix == nil {
 			continue
 		}
-		for _, op := range rule.Fix(scan, profile, ruleIssues) {
-			key := op.Type + "|" + op.Path + "|" + op.NewPath
+		for _, op := range rule.Fix(scan, profile, byRule[ruleID]) {
+			key := operationKey(op)
 			if seen[key] {
 				continue
 			}
 			seen[key] = true
 			plan.Operations = append(plan.Operations, op)
 		}
+	}
+	// Read the current tag values so the preview shows a real before/after
+	// diff. A file that cannot be read simply has no old value shown.
+	for i := range plan.Operations {
+		op := &plan.Operations[i]
+		if op.Type != "tags" || len(op.Set) == 0 {
+			continue
+		}
+		tags, err := taglib.ReadTags(op.Path)
+		if err != nil {
+			continue
+		}
+		old := map[string]string{}
+		byUpper := map[string]string{}
+		for key := range tags {
+			byUpper[strings.ToUpper(key)] = key
+		}
+		for _, key := range append(keysOf(op.Set), op.Delete...) {
+			if actual, ok := byUpper[strings.ToUpper(key)]; ok {
+				old[key] = firstTag(tags, actual)
+			} else {
+				old[key] = ""
+			}
+		}
+		op.Old = old
 	}
 	// A move that would overwrite another planned destination is unsafe.
 	dests := map[string]int{}
@@ -154,6 +187,27 @@ func BuildPlan(scan *Scan, profile Profile, issues []Issue) *Plan {
 		return a.Path < b.Path
 	})
 	return plan
+}
+
+// operationKey identifies an operation for plan de-duplication. The tag
+// values are part of the key: two rules can legitimately write different
+// tags to the same file.
+func operationKey(op Operation) string {
+	keys := keysOf(op.Set)
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString(op.Type)
+	b.WriteString("|")
+	b.WriteString(op.Path)
+	b.WriteString("|")
+	b.WriteString(op.NewPath)
+	for _, key := range keys {
+		b.WriteString("|")
+		b.WriteString(key)
+		b.WriteString("=")
+		b.WriteString(op.Set[key])
+	}
+	return b.String()
 }
 
 // TrackByPath finds a scanned track by its absolute path.
@@ -214,4 +268,3 @@ func mostCommon(counts map[string]int) string {
 	}
 	return best
 }
-

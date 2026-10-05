@@ -19,9 +19,13 @@ type Operation struct {
 	Path    string            `json:"path"`
 	NewPath string            `json:"new_path,omitempty"`
 	Set     map[string]string `json:"set,omitempty"` // tag key -> new value
-	Delete  []string          `json:"delete,omitempty"`
-	Reason  string            `json:"reason"`
-	Error   string            `json:"error,omitempty"`
+	// Old holds the tag values currently on disk for the same keys, so the
+	// preview can show a real before/after diff. Apply recomputes them at
+	// write time for the journal.
+	Old    map[string]string `json:"old,omitempty"`
+	Delete []string          `json:"delete,omitempty"`
+	Reason string            `json:"reason"`
+	Error  string            `json:"error,omitempty"`
 	// Size and ModTime capture the file state at scan time; Apply refuses
 	// to touch a file that changed since.
 	Size    int64 `json:"size"`
