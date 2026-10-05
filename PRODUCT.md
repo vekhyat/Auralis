@@ -28,7 +28,10 @@ lossless quality from **Tidal, Qobuz, and Amazon Music**, with extra fallbacks f
 ## What it is not
 
 - Not a streaming client. No playback beyond short previews.
-- No accounts, no paywalls, no donate/support pages, no "other projects" cross-promo.
+- No Auralis account. Optional read-only connections to listening services (Spotify, Last.fm), stored locally and encrypted.
+- No paywalls, donate/support pages, or "other projects" cross-promo.
+- Not a feed. **For You** is an opt-in download backlog (off by default): things the user
+  probably wants as files, each with the reason it was suggested.
 - Not a theme playground: identity is locked (light/dark skins of one design).
 
 ## Audience & scene
