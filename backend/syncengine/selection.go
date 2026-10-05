@@ -22,6 +22,38 @@ type SourceTrack struct {
 	Ext         string // lower-case extension with dot, e.g. ".flac"
 	DurationSec int
 	AddedAt     time.Time // when the track landed in the library; ModTime if zero
+	// Lossless reports that the source audio is lossless even when Ext is
+	// ambiguous. ALAC commonly lives in ".m4a", which AAC also uses, so the
+	// extension alone cannot decide. The library scanner populates this
+	// (and Codec) from the file's actual stream; stale tracks without it
+	// fall back to extension-only logic, which treats unknown ".m4a" as
+	// lossy (copy) rather than risk degrading audio.
+	Lossless bool
+	// Codec is the audio codec id when known, e.g. "flac", "alac", "aac",
+	// "mp3", "opus", "vorbis", "wav", "aiff". Empty means unknown.
+	Codec string
+}
+
+// IsLossless reports whether the track's audio is lossless. The explicit
+// Lossless flag wins, then the Codec id, then the file extension (with
+// ambiguous containers like ".m4a" defaulting to lossy unless the flag or
+// codec says otherwise).
+func IsLossless(tr *SourceTrack) bool {
+	if tr == nil {
+		return false
+	}
+	if tr.Lossless {
+		return true
+	}
+	if c := losslessCodec(normalizeCodec(tr.Codec)); c {
+		return true
+	}
+	if tr.Codec != "" {
+		// A known codec id that is not lossless decides the matter;
+		// do not let the extension overrule it.
+		return false
+	}
+	return losslessExts[strings.ToLower(tr.Ext)]
 }
 
 // Selection narrows which library tracks a device sync covers.

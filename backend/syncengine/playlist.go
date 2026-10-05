@@ -78,12 +78,29 @@ func repeat(s string, n int) []string {
 }
 
 // WriteDevicePlaylists regenerates every playlist through the target.
-// Only tracks whose paths exist in the manifest are included; `relFor`
-// maps a source path to its device-relative path.
+// Only tracks whose device-relative paths are both managed (present in the
+// manifest) and safe (validated to stay under the music root) are included.
+// Playlists themselves are confined to playlistDir via safePlaylistName so
+// a hostile playlist name can never escape its directory.
 func WriteDevicePlaylists(ctx context.Context, t SyncTarget, root, playlistDir string, playlists []DevicePlaylist, manifest *Manifest, staging string) error {
+	cleanDir := strings.ReplaceAll(playlistDir, "\\", "/")
+	cleanDir = path.Clean(strings.Trim(cleanDir, "/"))
+	if cleanDir == "." || cleanDir == "/" || cleanDir == "" {
+		cleanDir = "Playlists"
+	}
+	// A custom profile could set playlistDir to "../x": confine it.
+	if ValidateRemoteRel(cleanDir) != nil {
+		cleanDir = "Playlists"
+	}
 	for _, pl := range playlists {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		var tracks []PlaylistTrack
 		for _, tr := range pl.Tracks {
+			if ValidateRemoteRel(tr.Rel) != nil {
+				continue
+			}
 			if manifest.Entry(tr.Rel) != nil {
 				tracks = append(tracks, tr)
 			}
@@ -92,8 +109,11 @@ func WriteDevicePlaylists(ctx context.Context, t SyncTarget, root, playlistDir s
 		if name == "" {
 			continue
 		}
-		rel := path.Join(playlistDir, name+".m3u8")
-		content := BuildM3U8(tracks, playlistDir)
+		rel := path.Join(cleanDir, name+".m3u8")
+		if ValidateRemoteRel(rel) != nil {
+			continue
+		}
+		content := BuildM3U8(tracks, cleanDir)
 		dir := staging
 		if dir == "" {
 			var err error

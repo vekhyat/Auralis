@@ -3,6 +3,7 @@ package syncengine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path"
@@ -17,13 +18,14 @@ import (
 
 // memTarget is an in-memory SyncTarget for planner/executor tests.
 type memTarget struct {
-	mu      sync.Mutex
-	files   map[string][]byte // abs path -> contents
-	free    int64
-	puts    int
-	moves   int
-	deletes int
-	failPut error
+	mu        sync.Mutex
+	files     map[string][]byte // abs path -> contents
+	free      int64
+	puts      int
+	musicPuts int
+	moves     int
+	deletes   int
+	failPut   error
 }
 
 func newMemTarget() *memTarget {
@@ -59,6 +61,9 @@ func (m *memTarget) Put(ctx context.Context, localPath, remotePath string, progr
 	}
 	m.files[remotePath] = data
 	m.puts++
+	if !strings.Contains(remotePath, "/.auralis/") {
+		m.musicPuts++
+	}
 	if progress != nil {
 		progress(int64(len(data)))
 	}
@@ -95,7 +100,10 @@ func (m *memTarget) StatSize(ctx context.Context, remotePath string) (int64, err
 	defer m.mu.Unlock()
 	b, ok := m.files[remotePath]
 	if !ok {
-		return 0, errors.New("not found")
+		// Mirror the transport contract: "not found" maps to
+		// os.ErrNotExist so os.IsNotExist distinguishes a missing file
+		// from a disconnect, cancel, or permission failure.
+		return 0, fmt.Errorf("%s: %w", remotePath, os.ErrNotExist)
 	}
 	return int64(len(b)), nil
 }
@@ -105,7 +113,7 @@ func (m *memTarget) Open(ctx context.Context, remotePath string) (io.ReadCloser,
 	defer m.mu.Unlock()
 	b, ok := m.files[remotePath]
 	if !ok {
-		return nil, errors.New("not found")
+		return nil, fmt.Errorf("%s: %w", remotePath, os.ErrNotExist)
 	}
 	return io.NopCloser(strings.NewReader(string(b))), nil
 }
@@ -167,7 +175,7 @@ func TestPlannerAddsUpdatesMovesDeletes(t *testing.T) {
 func TestPlannerFreeSpaceRefusal(t *testing.T) {
 	profile := library.ProfileByID(library.ProfileMediaStore)
 	plan := PlanSelect(PlanOptions{
-		Tracks: []SourceTrack{track("A", "One", 1, "h1"), track("A", "Two", 2, "h2")},
+		Tracks:  []SourceTrack{track("A", "One", 1, "h1"), track("A", "Two", 2, "h2")},
 		Profile: profile, ProfileVersion: 1, Policy: FormatPolicy{Mode: "keep"}, FreeBytes: 10,
 	})
 	if !plan.Insufficient {

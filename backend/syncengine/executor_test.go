@@ -163,20 +163,38 @@ func TestExecutorResumeRebuildsManifestFromJournal(t *testing.T) {
 
 	healthy := newMemTarget()
 	healthy.files = target.memTarget.files
+	counted := &audioPutCounter{memTarget: healthy}
 	fresh := NewManifest(profile.ID)
-	ex2 := &Executor{Target: healthy, Root: "/music", Profile: profile, ProfileVersion: 1, Policy: FormatPolicy{Mode: "keep"}, JournalPath: journalPath, Concurrency: 1}
+	ex2 := &Executor{Target: counted, Root: "/music", Profile: profile, ProfileVersion: 1, Policy: FormatPolicy{Mode: "keep"}, JournalPath: journalPath, Concurrency: 1}
 	if err := ex2.Run(context.Background(), plan, fresh); err != nil {
 		t.Fatal(err)
 	}
 	if len(fresh.Entries) != len(tracks) {
 		t.Fatalf("manifest after resume has %d entries, want %d", len(fresh.Entries), len(tracks))
 	}
-	if healthy.puts > len(tracks)-2+1 { // remaining tracks + manifest upload
-		t.Fatalf("resume re-copied finished tracks: %d puts", healthy.puts)
+	// Each finished copy also uploads the device manifest, so count only
+	// audio Puts: the resume must copy just the unfinished remainder.
+	// (The crash left op 0 journaled, so ops 1..2 are the remainder.)
+	if counted.audio != len(tracks)-1 {
+		t.Fatalf("resume copied %d audio files, want %d", counted.audio, len(tracks)-1)
 	}
 	if _, err := os.Stat(journalPath); !os.IsNotExist(err) {
 		t.Fatalf("journal should be removed after success, stat err = %v", err)
 	}
+}
+
+// audioPutCounter counts Puts of audio files, excluding the per-operation
+// device-manifest uploads, so resume tests can assert unfinished work only.
+type audioPutCounter struct {
+	*memTarget
+	audio int
+}
+
+func (a *audioPutCounter) Put(ctx context.Context, localPath, remotePath string, progress func(int64)) error {
+	if !strings.HasSuffix(remotePath, ".auralis/manifest.json") {
+		a.audio++
+	}
+	return a.memTarget.Put(ctx, localPath, remotePath, progress)
 }
 
 func TestExecutorNeverOverwritesUnmanagedFiles(t *testing.T) {

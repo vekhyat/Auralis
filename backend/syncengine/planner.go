@@ -34,7 +34,9 @@ type Operation struct {
 	Remote string `json:"remote"`
 	// Size projects the space the op consumes (delivered size).
 	Size int64 `json:"size"`
-	// Track is the source track for add/update/move.
+	// Track is the source track for add/update/move/keep. Keeps carry it
+	// so playlist mapping, ModTime refreshes, and missing-file repair all
+	// work from the snapshot without rescanning.
 	Track *SourceTrack `json:"-"`
 	// TrackSourcePath lets snapshots reattach the track pointer.
 	TrackSourcePath string `json:"track_source_path,omitempty"`
@@ -66,6 +68,13 @@ type Plan struct {
 	// FreeAvailable is the device's reported free bytes at plan time.
 	FreeAvailable int64 `json:"free_available"`
 	Insufficient  bool  `json:"insufficient"`
+	// ProfileID and ProfileVersion identify the layout the plan was built
+	// for; Policy is the format policy. They bind the plan Hash to the
+	// approved settings so a settings change invalidates journal matching,
+	// and they survive Snapshot.Plan round-trips for execution.
+	ProfileID      string       `json:"profile_id,omitempty"`
+	ProfileVersion int          `json:"profile_version,omitempty"`
+	Policy         FormatPolicy `json:"policy,omitempty"`
 }
 
 // Summary renders the headline for the preview, e.g. "+312 tracks, 9.4 GB; −12 tracks".
@@ -100,11 +109,19 @@ func (p *Plan) AddBytes() int64 {
 	return total
 }
 
-// Hash returns a stable digest of the operation list for journal matching.
+// Hash returns a stable digest of the plan for journal matching. It binds
+// the operation list (including each source track's content hash) and the
+// profile/policy settings, so a retag, re-encode, or settings change can
+// never silently reuse a journal recorded for different bytes.
 func (p *Plan) Hash() string {
 	sum := sha256.New()
+	fmt.Fprintf(sum, "profile:%s|%d|%s\n", p.ProfileID, p.ProfileVersion, p.Policy.SettingsKey())
 	for _, op := range p.Ops {
-		fmt.Fprintf(sum, "%s|%s|%s\n", op.Kind, op.Source, op.Remote)
+		trackHash := ""
+		if op.Track != nil {
+			trackHash = op.Track.Hash
+		}
+		fmt.Fprintf(sum, "%s|%s|%s|%s\n", op.Kind, op.Source, op.Remote, trackHash)
 	}
 	return hex.EncodeToString(sum.Sum(nil))
 }
@@ -120,6 +137,12 @@ type PlanOptions struct {
 }
 
 // Plan computes the diff between the desired selection and the manifest.
+// Manifest entries with unsafe remote paths are ignored: they are left
+// alone on the device and never become delete or move sources, so a corrupt
+// or hostile manifest cannot drive the engine outside the music root.
+// Operation Size is the source file size, an upper bound on the delivered
+// bytes when a transcode policy shrinks the file. Free-space planning is
+// therefore conservative for transcodes, never optimistic.
 func PlanSelect(opts PlanOptions) *Plan {
 	m := opts.Manifest
 	if m == nil {
@@ -134,13 +157,30 @@ func PlanSelect(opts PlanOptions) *Plan {
 			Album: tr.Album, Year: tr.Year, TrackNumber: tr.TrackNumber,
 			DiscNumber: tr.DiscNumber, DiscTotal: tr.DiscTotal,
 		})
-		rel = uniqueRel(takenFold, opts.Profile.SanitizeRelativePath(rel+opts.Policy.RemoteExt(tr.Ext)))
+		// Track-aware extension so ALAC-in-".m4a" lands on the transcoded
+		// name instead of colliding with a lossy ".m4a" copy.
+		rel = uniqueRel(takenFold, opts.Profile.SanitizeRelativePath(rel+opts.Policy.RemoteExtForTrack(tr)))
+		if err := ValidateRemoteRel(rel); err != nil {
+			// SanitizeRelativePath should never produce this; skipping
+			// beats syncing to an unmanaged path.
+			continue
+		}
 		takenFold[strings.ToLower(rel)] = true
 		desired[rel] = tr
 	}
+	safeManifest := map[string]ManifestEntry{}
+	for _, rel := range m.SortedPaths() {
+		if ValidateRemoteRel(rel) != nil {
+			continue
+		}
+		safeManifest[rel] = m.Entries[rel]
+	}
 
 	// Pass 1: same remote path in the manifest means keep or update.
-	plan := &Plan{FreeAvailable: opts.FreeBytes}
+	plan := &Plan{
+		FreeAvailable: opts.FreeBytes,
+		ProfileID:     opts.Profile.ID, ProfileVersion: opts.ProfileVersion, Policy: opts.Policy,
+	}
 	placed := map[*SourceTrack]bool{}
 	handledManifestRels := map[string]bool{}
 	for _, rel := range sortedKeys(desired) {
@@ -165,9 +205,9 @@ func PlanSelect(opts PlanOptions) *Plan {
 	// update instead, which pass 1 would have classified at the same rel;
 	// here the source is stale for the new settings, so we re-copy.
 	byHash := map[string][]string{}
-	for _, rel := range m.SortedPaths() {
+	for _, rel := range sortedManifestKeys(safeManifest) {
 		if !handledManifestRels[rel] {
-			byHash[m.Entries[rel].Hash] = append(byHash[m.Entries[rel].Hash], rel)
+			byHash[safeManifest[rel].Hash] = append(byHash[safeManifest[rel].Hash], rel)
 		}
 	}
 	for _, rel := range sortedKeys(desired) {
@@ -183,7 +223,7 @@ func PlanSelect(opts PlanOptions) *Plan {
 		old := candidates[0]
 		byHash[tr.Hash] = candidates[1:]
 		handledManifestRels[old] = true
-		oldEntry := m.Entries[old]
+		oldEntry := safeManifest[old]
 		if oldEntry.ProfileID == opts.Profile.ID && oldEntry.ProfileVersion == opts.ProfileVersion &&
 			oldEntry.Transcode == opts.Policy.SettingsKey() {
 			plan.addOp(OpMove, old, rel, tr)
@@ -198,14 +238,14 @@ func PlanSelect(opts PlanOptions) *Plan {
 	}
 
 	// Pass 3: manifest entries no longer desired are deleted (to trash).
-	for _, rel := range m.SortedPaths() {
+	for _, rel := range sortedManifestKeys(safeManifest) {
 		if handledManifestRels[rel] {
 			continue
 		}
 		if _, wanted := desired[rel]; wanted {
 			continue
 		}
-		entry := m.Entries[rel]
+		entry := safeManifest[rel]
 		plan.addOp(OpDelete, rel, rel, nil)
 		plan.Ops[len(plan.Ops)-1].Album = entry.Album
 		plan.Ops[len(plan.Ops)-1].Artist = entry.Artist
@@ -290,6 +330,15 @@ func sortedKeys(m map[string]*SourceTrack) []string {
 	return keys
 }
 
+func sortedManifestKeys(m map[string]ManifestEntry) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 // HumanBytes renders bytes compactly for previews.
 func HumanBytes(v int64) string {
 	const unit = 1024
@@ -331,8 +380,3 @@ func SanitizedManifestEntry(tr *SourceTrack, rel, profileID string, profileVersi
 		Title: tr.Title, Artist: tr.Artist, Album: tr.Album, DurationSec: tr.DurationSec,
 	}
 }
-
-
-
-
-

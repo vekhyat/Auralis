@@ -13,9 +13,12 @@ const hashSampleBytes = 64 * 1024
 
 // HashSource computes a cheap, stable content hash of a library file.
 //
-// Choice: SHA-256 over (file size || mtime unix seconds || first 64 KiB ||
-// last 64 KiB). Full-file hashing was rejected because a first sync of a
-// large library would read every byte twice (once for hashing, once for
+// Choice: SHA-256 over (file size || mtime as provided by the caller ||
+// first 64 KiB || last 64 KiB). The library scanner passes
+// info.ModTime().UnixNano() and file size, so sub-second edits change the
+// hash; tests may pass Unix seconds and stay consistent within their own
+// runs. Full-file hashing was rejected because a first sync of a large
+// library would read every byte twice (once for hashing, once for
 // copying); the first/last 64 KiB window catches re-tags and re-encodes
 // (tag edits touch the head on FLAC/MP3, new audio data changes the tail),
 // while size+mtime catches everything else in practice. The hash is
