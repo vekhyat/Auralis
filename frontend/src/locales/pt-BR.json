@@ -1487,7 +1487,8 @@
       "lastfmUsernamePlaceholder": "Seu nome de usuário do Last.fm",
       "lastfmApiKeyPlaceholder": "Sua chave de API do Last.fm",
       "selectExportFolder": "Escolher pasta de exportação",
-      "spotifyLoopbackHint": "O Spotify permite qualquer porta para este endereço de loopback. O Auralis escolhe uma porta disponível ao conectar."
+      "spotifyLoopbackHint": "O Spotify permite qualquer porta para este endereço de loopback. O Auralis escolhe uma porta disponível ao conectar.",
+      "save": "Salvar"
     }
   },
   "literal": {

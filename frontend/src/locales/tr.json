@@ -1487,7 +1487,8 @@
       "lastfmUsernamePlaceholder": "Last.fm kullanıcı adınız",
       "lastfmApiKeyPlaceholder": "Last.fm API anahtarınız",
       "selectExportFolder": "Dışa aktarma klasörü seç",
-      "spotifyLoopbackHint": "Spotify bu geri döngü adresi için herhangi bir bağlantı noktasına izin verir. Auralis bağlanırken kullanılabilir bir bağlantı noktası seçer."
+      "spotifyLoopbackHint": "Spotify bu geri döngü adresi için herhangi bir bağlantı noktasına izin verir. Auralis bağlanırken kullanılabilir bir bağlantı noktası seçer.",
+      "save": "Kaydet"
     }
   },
   "literal": {

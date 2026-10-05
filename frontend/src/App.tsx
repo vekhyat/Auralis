@@ -227,6 +227,9 @@ function App() {
     const [pendingPageChange, setPendingPageChange] = useState<ShellPage | null>(null);
     const [showUnsavedChangesDialog, setShowUnsavedChangesDialog] = useState(false);
     const [resetSettingsFn, setResetSettingsFn] = useState<(() => void) | null>(null);
+    const registerSettingsReset = useCallback((reset: () => void) => {
+        setResetSettingsFn(() => reset);
+    }, []);
     const [forYouEnabled, setForYouEnabled] = useState(false);
     const [settingsInitialSection, setSettingsInitialSection] = useState<"connections" | undefined>();
 
@@ -808,6 +811,7 @@ function App() {
             return;
         }
         setCurrentPage(page);
+        if (page !== "settings") setSettingsInitialSection(undefined);
     };
     const handlePageChange = (page: ShellPage) => {
         if (currentPage === "settings" && hasUnsavedSettings && page !== "settings") {
@@ -877,7 +881,7 @@ function App() {
                     handlePageChange("settings");
                 }} />);
             case "settings":
-                return renderSecondary(<secondaryPages.settings initialSection={settingsInitialSection} onUnsavedChangesChange={setHasUnsavedSettings} onResetRequest={setResetSettingsFn} onForYouToggle={setForYouEnabled}/>);
+                return renderSecondary(<secondaryPages.settings initialSection={settingsInitialSection} onUnsavedChangesChange={setHasUnsavedSettings} onResetRequest={registerSettingsReset} onForYouToggle={setForYouEnabled}/>);
             case "debug":
                 return renderSecondary(<secondaryPages.debug />);
             case "devices":

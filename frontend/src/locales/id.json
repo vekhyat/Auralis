@@ -1487,7 +1487,8 @@
       "lastfmUsernamePlaceholder": "Nama pengguna Last.fm Anda",
       "lastfmApiKeyPlaceholder": "Kunci API Last.fm Anda",
       "selectExportFolder": "Pilih folder ekspor",
-      "spotifyLoopbackHint": "Spotify mengizinkan port apa pun untuk alamat loopback ini. Auralis memilih port yang tersedia saat Anda terhubung."
+      "spotifyLoopbackHint": "Spotify mengizinkan port apa pun untuk alamat loopback ini. Auralis memilih port yang tersedia saat Anda terhubung.",
+      "save": "Simpan"
     }
   },
   "literal": {

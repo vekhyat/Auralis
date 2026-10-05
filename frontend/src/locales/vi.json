@@ -1487,7 +1487,8 @@
       "lastfmUsernamePlaceholder": "Tên người dùng Last.fm của bạn",
       "lastfmApiKeyPlaceholder": "Khóa API Last.fm của bạn",
       "selectExportFolder": "Chọn thư mục xuất dữ liệu",
-      "spotifyLoopbackHint": "Spotify cho phép mọi cổng cho địa chỉ vòng lặp cục bộ này. Auralis chọn một cổng khả dụng khi bạn kết nối."
+      "spotifyLoopbackHint": "Spotify cho phép mọi cổng cho địa chỉ vòng lặp cục bộ này. Auralis chọn một cổng khả dụng khi bạn kết nối.",
+      "save": "Lưu"
     }
   },
   "literal": {

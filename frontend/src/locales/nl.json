@@ -1487,7 +1487,8 @@
       "lastfmUsernamePlaceholder": "Je Last.fm-gebruikersnaam",
       "lastfmApiKeyPlaceholder": "Je Last.fm-API-sleutel",
       "selectExportFolder": "Exportmap kiezen",
-      "spotifyLoopbackHint": "Spotify staat elke poort toe voor dit loopbackadres. Auralis kiest een beschikbare poort wanneer je verbinding maakt."
+      "spotifyLoopbackHint": "Spotify staat elke poort toe voor dit loopbackadres. Auralis kiest een beschikbare poort wanneer je verbinding maakt.",
+      "save": "Opslaan"
     }
   },
   "literal": {

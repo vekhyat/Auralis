@@ -338,7 +338,7 @@ export function ListeningConnectionsSettings({ onForYouToggle }: ListeningConnec
                             onClick={handleSaveSpotifyClientId}
                             disabled={!spotifyClientId.trim() || savingClientId || isConnectingSpotify}
                         >
-                            {t("translation.common.save")}
+                            {t("translation.connections.save")}
                         </Button>
                     </div>
                 </div>

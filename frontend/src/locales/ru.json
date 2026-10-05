@@ -1487,7 +1487,8 @@
       "lastfmUsernamePlaceholder": "Ваше имя пользователя Last.fm",
       "lastfmApiKeyPlaceholder": "Ваш ключ API Last.fm",
       "selectExportFolder": "Выбрать папку экспорта",
-      "spotifyLoopbackHint": "Spotify допускает любой порт для этого адреса обратной петли. При подключении Auralis выбирает свободный порт."
+      "spotifyLoopbackHint": "Spotify допускает любой порт для этого адреса обратной петли. При подключении Auralis выбирает свободный порт.",
+      "save": "Сохранить"
     }
   },
   "literal": {

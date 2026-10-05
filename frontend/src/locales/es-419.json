@@ -1487,7 +1487,8 @@
       "lastfmUsernamePlaceholder": "Tu nombre de usuario de Last.fm",
       "lastfmApiKeyPlaceholder": "Tu clave de API de Last.fm",
       "selectExportFolder": "Elegir carpeta de exportación",
-      "spotifyLoopbackHint": "Spotify permite cualquier puerto para esta dirección de bucle local. Auralis elige un puerto disponible al conectarse."
+      "spotifyLoopbackHint": "Spotify permite cualquier puerto para esta dirección de bucle local. Auralis elige un puerto disponible al conectarse.",
+      "save": "Guardar"
     }
   },
   "literal": {
