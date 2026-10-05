@@ -125,13 +125,13 @@ func TestLastFMSource(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Test Pull (top artists, loved tracks, recent tracks)
+	// Test Pull (top artists, top albums, loved tracks, recent tracks)
 	events, err := source.Pull(ctx, time.Time{})
 	if err != nil {
 		t.Fatalf("Pull failed: %v", err)
 	}
-	if len(events) != 3 {
-		t.Fatalf("expected 3 events from pull, got %d", len(events))
+	if len(events) != 4 {
+		t.Fatalf("expected 4 events from pull, got %d", len(events))
 	}
 
 	// Test GetSimilar

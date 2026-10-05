@@ -406,6 +406,11 @@ func (s *LastFMSource) Pull(ctx context.Context, since time.Time) ([]TasteEvent,
 		return events, err
 	}
 	events = append(events, top...)
+	albums, err := s.TopAlbums(ctx, "overall", 100)
+	if err != nil {
+		return events, err
+	}
+	events = append(events, albums...)
 	loved, err := s.LovedTracks(ctx, 200)
 	if err != nil {
 		return events, err
