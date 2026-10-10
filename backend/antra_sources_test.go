@@ -126,12 +126,19 @@ func TestSanitizeDownloaderIncludesNewSources(t *testing.T) {
 	if sanitizeDownloaderValue("jiosaavn") != "jiosaavn" {
 		t.Fatal("jiosaavn")
 	}
+	for _, retired := range []string{"tidal", "amazon", " TIDAL "} {
+		if got := sanitizeDownloaderValue(retired); got != "auto" {
+			t.Fatalf("retired downloader %q kept as %q", retired, got)
+		}
+	}
 }
 
-func TestSanitizeAutoOrderKeepsExtraSources(t *testing.T) {
-	got := sanitizeAutoOrderValue("tidal-qobuz-amazon-deezer")
-	if got != "tidal-qobuz-amazon-deezer" {
+func TestSanitizeAutoOrderDropsRetiredSources(t *testing.T) {
+	if got := sanitizeAutoOrderValue("tidal-qobuz-amazon-deezer"); got != "qobuz-deezer" {
 		t.Fatalf("got %q", got)
+	}
+	if got := sanitizeAutoOrderValue("tidal-amazon"); got != "qobuz-deezer-apple-jiosaavn" {
+		t.Fatalf("all-retired order fell back to %q", got)
 	}
 }
 

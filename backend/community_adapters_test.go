@@ -313,7 +313,7 @@ func TestCommunitySubsonicMatchesAndAuthenticatesWithoutSendingPassword(t *testi
 func TestCommunityHTMLInterstitialIsReportedAsAuthenticationRequired(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, "<!doctype html><html><head><title>Redirecting...</title></head><body>Loading</body></html>")
+		fmt.Fprint(w, "<!doctype html><html><head><title>Just a moment...</title></head><body>cf-challenge</body></html>")
 	}))
 	defer server.Close()
 	source := CommunitySource{BaseURL: server.URL}

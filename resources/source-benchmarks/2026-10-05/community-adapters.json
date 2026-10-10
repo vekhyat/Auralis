@@ -1,0 +1,181 @@
+[
+  {
+    "id": "bryan-qobuz",
+    "state": "not_configured",
+    "message": "Requires a configured server",
+    "latency_ms": 0,
+    "audio_verified": false,
+    "checked_at": ""
+  },
+  {
+    "id": "dab-xyz",
+    "state": "failed",
+    "message": "source network request failed: request timed out",
+    "latency_ms": 8000.1943,
+    "audio_verified": false,
+    "checked_at": "2026-10-05T09:34:30Z"
+  },
+  {
+    "id": "dab-yeet",
+    "state": "failed",
+    "message": "source returned a non-JSON response",
+    "latency_ms": 1433.4774,
+    "audio_verified": false,
+    "checked_at": "2026-10-05T09:34:30Z"
+  },
+  {
+    "id": "hifi-api.monochrome.tf",
+    "state": "failed",
+    "message": "source network request failed: connection failed",
+    "latency_ms": 26.7594,
+    "audio_verified": false,
+    "checked_at": "2026-10-05T09:34:22Z"
+  },
+  {
+    "id": "hifi-arran.monochrome.tf",
+    "state": "failed",
+    "message": "source network request failed: connection failed",
+    "latency_ms": 40.3,
+    "audio_verified": false,
+    "checked_at": "2026-10-05T09:34:22Z"
+  },
+  {
+    "id": "hifi-eu-central.monochrome.tf",
+    "state": "failed",
+    "message": "source network request failed: connection failed",
+    "latency_ms": 40.8531,
+    "audio_verified": false,
+    "checked_at": "2026-10-05T09:34:22Z"
+  },
+  {
+    "id": "hifi-hifi.p1nkhamster.xyz",
+    "state": "failed",
+    "message": "source network request failed: connection failed",
+    "latency_ms": 90.0376,
+    "audio_verified": false,
+    "checked_at": "2026-10-05T09:34:30Z"
+  },
+  {
+    "id": "hifi-hund.qqdl.site",
+    "state": "failed",
+    "message": "source network request failed: request timed out",
+    "latency_ms": 8000.5261,
+    "audio_verified": false,
+    "checked_at": "2026-10-05T09:34:30Z"
+  },
+  {
+    "id": "hifi-katze.qqdl.site",
+    "state": "failed",
+    "message": "source network request failed: request timed out",
+    "latency_ms": 8001.1667,
+    "audio_verified": false,
+    "checked_at": "2026-10-05T09:34:23Z"
+  },
+  {
+    "id": "hifi-maus.qqdl.site",
+    "state": "failed",
+    "message": "source network request failed: request timed out",
+    "latency_ms": 8000.4007,
+    "audio_verified": false,
+    "checked_at": "2026-10-05T09:34:22Z"
+  },
+  {
+    "id": "hifi-monochrome-api.samidy.com",
+    "state": "authentication_required",
+    "message": "source requires an authorized session or verification (HTTP 401)",
+    "latency_ms": 1284.422,
+    "audio_verified": false,
+    "checked_at": "2026-10-05T09:34:31Z",
+    "action": "verify"
+  },
+  {
+    "id": "hifi-tidal.kinoplus.online",
+    "state": "failed",
+    "message": "source network request failed: connection failed",
+    "latency_ms": 160.313,
+    "audio_verified": false,
+    "checked_at": "2026-10-05T09:34:30Z"
+  },
+  {
+    "id": "hifi-triton.squid.wtf",
+    "state": "failed",
+    "message": "source network request failed: connection failed",
+    "latency_ms": 385.8979,
+    "audio_verified": false,
+    "checked_at": "2026-10-05T09:34:22Z"
+  },
+  {
+    "id": "hifi-us-west.monochrome.tf",
+    "state": "failed",
+    "message": "source network request failed: connection failed",
+    "latency_ms": 40.8531,
+    "audio_verified": false,
+    "checked_at": "2026-10-05T09:34:22Z"
+  },
+  {
+    "id": "hifi-vogel.qqdl.site",
+    "state": "failed",
+    "message": "source network request failed: request timed out",
+    "latency_ms": 8000.3683,
+    "audio_verified": false,
+    "checked_at": "2026-10-05T09:34:22Z"
+  },
+  {
+    "id": "hifi-wolf.qqdl.site",
+    "state": "failed",
+    "message": "source network request failed: request timed out",
+    "latency_ms": 8000.2676,
+    "audio_verified": false,
+    "checked_at": "2026-10-05T09:34:22Z"
+  },
+  {
+    "id": "lucida-amazon",
+    "state": "authentication_required",
+    "message": "source requires an authorized session or verification (HTTP 403)",
+    "latency_ms": 1013.2995,
+    "audio_verified": false,
+    "checked_at": "2026-10-05T09:34:22Z",
+    "action": "verify"
+  },
+  {
+    "id": "lucida-qobuz",
+    "state": "authentication_required",
+    "message": "source requires an authorized session or verification (HTTP 403)",
+    "latency_ms": 202.4332,
+    "audio_verified": false,
+    "checked_at": "2026-10-05T09:34:31Z",
+    "action": "verify"
+  },
+  {
+    "id": "octo-fiesta",
+    "state": "not_configured",
+    "message": "Requires a configured server",
+    "latency_ms": 0,
+    "audio_verified": false,
+    "checked_at": ""
+  },
+  {
+    "id": "qobuz-dl",
+    "state": "not_configured",
+    "message": "Requires a configured server",
+    "latency_ms": 0,
+    "audio_verified": false,
+    "checked_at": ""
+  },
+  {
+    "id": "qobuz-rest",
+    "state": "not_configured",
+    "message": "Requires a configured server",
+    "latency_ms": 0,
+    "audio_verified": false,
+    "checked_at": ""
+  },
+  {
+    "id": "qobuz-squid",
+    "state": "failed",
+    "message": "source network request failed: connection failed",
+    "latency_ms": 424.7944,
+    "audio_verified": false,
+    "checked_at": "2026-10-05T09:34:30Z"
+  }
+]

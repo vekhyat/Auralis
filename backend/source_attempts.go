@@ -33,9 +33,17 @@ func runDownloadSources(service, quality string, expectedSeconds int, attempts [
 			duration, probeErr := readAudioDuration(path)
 			if probeErr != nil || duration <= 0 {
 				err = fmt.Errorf("%s returned unreadable audio", id)
+			} else if duration <= previewMaxSeconds {
+				err = fmt.Errorf("%s returned a preview without a full-track duration", id)
 			} else {
-				validated = duration > previewMaxSeconds
+				validated = true
 			}
+		}
+		if err == nil && !validated {
+			err = fmt.Errorf("%s returned no validated audio file", id)
+		}
+		if err == nil && validated {
+			err = requireCommunityCodec(path, quality)
 		}
 		if err == nil && validated && sourceQuality(quality) == "24" {
 			metadata, probeErr := GetMetadataWithFFprobe(path)
@@ -64,32 +72,37 @@ func runDownloadSources(service, quality string, expectedSeconds int, attempts [
 	return "", errors.Join(failures...)
 }
 
-func (t *TidalDownloader) downloadRankedTidal(trackID int64, quality, dest string, hints ...SourceTrack) (string, error) {
-	viaURL := func(resolve func(int64, string) (string, error)) func() (string, error) {
-		return func() (string, error) {
-			raw, err := resolve(trackID, quality)
-			if err == nil {
-				err = t.DownloadFile(raw, dest, quality)
-			}
-			if err != nil {
-				cleanupTidalDownloadArtifacts(dest)
-			}
-			return dest, err
-		}
-	}
-	track := SourceTrack{ID: fmt.Sprint(trackID)}
-	if len(hints) > 0 {
-		track = hints[0]
-		track.ID = fmt.Sprint(trackID)
-	}
+// tidalAutoAttempts lists the routes a Tidal download may try: the built-in
+// Antra route plus explicitly enabled custom servers. Retired community/Zarz
+// mirrors are never appended, so automatic routing cannot fall back to them.
+func tidalAutoAttempts(t *TidalDownloader, trackID int64, quality, dest string, track SourceTrack) []sourceDownloadAttempt {
 	attempts := []sourceDownloadAttempt{
 		{"antra-tidal", func() (string, error) {
 			return antraStreamToFile("tidal", fmt.Sprint(trackID), dest, antraQualityQuery("tidal", quality))
 		}},
 	}
-	attempts = append(attempts, communitySourceAttempts("tidal", quality, dest, track)...)
-	attempts = append(attempts, sourceDownloadAttempt{"community-tidal", viaURL(t.getTidalCommunityDownloadURL)}, sourceDownloadAttempt{"zarz-tidal", viaURL(t.getTidalZarzDownloadURL)})
-	return runDownloadSources("tidal", quality, track.Duration, attempts)
+	return append(attempts, communitySourceAttempts("tidal", quality, dest, track)...)
+}
+
+func (t *TidalDownloader) downloadRankedTidal(trackID int64, quality, dest string, hints ...SourceTrack) (string, error) {
+	track := SourceTrack{ID: fmt.Sprint(trackID)}
+	if len(hints) > 0 {
+		track = hints[0]
+		track.ID = fmt.Sprint(trackID)
+	}
+	return runDownloadSources("tidal", quality, track.Duration, tidalAutoAttempts(t, trackID, quality, dest, track))
+}
+
+// qobuzAutoAttempts lists the routes a Qobuz download may try: the built-in
+// Antra route plus explicitly enabled custom servers. Retired community/Zarz
+// mirrors are never appended, so automatic routing cannot fall back to them.
+func qobuzAutoAttempts(q *QobuzDownloader, trackID int64, qual, dest string, track SourceTrack) []sourceDownloadAttempt {
+	attempts := []sourceDownloadAttempt{
+		{"antra-qobuz", func() (string, error) {
+			return antraStreamToFile("qobuz", fmt.Sprint(trackID), dest, antraQualityQuery("qobuz", qual))
+		}},
+	}
+	return append(attempts, communitySourceAttempts("qobuz", qual, dest, track)...)
 }
 
 func (q *QobuzDownloader) downloadRankedQobuz(trackID int64, quality, dest string, expectedSeconds int, allowFallback bool, hints ...SourceTrack) (string, error) {
@@ -131,14 +144,7 @@ func (q *QobuzDownloader) downloadRankedQobuz(trackID int64, quality, dest strin
 		track.Duration = expectedSeconds
 	}
 	for _, qual := range qualities {
-		attempts := []sourceDownloadAttempt{
-			{"antra-qobuz", func() (string, error) {
-				return antraStreamToFile("qobuz", fmt.Sprint(trackID), dest, antraQualityQuery("qobuz", qual))
-			}},
-		}
-		attempts = append(attempts, communitySourceAttempts("qobuz", qual, dest, track)...)
-		attempts = append(attempts, sourceDownloadAttempt{"community-qobuz", viaURL(q.getQobuzCommunityDownloadURL, qual)}, sourceDownloadAttempt{"zarz-qobuz", viaURL(q.getQobuzZarzDownloadURL, qual)})
-		path, err := runDownloadSources("qobuz", qual, expectedSeconds, attempts)
+		path, err := runDownloadSources("qobuz", qual, expectedSeconds, qobuzAutoAttempts(q, trackID, qual, dest, track))
 		if err == nil || IsDownloadCancelledError(err) {
 			return path, err
 		}

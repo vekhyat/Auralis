@@ -36,23 +36,29 @@ type DownloadSource struct {
 	URL     string `json:"url,omitempty"`
 }
 
-// The registry lists implemented routes. Only validated audio improves their
-// download priority; presence here does not assert hosted availability.
+// Only routes with authenticated full-audio proof take part in automatic
+// selection: Antra Qobuz/Deezer/Apple and official JioSaavn. Retired built-in
+// routes (Tidal, Amazon, community/Zarz mirrors, saavn.dev) keep their
+// standalone implementations for compatibility and custom configuration but
+// are no longer advertised here. Presence here does not assert hosted
+// availability; only validated audio improves download priority.
 func DownloadSources() []DownloadSource {
-	var out []DownloadSource
-	for _, service := range []string{"tidal", "qobuz", "amazon", "deezer", "apple"} {
-		out = append(out, DownloadSource{ID: "antra-" + service, Service: service, Name: "Antra / " + service, Role: "download"})
-		if service == "tidal" || service == "qobuz" || service == "amazon" {
-			out = append(out, DownloadSource{ID: "community-" + service, Service: service, Name: "Community / " + service, Role: "download"}, DownloadSource{ID: "zarz-" + service, Service: service, Name: "Zarz / " + service, Role: "download"})
-		}
+	out := builtInDownloadSources()
+	reserved := map[string]bool{}
+	for _, source := range append(builtInDownloadSources(), ResourceSources()...) {
+		reserved[source.ID] = true
 	}
-	out = append(out,
-		DownloadSource{ID: "jiosaavn-official", Service: "jiosaavn", Name: "JioSaavn", Role: "download", URL: jioSaavnOfficialAPI},
-		DownloadSource{ID: "jiosaavn-community", Service: "jiosaavn", Name: "Saavn.dev", Role: "download", URL: jioSaavnCommunityAPI},
-	)
 	if sources, err := ListCommunitySources(); err == nil {
 		for _, source := range sources {
-			if source.Enabled && source.BaseURL != "" {
+			// A configured row whose ID collides with a built-in download or
+			// resource ID must not shadow or duplicate the built-in: the
+			// built-in definition wins and the configured row stays out of
+			// this registry (its downloads still run through
+			// communitySourceAttempts via ListCommunitySources). This is a
+			// merge-time skip, not a validation error: listCommunitySourcesUnlocked
+			// rejects the whole list when any stored row fails validation, so
+			// a new rejection there would break existing installs.
+			if source.Enabled && source.BaseURL != "" && !reserved[source.ID] {
 				out = append(out, DownloadSource{ID: source.ID, Service: source.Service, Name: source.Name, Role: "download", URL: source.BaseURL})
 			}
 		}
@@ -60,11 +66,21 @@ func DownloadSources() []DownloadSource {
 	return out
 }
 
+// builtInDownloadSources is the single definition of the built-in download
+// routes. Connection checks and the collision guard above key on these exact
+// IDs; a configured source never gains built-in behaviour from its ID prefix.
+func builtInDownloadSources() []DownloadSource {
+	return []DownloadSource{
+		{ID: "antra-qobuz", Service: "qobuz", Name: "Antra / qobuz", Role: "download"},
+		{ID: "antra-deezer", Service: "deezer", Name: "Antra / deezer", Role: "download"},
+		{ID: "antra-apple", Service: "apple", Name: "Antra / apple", Role: "download"},
+		{ID: "jiosaavn-official", Service: "jiosaavn", Name: "JioSaavn", Role: "download", URL: jioSaavnOfficialAPI},
+	}
+}
+
 func ResourceSources() []DownloadSource {
 	return []DownloadSource{
 		{ID: "resource-tidal", Service: "tidal", Name: "TIDAL catalog", Role: "catalog", URL: tidalPublicAPIBase},
-		{ID: "samidy-catalog", Service: "tidal", Name: "Samidy Hi-Fi catalog", Role: "catalog", URL: "https://monochrome-api.samidy.com"},
-		{ID: "resource-qobuz", Service: "qobuz", Name: "Qobuz catalog", Role: "catalog", URL: qobuzAPIBaseURL},
 		{ID: "resource-deezer", Service: "deezer", Name: "Deezer catalog", Role: "catalog", URL: "https://api.deezer.com"},
 		{ID: "resource-musicbrainz", Name: "MusicBrainz", Role: "metadata", URL: musicBrainzAPIBase},
 		{ID: "resource-lrclib", Name: "LRCLIB", Role: "lyrics", URL: "https://lrclib.net"},
@@ -184,7 +200,42 @@ func RankedSourceIDs(ids []string, quality string) []string {
 	return rankSources(ids, quality, SourceBenchmarks(), time.Now())
 }
 
+// supportedAutoServices lists the only services automatic download
+// selection may use. Every entry has authenticated full-audio proof; retired
+// built-in routes are filtered at ranking time so old saved orders and stale
+// callers cannot reintroduce them into auto routing.
+var supportedAutoServices = []string{"qobuz", "deezer", "apple", "jiosaavn"}
+
+var defaultAutoServices = []string{"qobuz", "deezer", "apple", "jiosaavn"}
+
+func isSupportedAutoService(service string) bool {
+	for _, supported := range supportedAutoServices {
+		if service == supported {
+			return true
+		}
+	}
+	return false
+}
+
+func filterSupportedAutoServices(services []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(services))
+	for _, service := range services {
+		normalized := strings.ToLower(strings.TrimSpace(service))
+		if normalized == "" || seen[normalized] || !isSupportedAutoService(normalized) {
+			continue
+		}
+		seen[normalized] = true
+		out = append(out, normalized)
+	}
+	return out
+}
+
 func RankedDownloadServices(services []string, quality string) []string {
+	services = filterSupportedAutoServices(services)
+	if len(services) == 0 {
+		services = append([]string(nil), defaultAutoServices...)
+	}
 	rows := SourceBenchmarks()
 	var best []SourceBenchmark
 	for _, service := range services {

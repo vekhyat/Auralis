@@ -23,6 +23,7 @@ const (
 )
 
 var (
+	errInvalidCommunityCredential           = errors.New("credential contains invalid characters")
 	errBrowserSessionPersistenceUnavailable = errors.New("browser session persistence is unavailable on this platform")
 	errInAppVerificationUnavailable         = errors.New("in-app source verification is unavailable on this platform")
 )
@@ -724,7 +725,7 @@ func applyCommunityRequestCredentials(req *http.Request, source CommunitySource)
 	if source.CredentialEnv != "" {
 		credential = os.Getenv(source.CredentialEnv)
 		if strings.ContainsAny(credential, "\r\n") {
-			return fmt.Errorf("credential contains invalid characters")
+			return errInvalidCommunityCredential
 		}
 	}
 	if credential != "" && sameCommunityOrigin(source.BaseURL, req.URL.String()) {
@@ -760,7 +761,7 @@ func communityCookieHeader(source CommunitySource, rawURL string) (string, error
 	if source.CredentialEnv != "" {
 		credential = os.Getenv(source.CredentialEnv)
 		if strings.ContainsAny(credential, "\r\n") {
-			return "", fmt.Errorf("credential contains invalid characters")
+			return "", errInvalidCommunityCredential
 		}
 	}
 	if credential != "" && source.CredentialType == "cookie" {

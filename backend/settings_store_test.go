@@ -52,7 +52,7 @@ func TestLoadSettingsDoesNotRewrite(t *testing.T) {
 func TestMigrateSettingsIsAtomicAndIdempotent(t *testing.T) {
 	dir := isolateAppData(t)
 	path := filepath.Join(dir, "config.json")
-	original := []byte(`{"downloader":"QOBUZ","autoOrder":"qobuz-tidal","downloadPath":"D:\\Music","customTidalApi":"https://tidal.example/api","customThing":true}`)
+	original := []byte(`{"downloader":"QOBUZ","autoOrder":"qobuz-deezer","downloadPath":"D:\\Music","customTidalApi":"https://tidal.example/api","customThing":true}`)
 	if err := os.WriteFile(path, original, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestMigrateSettingsIsAtomicAndIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded["downloader"] != "qobuz" || loaded["autoOrder"] != "qobuz-tidal" {
+	if loaded["downloader"] != "qobuz" || loaded["autoOrder"] != "qobuz-deezer" {
 		t.Fatalf("sanitized settings = %#v", loaded)
 	}
 	if loaded["customTidalApi"] != "https://tidal.example/api" {
@@ -116,9 +116,9 @@ func TestSaveSettingsRoundTripUnderContention(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			err := SaveConfigSettings(map[string]interface{}{
-				"downloader":   "tidal",
+				"downloader":   "deezer",
 				"downloadPath": "D:\\Music",
-				"autoOrder":    "tidal-qobuz-amazon",
+				"autoOrder":    "deezer-qobuz-apple",
 				"generation":   i,
 			})
 			if err != nil {
@@ -147,7 +147,7 @@ func TestSaveSettingsRoundTripUnderContention(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded["downloader"] != "tidal" {
+	if loaded["downloader"] != "deezer" {
 		t.Fatalf("downloader = %#v", loaded["downloader"])
 	}
 	matches, err := filepath.Glob(filepath.Join(dir, ".auralis-*.tmp"))
