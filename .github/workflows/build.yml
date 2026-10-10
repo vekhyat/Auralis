@@ -77,19 +77,30 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm run generate-icon
 
-      - name: Build application
-        run: wails build -platform windows/amd64
+      - name: Install NSIS
+        run: |
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            choco install nsis -y --no-progress
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            "${env:ProgramFiles(x86)}\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          }
+
+      - name: Build application and installer
+        run: wails build -platform windows/amd64 -nsis
 
       - name: Prepare artifacts
         run: |
           mkdir -p dist
           Copy-Item -Path "build\bin\Auralis.exe" -Destination "dist\Auralis.exe"
+          Copy-Item -Path "build\bin\Auralis-amd64-installer.exe" -Destination "dist\Auralis-Setup.exe"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-portable
-          path: dist/Auralis.exe
+          path: |
+            dist/Auralis.exe
+            dist/Auralis-Setup.exe
           retention-days: 7
 
   build-macos:
@@ -193,6 +204,7 @@ jobs:
             wails_platform: linux/amd64
             artifact_name: linux-portable
             output_name: Auralis.AppImage
+            deb_name: Auralis_amd64.deb
             appimage_arch: x86_64
             appimagetool_arch: x86_64
             pkgconfig_dir: /usr/lib/x86_64-linux-gnu/pkgconfig
@@ -201,6 +213,7 @@ jobs:
             wails_platform: linux/arm64
             artifact_name: linux-portable-arm
             output_name: Auralis-ARM.AppImage
+            deb_name: Auralis_arm64.deb
             appimage_arch: aarch64
             appimagetool_arch: aarch64
             pkgconfig_dir: /usr/lib/aarch64-linux-gnu/pkgconfig
@@ -339,11 +352,60 @@ jobs:
           mkdir -p dist
           ARCH=${{ matrix.appimage_arch }} ./appimagetool --no-appstream AppDir "dist/${{ matrix.output_name }}"
 
+      - name: Create Debian package
+        run: |
+          DEB_ARCH=$(dpkg --print-architecture)
+          VERSION=$(jq -r .info.productVersion wails.json)
+          if [[ "${{ steps.version.outputs.version }}" == "dev" ]]; then
+            VERSION="${VERSION}~dev"
+          fi
+
+          PKG=deb-root
+          install -Dm755 build/bin/Auralis "$PKG/usr/bin/auralis"
+          if [ -f AppDir/auralis.png ]; then
+            install -Dm644 AppDir/auralis.png "$PKG/usr/share/icons/hicolor/256x256/apps/auralis.png"
+          fi
+          # %u and the scheme handler let auralis:// links open the installed app.
+          install -d "$PKG/usr/share/applications"
+          cat > "$PKG/usr/share/applications/auralis.desktop" << 'EOF'
+          [Desktop Entry]
+          Name=Auralis
+          Comment=Download lossless music and manage your library
+          Exec=auralis %u
+          Icon=auralis
+          Type=Application
+          Categories=Audio;AudioVideo;
+          MimeType=x-scheme-handler/auralis;
+          StartupWMClass=Auralis
+          EOF
+
+          install -d "$PKG/DEBIAN"
+          cat > "$PKG/DEBIAN/control" << EOF
+          Package: auralis
+          Version: ${VERSION}
+          Architecture: ${DEB_ARCH}
+          Maintainer: Vekhyat Jain <vekhyat@users.noreply.github.com>
+          Installed-Size: $(du -sk "$PKG/usr" | cut -f1)
+          Depends: libgtk-3-0t64 | libgtk-3-0, libwebkit2gtk-4.1-0
+          Section: sound
+          Priority: optional
+          Homepage: https://github.com/vekhyat/Auralis
+          Description: Lossless music downloader and library manager
+           Auralis fetches tracks, albums and playlists in lossless quality,
+           keeps the library tidy, and syncs it to phones and folders.
+          EOF
+
+          dpkg-deb --root-owner-group --build "$PKG" "dist/${{ matrix.deb_name }}"
+          dpkg-deb --info "dist/${{ matrix.deb_name }}"
+          dpkg-deb --contents "dist/${{ matrix.deb_name }}"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: dist/${{ matrix.output_name }}
+          path: |
+            dist/${{ matrix.output_name }}
+            dist/${{ matrix.deb_name }}
           retention-days: 7
 
   create-release:
@@ -385,10 +447,12 @@ jobs:
 
             ## Downloads
 
-            - `Auralis.exe` - Windows
+            - `Auralis-Setup.exe` - Windows installer
+            - `Auralis.exe` - Windows portable
             - `Auralis.dmg` - macOS
             - `Auralis.AppImage` - Linux AMD64
             - `Auralis-ARM.AppImage` - Linux ARM64
+            - `Auralis_amd64.deb` / `Auralis_arm64.deb` - Debian/Ubuntu package
 
             <details>
             <summary><b>Linux Requirements</b></summary>
@@ -425,8 +489,11 @@ jobs:
             </details>
           files: |
             artifacts/windows-portable/Auralis.exe
+            artifacts/windows-portable/Auralis-Setup.exe
             artifacts/macos-portable/Auralis.dmg
             artifacts/linux-portable/Auralis.AppImage
+            artifacts/linux-portable/Auralis_amd64.deb
             artifacts/linux-portable-arm/Auralis-ARM.AppImage
+            artifacts/linux-portable-arm/Auralis_arm64.deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
