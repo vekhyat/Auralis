@@ -28,6 +28,10 @@ pnpm-debug.log*
 .yarn
 *.tsbuildinfo
 
+# Rust
+rust/target/
+target/
+
 # IDE / Editors
 .vscode/
 .idea/
