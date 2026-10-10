@@ -342,7 +342,17 @@ func communitySourceAttempts(service, quality, dest string, track SourceTrack) [
 			continue
 		}
 		out = append(out, sourceDownloadAttempt{id: source.ID, download: func() (string, error) {
+			started := time.Now()
 			path, err := downloadCommunitySource(source, track, quality, dest)
+			if communitySourceNeedsVerification(source, err) {
+				// The first download that reaches a protected source opens
+				// its check in the app; a passed check is retried at once.
+				if verifyErr := verifyCommunitySourceForDownload(source, started); verifyErr == nil {
+					path, err = downloadCommunitySource(source, track, quality, dest)
+				} else if IsDownloadCancelledError(verifyErr) {
+					err = verifyErr
+				}
+			}
 			if err == nil {
 				err = requireCommunityCodec(path, quality)
 			}

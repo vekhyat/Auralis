@@ -128,6 +128,28 @@ func TestVerificationChildStyleStripsPopupChrome(t *testing.T) {
 	}
 }
 
+func TestVerificationFrameInsetsFrom(t *testing.T) {
+	window := verificationRect{left: 100, top: 200, right: 594, bottom: 537}
+	cases := []struct {
+		name string
+		page verificationRect
+		want verificationFrameInsets
+		ok   bool
+	}{
+		{"edge chrome", verificationRect{107, 230, 587, 530}, verificationFrameInsets{7, 30, 7, 7}, true},
+		{"no chrome", window, verificationFrameInsets{}, true},
+		{"empty page", verificationRect{107, 230, 107, 530}, verificationFrameInsets{}, false},
+		{"page outside window", verificationRect{90, 230, 587, 530}, verificationFrameInsets{}, false},
+		{"mostly chrome", verificationRect{107, 430, 587, 530}, verificationFrameInsets{}, false},
+	}
+	for _, tc := range cases {
+		got, ok := verificationFrameInsetsFrom(window, tc.page)
+		if got != tc.want || ok != tc.ok {
+			t.Fatalf("%s: got %+v ok=%v, want %+v ok=%v", tc.name, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
 func TestValidateVerificationTargetURL(t *testing.T) {
 	seedVerificationSources(t)
 
@@ -249,7 +271,7 @@ func TestVerificationPresentationOmitsSecrets(t *testing.T) {
 	})
 	t.Cleanup(func() { SetVerificationPresentationHandler(nil) })
 
-	raw := "https://dabmusic.xyz/login?token=super-secret#grant"
+	raw := "https://lucida.to/login?token=super-secret#grant"
 	publishVerificationPresentation(VerificationPresentation{
 		ID: atomic.LoadUint64(&verificationRunSeq) + 1, Active: true, Title: verificationGenericTitle, Host: verificationPresentationHost(raw), Ready: false,
 	})
@@ -257,14 +279,14 @@ func TestVerificationPresentationOmitsSecrets(t *testing.T) {
 	select {
 	case snap := <-events:
 		assertPresentationSafe(t, snap, raw)
-		if snap.Host != "dabmusic.xyz" || snap.Title != verificationGenericTitle || !snap.Active || snap.Ready {
+		if snap.Host != "lucida.to" || snap.Title != verificationGenericTitle || !snap.Active || snap.Ready {
 			t.Fatalf("snapshot = %+v", snap)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("presentation handler was not called")
 	}
 
-	if err := OpenVerificationWindow("https://user:secret@dabmusic.xyz/login?token=abc"); err == nil {
+	if err := OpenVerificationWindow("https://user:secret@lucida.to/login?token=abc"); err == nil {
 		t.Fatal("credential URL must be rejected before a browser starts")
 	}
 	failed := GetVerificationPresentation()

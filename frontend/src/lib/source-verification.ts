@@ -8,30 +8,16 @@ export interface SourceVerification {
     can_confirm: boolean;
 }
 
-export interface SourceConnection {
-    id: string;
-    name: string;
-    service: string;
-    role: string;
-    state: string;
-    message: string;
-    can_verify: boolean;
-    checked_at?: string;
-}
-
 interface SourceVerificationBridge {
     GetSourceVerification: () => Promise<SourceVerification>;
     SetSourceVerificationViewport: (id: number, left: number, top: number, width: number, height: number) => Promise<void>;
     CancelSourceVerification: (id: number) => Promise<void>;
     ConfirmSourceVerification: () => Promise<boolean>;
-    GetSourceConnections: () => Promise<SourceConnection[]>;
-    CheckSourceConnection: (id: string) => Promise<SourceConnection>;
-    VerifySourceConnection: (id: string) => Promise<SourceConnection>;
 }
 
 export function sourceVerificationBridge(): SourceVerificationBridge {
     const bridge = (window as Window & { go?: { main?: { App?: Partial<SourceVerificationBridge> } } }).go?.main?.App;
-    if (!bridge?.GetSourceVerification || !bridge.SetSourceVerificationViewport || !bridge.CancelSourceVerification || !bridge.ConfirmSourceVerification || !bridge.GetSourceConnections || !bridge.CheckSourceConnection || !bridge.VerifySourceConnection) {
+    if (!bridge?.GetSourceVerification || !bridge.SetSourceVerificationViewport || !bridge.CancelSourceVerification || !bridge.ConfirmSourceVerification) {
         throw new Error("Source verification is unavailable. Open the latest Auralis desktop build.");
     }
     return bridge as SourceVerificationBridge;
