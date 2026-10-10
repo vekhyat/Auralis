@@ -20,10 +20,8 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-const (
-	jioSaavnOfficialAPI  = "https://www.jiosaavn.com/api.php"
-	jioSaavnCommunityAPI = "https://saavn.dev/api"
-)
+// The saavn.dev community mirror was removed: its domain no longer resolves.
+const jioSaavnOfficialAPI = "https://www.jiosaavn.com/api.php"
 
 var jioSaavnFeatRE = regexp.MustCompile(`(?i)\s*[\(\[](feat\.?|ft\.?|with|featuring)\s[^\)\]]+[\)\]]`)
 
@@ -32,7 +30,7 @@ func downloadJioSaavnTrack(p ExtraDownloadParams, destPath string) (string, stri
 	if err != nil {
 		return "", "", err
 	}
-	streamURL, err := jioSaavnStreamURL(songID)
+	streamURL, err := jioSaavnOfficialStreamURL(songID)
 	if err != nil {
 		return "", sourceURL, err
 	}
@@ -63,16 +61,6 @@ func searchJioSaavn(p ExtraDownloadParams) (songID, sourceURL string, err error)
 			return "", "", err
 		}
 		if id, src, searchErr := jioSaavnOfficialSearch(query, want); searchErr == nil && id != "" {
-			return id, src, nil
-		} else if IsDownloadCancelledError(searchErr) {
-			return "", "", searchErr
-		} else if searchErr != nil {
-			lastErr = searchErr
-		}
-		if err := CheckDownloadCancelled(); err != nil {
-			return "", "", err
-		}
-		if id, src, searchErr := jioSaavnCommunitySearch(query, want); searchErr == nil && id != "" {
 			return id, src, nil
 		} else if IsDownloadCancelledError(searchErr) {
 			return "", "", searchErr
@@ -156,58 +144,6 @@ func jioSaavnOfficialSearch(query string, want jioSaavnWant) (string, string, er
 	return jioSaavnResultFromList(payload.Songs.Data, want)
 }
 
-func jioSaavnCommunitySearch(query string, want jioSaavnWant) (string, string, error) {
-	req, err := NewRequestWithDefaultHeaders(http.MethodGet, jioSaavnCommunityAPI+"/search/songs?query="+url.QueryEscape(query)+"&page=1&limit=8", nil)
-	if err != nil {
-		return "", "", err
-	}
-	resp, err := (&http.Client{Timeout: 12 * time.Second}).Do(WithDownloadContext(req))
-	if err != nil {
-		return "", "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return "", "", fmt.Errorf("saavn.dev HTTP %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
-	if err != nil {
-		return "", "", err
-	}
-	var payload struct {
-		Data struct {
-			Results []map[string]any `json:"results"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return "", "", err
-	}
-	if len(payload.Data.Results) == 0 {
-		return "", "", fmt.Errorf("jiosaavn: empty community results")
-	}
-	return jioSaavnResultFromList(payload.Data.Results, want)
-}
-
-func jioSaavnStreamURL(songID string) (string, error) {
-	var lastErr error
-	for _, id := range RankedSourceIDs([]string{"jiosaavn-official", "jiosaavn-community"}, "lossy") {
-		var raw string
-		var err error
-		if id == "jiosaavn-official" {
-			raw, err = jioSaavnOfficialStreamURL(songID)
-		} else {
-			raw, err = jioSaavnCommunityStreamURL(songID)
-		}
-		if err == nil && raw != "" {
-			return raw, nil
-		}
-		if IsDownloadCancelledError(err) {
-			return "", err
-		}
-		lastErr = err
-	}
-	return "", lastErr
-}
-
 func jioSaavnOfficialStreamURL(songID string) (string, error) {
 	params := url.Values{
 		"__call":  {"song.getDetails"},
@@ -252,54 +188,6 @@ func jioSaavnOfficialStreamURL(songID string) (string, error) {
 		return "", err
 	}
 	return normalizeJioSaavnMediaURL(decrypted), nil
-}
-
-func jioSaavnCommunityStreamURL(songID string) (string, error) {
-	req, err := NewRequestWithDefaultHeaders(http.MethodGet, jioSaavnCommunityAPI+"/songs/"+url.PathEscape(songID), nil)
-	if err != nil {
-		return "", err
-	}
-	resp, err := (&http.Client{Timeout: 12 * time.Second}).Do(WithDownloadContext(req))
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
-	if err != nil {
-		return "", err
-	}
-	var payload struct {
-		Data json.RawMessage `json:"data"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return "", err
-	}
-	var songs []map[string]any
-	if json.Unmarshal(payload.Data, &songs) != nil {
-		var one map[string]any
-		if json.Unmarshal(payload.Data, &one) == nil {
-			songs = []map[string]any{one}
-		}
-	}
-	if len(songs) == 0 {
-		return "", fmt.Errorf("jiosaavn: community song missing")
-	}
-	rawURLs, _ := songs[0]["downloadUrl"].([]any)
-	var last string
-	for _, entry := range rawURLs {
-		item, _ := entry.(map[string]any)
-		u, _ := item["url"].(string)
-		if u != "" {
-			last = u
-			if q, _ := item["quality"].(string); q == "320kbps" {
-				return strings.ReplaceAll(u, "http://", "https://"), nil
-			}
-		}
-	}
-	if last != "" {
-		return strings.ReplaceAll(last, "http://", "https://"), nil
-	}
-	return "", fmt.Errorf("jiosaavn: no community download url")
 }
 
 func jioSaavnExtractSong(payload map[string]any, songID string) map[string]any {

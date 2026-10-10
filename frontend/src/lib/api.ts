@@ -2,6 +2,7 @@ import type { SpotifyMetadataResponse, DownloadRequest, DownloadResponse, Lyrics
 import { GetSpotifyMetadata, DownloadTrack, DownloadLyrics, DownloadCover, DownloadHeader, DownloadGalleryImage, DownloadAvatar } from "../../wailsjs/go/main/App";
 import { main } from "../../wailsjs/go/models";
 import { getSettings } from "@/lib/settings";
+import { lossyConversionTarget } from "@/lib/quality";
 function resolveArtistSeparator(separator: unknown): ", " | "; " {
     return separator === "semicolon" ? "; " : ", ";
 }
@@ -21,13 +22,16 @@ export async function fetchSpotifyMetadata(url: string, batch: boolean = true, d
 }
 export async function downloadTrack(request: DownloadRequest): Promise<DownloadResponse> {
     const settings = getSettings();
+    // A smaller-file quality tier is an encode of the lossless download, so it
+    // takes over the optional auto-convert step and never keeps the FLAC.
+    const lossyTarget = lossyConversionTarget(settings.autoQuality);
     const enriched = {
         ...request,
         library_root: settings.downloadPath,
-        auto_convert_audio: settings.autoConvertAudio,
-        auto_convert_format: settings.autoConvertFormat,
-        auto_convert_bitrate: settings.autoConvertBitrate,
-        auto_convert_delete_original: settings.autoConvertDeleteOriginal,
+        auto_convert_audio: lossyTarget ? true : settings.autoConvertAudio,
+        auto_convert_format: lossyTarget ? lossyTarget.format : settings.autoConvertFormat,
+        auto_convert_bitrate: lossyTarget ? lossyTarget.bitrate : settings.autoConvertBitrate,
+        auto_convert_delete_original: lossyTarget ? true : settings.autoConvertDeleteOriginal,
         auto_resample_audio: settings.autoResampleAudio,
         auto_resample_sample_rate: settings.autoResampleSampleRate,
         auto_resample_bit_depth: settings.autoResampleBitDepth,

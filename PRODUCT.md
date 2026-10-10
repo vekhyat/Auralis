@@ -8,8 +8,11 @@ Auralis is a **Windows desktop app** (Wails, frameless window) for fetching loss
 The user pastes a streaming link (Spotify URL/URI) or types a search, inspects the result,
 and downloads tracks, albums, playlists, or artist collections in one action. A persistent
 worker starts automatically and handles later requests in the background. Files are fetched in
-lossless quality from **Tidal, Qobuz, and Amazon Music**, with extra fallbacks from
-**Deezer, Apple Music, and JioSaavn** (community/mirror APIs; no user account inside this app).
+lossless quality from **Qobuz, Deezer, and Apple Music**, with **JioSaavn** as the
+final lossy fallback. Automatic selection stays inside the app; Settings exposes
+file quality and fallback preferences, never provider lists, API checks, or server
+credentials. Other provider implementations remain for compatibility, but routes
+without current working-audio evidence are excluded from automatic downloads.
 
 - Stack: Go backend + Wails v2 + React 19 + Tailwind CSS v4 + shadcn/radix primitives.
 - Config and data live under `~/.auralis`; custom protocol `auralis://`.
@@ -21,7 +24,7 @@ lossless quality from **Tidal, Qobuz, and Amazon Music**, with extra fallbacks f
 ## Core jobs
 
 1. **Find** — paste a Spotify link or search the catalog by text.
-2. **Inspect** — see metadata, track list, and per-provider availability before committing.
+2. **Inspect** — see metadata, track list, and download quality before committing.
 3. **Download** — start immediately; monitor Downloads; pause/resume/retry/cancel.
 4. **Keep tidy** — naming templates, folder structures, embedded tags, lyrics, covers.
 

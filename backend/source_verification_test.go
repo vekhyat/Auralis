@@ -28,6 +28,7 @@ func TestCommunityVerificationActionSeparatesBrowserAndConfiguration(t *testing.
 		{ID: "sub-local", Name: "Sub", Service: "qobuz", Protocol: "subsonic", BaseURL: "http://127.0.0.1:9", Enabled: true, CredentialEnv: "AURALIS_TEST_SUBSONIC_AUTH", CredentialType: "subsonic"},
 		{ID: "bearer-local", Name: "Bearer", Service: "qobuz", Protocol: "qobuz-dl", BaseURL: "http://127.0.0.1:9", Enabled: true, CredentialEnv: "AURALIS_TEST_BEARER", CredentialType: "bearer"},
 		{ID: "cookie-local", Name: "Cookie", Service: "qobuz", Protocol: "dab", BaseURL: "https://dab.example.test", Enabled: true, CredentialType: "cookie"},
+		{ID: "hifi-local", Name: "Hi-Fi Fixture", Service: "tidal", Protocol: "hifi", BaseURL: "https://hifi.example.test", Enabled: true},
 	}
 	if err := SaveCommunitySources(rows); err != nil {
 		t.Fatal(err)
@@ -52,7 +53,7 @@ func TestCommunityVerificationActionSeparatesBrowserAndConfiguration(t *testing.
 	if err != nil || action.Action != "verify" {
 		t.Fatalf("cookie action %+v %v", action, err)
 	}
-	hifi, err := CommunitySourceVerificationAction("hifi-monochrome-api.samidy.com")
+	hifi, err := CommunitySourceVerificationAction("hifi-local")
 	if err != nil || hifi.Action != "verify" {
 		t.Fatalf("hifi action %+v %v", hifi, err)
 	}
@@ -167,6 +168,10 @@ func TestManualVerificationDoesNotCloseOrStoreBeforeAPIAccepts(t *testing.T) {
 func TestManualVerificationCancelDoesNotMarkVerified(t *testing.T) {
 	t.Setenv(appDataDirEnv, t.TempDir())
 	t.Cleanup(resetSourceVerificationForTest)
+	const fixtureID = "verify-dab-fixture"
+	if err := SaveCommunitySources([]CommunitySource{{ID: fixtureID, Name: "DAB Fixture", Service: "qobuz", Protocol: "dab", BaseURL: "https://dab-verify.example.test", Enabled: true, CredentialType: "cookie"}}); err != nil {
+		t.Fatal(err)
+	}
 	var closed atomic.Int32
 	release := make(chan error, 1)
 	sourceVerificationHook.open = func(string) <-chan error { return release }
@@ -179,7 +184,7 @@ func TestManualVerificationCancelDoesNotMarkVerified(t *testing.T) {
 	}
 	done := make(chan CommunitySourceCheck, 1)
 	go func() {
-		result, err := VerifyCommunitySource("dab-xyz")
+		result, err := VerifyCommunitySource(fixtureID)
 		if err != nil {
 			t.Errorf("verify: %v", err)
 		}
@@ -207,7 +212,7 @@ func TestManualVerificationCancelDoesNotMarkVerified(t *testing.T) {
 		t.Fatalf("confirm after cancel = %v %v", accepted, err)
 	}
 	for _, row := range GetCommunitySourceChecks() {
-		if row.ID == "dab-xyz" && (row.AudioVerified || row.State == "available" || row.State == "validated") {
+		if row.ID == fixtureID && (row.AudioVerified || row.State == "available" || row.State == "validated") {
 			t.Fatalf("cancel stored a verified check: %+v", row)
 		}
 	}
@@ -216,6 +221,10 @@ func TestManualVerificationCancelDoesNotMarkVerified(t *testing.T) {
 func TestManualVerificationFollowsDownloadContextCancel(t *testing.T) {
 	t.Setenv(appDataDirEnv, t.TempDir())
 	t.Cleanup(resetSourceVerificationForTest)
+	const fixtureID = "verify-dab-fixture"
+	if err := SaveCommunitySources([]CommunitySource{{ID: fixtureID, Name: "DAB Fixture", Service: "qobuz", Protocol: "dab", BaseURL: "https://dab-verify.example.test", Enabled: true, CredentialType: "cookie"}}); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var closed atomic.Int32
@@ -224,7 +233,7 @@ func TestManualVerificationFollowsDownloadContextCancel(t *testing.T) {
 	sourceVerificationHook.close = func() { closed.Add(1) }
 	done := make(chan CommunitySourceCheck, 1)
 	go func() {
-		result, err := VerifyCommunitySource("dab-xyz")
+		result, err := VerifyCommunitySource(fixtureID)
 		if err != nil {
 			t.Errorf("verify: %v", err)
 		}
@@ -248,11 +257,15 @@ func TestManualVerificationFollowsDownloadContextCancel(t *testing.T) {
 func TestManualVerificationTimeoutDoesNotMarkVerified(t *testing.T) {
 	t.Setenv(appDataDirEnv, t.TempDir())
 	t.Cleanup(resetSourceVerificationForTest)
+	const fixtureID = "verify-dab-fixture"
+	if err := SaveCommunitySources([]CommunitySource{{ID: fixtureID, Name: "DAB Fixture", Service: "qobuz", Protocol: "dab", BaseURL: "https://dab-verify.example.test", Enabled: true, CredentialType: "cookie"}}); err != nil {
+		t.Fatal(err)
+	}
 	var closed atomic.Int32
 	sourceVerificationHook.timeout = 200 * time.Millisecond
 	sourceVerificationHook.open = func(string) <-chan error { return make(chan error) }
 	sourceVerificationHook.close = func() { closed.Add(1) }
-	result, err := VerifyCommunitySource("dab-xyz")
+	result, err := VerifyCommunitySource(fixtureID)
 	if err != nil || result.State == "available" || result.AudioVerified || closed.Load() == 0 {
 		t.Fatalf("timeout result %+v closed=%d err=%v", result, closed.Load(), err)
 	}
@@ -266,7 +279,7 @@ func TestCommunitySourceChangeKeepsUnrelatedEvidence(t *testing.T) {
 	t.Setenv(appDataDirEnv, dir)
 	t.Cleanup(func() {
 		communityCircuit.Lock()
-		delete(communityCircuit.until, "hifi-monochrome-api.samidy.com")
+		delete(communityCircuit.until, "untouched-custom")
 		delete(communityCircuit.until, "keep-custom")
 		delete(communityCircuit.until, "change-custom")
 		communityCircuit.Unlock()
@@ -274,7 +287,8 @@ func TestCommunitySourceChangeKeepsUnrelatedEvidence(t *testing.T) {
 	})
 	keep := CommunitySource{ID: "keep-custom", Name: "Keep", Service: "qobuz", Protocol: "dab", BaseURL: "https://keep.example.test", Enabled: true, CredentialType: "cookie"}
 	changed := CommunitySource{ID: "change-custom", Name: "Change", Service: "qobuz", Protocol: "dab", BaseURL: "https://old.example.test", Enabled: true, CredentialType: "cookie"}
-	if err := SaveCommunitySources([]CommunitySource{keep, changed}); err != nil {
+	untouched := CommunitySource{ID: "untouched-custom", Name: "Untouched", Service: "tidal", Protocol: "hifi", BaseURL: "https://untouched.example.test", Enabled: true}
+	if err := SaveCommunitySources([]CommunitySource{keep, changed, untouched}); err != nil {
 		t.Fatal(err)
 	}
 	secretKeep := "keep-cookie-secret"
@@ -287,20 +301,20 @@ func TestCommunitySourceChangeKeepsUnrelatedEvidence(t *testing.T) {
 	}
 	saveCommunityCheck(CommunitySourceCheck{ID: keep.ID, State: "available"})
 	saveCommunityCheck(CommunitySourceCheck{ID: changed.ID, State: "validated", AudioVerified: true})
-	saveCommunityCheck(CommunitySourceCheck{ID: "hifi-monochrome-api.samidy.com", State: "available"})
+	saveCommunityCheck(CommunitySourceCheck{ID: untouched.ID, State: "available"})
 	recordSourceOutcome(keep.ID, "qobuz", "16", time.Millisecond, true, nil)
 	recordSourceOutcome(changed.ID, "qobuz", "16", time.Millisecond, true, nil)
-	recordSourceOutcome("hifi-monochrome-api.samidy.com", "tidal", "16", time.Millisecond, true, nil)
+	recordSourceOutcome(untouched.ID, "tidal", "16", time.Millisecond, true, nil)
 	pause := time.Now().Add(time.Hour)
 	communityCircuit.Lock()
 	communityCircuit.until[keep.ID] = pause
 	communityCircuit.until[changed.ID] = pause
-	communityCircuit.until["hifi-monochrome-api.samidy.com"] = pause
+	communityCircuit.until[untouched.ID] = pause
 	communityCircuit.Unlock()
 
 	changed.BaseURL = "https://new.example.test"
 	keep.Name = "Renamed"
-	if err := SaveCommunitySources([]CommunitySource{keep, changed}); err != nil {
+	if err := SaveCommunitySources([]CommunitySource{keep, changed, untouched}); err != nil {
 		t.Fatal(err)
 	}
 	ids := map[string]CommunitySourceCheck{}
@@ -310,8 +324,8 @@ func TestCommunitySourceChangeKeepsUnrelatedEvidence(t *testing.T) {
 	if _, ok := ids[keep.ID]; !ok {
 		t.Fatal("unrelated source check was cleared")
 	}
-	if _, ok := ids["hifi-monochrome-api.samidy.com"]; !ok {
-		t.Fatal("untouched built-in check was cleared")
+	if _, ok := ids[untouched.ID]; !ok {
+		t.Fatal("untouched fixture check was cleared")
 	}
 	if _, ok := ids[changed.ID]; ok {
 		t.Fatal("changed source kept a stale check")
@@ -320,16 +334,16 @@ func TestCommunitySourceChangeKeepsUnrelatedEvidence(t *testing.T) {
 	for _, row := range SourceBenchmarks() {
 		benchmarks[row.ID] = true
 	}
-	if !benchmarks[keep.ID] || !benchmarks["hifi-monochrome-api.samidy.com"] || benchmarks[changed.ID] {
+	if !benchmarks[keep.ID] || !benchmarks[untouched.ID] || benchmarks[changed.ID] {
 		t.Fatalf("benchmarks = %+v", benchmarks)
 	}
 	communityCircuit.Lock()
 	_, keepPaused := communityCircuit.until[keep.ID]
-	_, hifiPaused := communityCircuit.until["hifi-monochrome-api.samidy.com"]
+	_, untouchedPaused := communityCircuit.until[untouched.ID]
 	_, changedPaused := communityCircuit.until[changed.ID]
 	communityCircuit.Unlock()
-	if !keepPaused || !hifiPaused || changedPaused {
-		t.Fatalf("circuits keep=%v hifi=%v changed=%v", keepPaused, hifiPaused, changedPaused)
+	if !keepPaused || !untouchedPaused || changedPaused {
+		t.Fatalf("circuits keep=%v untouched=%v changed=%v", keepPaused, untouchedPaused, changedPaused)
 	}
 	kept, err := browserCookiesForSource(keep)
 	if err != nil || len(kept) != 1 || kept[0].Value != secretKeep {
@@ -351,15 +365,15 @@ func TestBrowserSessionCookiesStayOnTheirOrigin(t *testing.T) {
 	}
 	t.Setenv(appDataDirEnv, t.TempDir())
 	t.Cleanup(resetSourceVerificationForTest)
-	wide := storedCookie{Name: "wide", Value: "wide-secret-value", Domain: ".lucida.to", Path: "/", Secure: true}
-	hostOnly := storedCookie{Name: "host", Value: "host-secret-value", Domain: "lucida.to", Path: "/", HostOnly: true, Secure: true}
-	other := storedCookie{Name: "other", Value: "other-secret-value", Domain: "dabmusic.xyz", Path: "/", HostOnly: true, Secure: true}
-	source := CommunitySource{ID: "lucida-qobuz", Name: "Lucida", Service: "qobuz", Protocol: "lucida", BaseURL: "https://lucida.to", Enabled: true, CredentialEnv: "AURALIS_TEST_LUCIDA_COOKIE", CredentialType: "cookie"}
+	wide := storedCookie{Name: "wide", Value: "wide-secret-value", Domain: ".lucida.example.test", Path: "/", Secure: true}
+	hostOnly := storedCookie{Name: "host", Value: "host-secret-value", Domain: "lucida.example.test", Path: "/", HostOnly: true, Secure: true}
+	other := storedCookie{Name: "other", Value: "other-secret-value", Domain: "dab-verify.example.test", Path: "/", HostOnly: true, Secure: true}
+	source := CommunitySource{ID: "lucida-synthetic", Name: "Lucida", Service: "qobuz", Protocol: "lucida", BaseURL: "https://lucida.example.test", Enabled: true, CredentialEnv: "AURALIS_TEST_LUCIDA_COOKIE", CredentialType: "cookie"}
 	if err := saveCommunityBrowserSession(source, []storedCookie{wide, hostOnly, other}); err != nil {
 		t.Fatal(err)
 	}
 	worker, err := lucidaWorkerSource(source, "eu")
-	if err != nil || worker.CredentialEnv != "" || worker.CredentialType != "" || worker.BaseURL != "https://eu.lucida.to" || worker.ID != source.ID {
+	if err != nil || worker.CredentialEnv != "" || worker.CredentialType != "" || worker.BaseURL != "https://eu.lucida.example.test" || worker.ID != source.ID {
 		t.Fatalf("worker %+v %v", worker, err)
 	}
 	header, err := cookieHeaderForURL([]storedCookie{wide, hostOnly, other}, worker.BaseURL+"/api/fetch/request/job")
@@ -376,12 +390,12 @@ func TestBrowserSessionCookiesStayOnTheirOrigin(t *testing.T) {
 		t.Fatalf("env cookie left its origin: %q %v", leaked, err)
 	}
 	jarOnly := source
-	jarOnly.ID = "lucida-jar"
+	jarOnly.ID = "lucida-synthetic-jar"
 	jarOnly.CredentialEnv = ""
 	if err := saveCommunityBrowserSession(jarOnly, []storedCookie{wide, hostOnly, other}); err != nil {
 		t.Fatal(err)
 	}
-	jarHeader, err := communityCookieHeader(jarOnly, "https://lucida.to/api/load")
+	jarHeader, err := communityCookieHeader(jarOnly, "https://lucida.example.test/api/load")
 	if err != nil || !strings.Contains(jarHeader, "wide-secret-value") || !strings.Contains(jarHeader, "host-secret-value") || strings.Contains(jarHeader, "other-secret-value") {
 		t.Fatalf("jar header %q %v", jarHeader, err)
 	}
@@ -398,7 +412,7 @@ func TestBrowserSessionCookiesStayOnTheirOrigin(t *testing.T) {
 	if err := applyCommunityRequestCredentials(same, keyed); err != nil || same.Header.Get("X-API-Key") != "server-key-secret" {
 		t.Fatal(err)
 	}
-	message := redactCommunityMessage("failed "+wide.Value+" at https://lucida.to/private?sig=1", wide.Value)
+	message := redactCommunityMessage("failed "+wide.Value+" at https://lucida.example.test/private?sig=1", wide.Value)
 	if strings.Contains(message, wide.Value) || strings.Contains(message, "https://") {
 		t.Fatal(message)
 	}
@@ -467,24 +481,31 @@ func TestHiFiAndLucidaChallengePagesAreAuthentication(t *testing.T) {
 
 func TestVerificationTargetURLIsExactConfiguredOrigin(t *testing.T) {
 	t.Setenv(appDataDirEnv, t.TempDir())
+	if err := SaveCommunitySources([]CommunitySource{{ID: "verify-target-fixture", Name: "Target Fixture", Service: "qobuz", Protocol: "dab", BaseURL: "https://verify-target.example.test", Enabled: true, CredentialType: "cookie"}}); err != nil {
+		t.Fatal(err)
+	}
 	if err := validateVerificationChallengeURL("https://api.zarz.moe/challenge"); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateVerificationChallengeURL("https://dabmusic.xyz/"); err == nil {
+	if err := validateVerificationChallengeURL("https://verify-target.example.test/"); err == nil {
 		t.Fatal("legacy allowlist accepted a community origin")
 	}
-	if err := validateVerificationTargetURL("https://dabmusic.xyz/login"); err != nil {
+	if err := validateVerificationTargetURL("https://verify-target.example.test/login"); err != nil {
 		t.Fatal(err)
 	}
 	if err := validateVerificationTargetURL("https://api.zarz.moe/challenge"); err != nil {
 		t.Fatal(err)
 	}
+	// Retired public hosts are no longer configured, so they must not verify.
+	if err := validateVerificationTargetURL("https://dabmusic.xyz/login"); err == nil {
+		t.Fatal("retired public host accepted as verification target")
+	}
 	for _, blocked := range []string{
-		"https://www.dabmusic.xyz/",
-		"https://evil.dabmusic.xyz/",
-		"https://dabmusic.xyz.evil.test/",
-		"https://user:secret@dabmusic.xyz/",
-		"http://dabmusic.xyz/",
+		"https://www.verify-target.example.test/",
+		"https://evil.verify-target.example.test/",
+		"https://verify-target.example.test.evil.test/",
+		"https://user:secret@verify-target.example.test/",
+		"http://verify-target.example.test/",
 		"javascript:alert(1)",
 	} {
 		if err := validateVerificationTargetURL(blocked); err == nil {
@@ -508,7 +529,7 @@ func TestCaptureRequestsOnlyTheSelectedOrigin(t *testing.T) {
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/json/list", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, `[{"type":"page","url":"https://dabmusic.xyz/","webSocketDebuggerUrl":"ws://127.0.0.1:%d/devtools/page/verification"}]`, port)
+		fmt.Fprintf(w, `[{"type":"page","url":"https://dab-synthetic.example.test/","webSocketDebuggerUrl":"ws://127.0.0.1:%d/devtools/page/verification"}]`, port)
 	})
 	mux.HandleFunc("/json/version", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `{"webSocketDebuggerUrl":"ws://127.0.0.1:%d/devtools/browser"}`, port)
@@ -535,7 +556,7 @@ func TestCaptureRequestsOnlyTheSelectedOrigin(t *testing.T) {
 			result := map[string]any{}
 			if req.Method == "Network.getCookies" {
 				result["cookies"] = []map[string]any{
-					{"name": "session", "value": "origin-secret-value", "domain": "dabmusic.xyz", "path": "/", "expires": -1, "secure": true, "httpOnly": true},
+					{"name": "session", "value": "origin-secret-value", "domain": "dab-synthetic.example.test", "path": "/", "expires": -1, "secure": true, "httpOnly": true},
 					{"name": "other", "value": "foreign-secret-value", "domain": "evil.example", "path": "/", "expires": -1, "secure": true},
 				}
 			}
@@ -553,21 +574,21 @@ func TestCaptureRequestsOnlyTheSelectedOrigin(t *testing.T) {
 		_ = server.Shutdown(ctx)
 	}()
 
-	cookies, err := captureCommunityCookiesFromProfile(profile, "https://dabmusic.xyz/")
+	cookies, err := captureCommunityCookiesFromProfile(profile, "https://dab-synthetic.example.test/")
 	if err != nil {
 		t.Fatal(err)
 	}
 	mu.Lock()
 	request := got.String()
 	mu.Unlock()
-	if !strings.Contains(request, "Network.getCookies") || strings.Contains(request, "getAllCookies") || !strings.Contains(request, "https://dabmusic.xyz/") {
+	if !strings.Contains(request, "Network.getCookies") || strings.Contains(request, "getAllCookies") || !strings.Contains(request, "https://dab-synthetic.example.test/") {
 		t.Fatalf("cookie request was not limited to the origin: %s", request)
 	}
 	if len(cookies) != 1 || cookies[0].Name != "session" || cookies[0].Value != "origin-secret-value" {
 		t.Fatalf("cookies %+v", cookies)
 	}
 	foreign := filepath.Join(t.TempDir(), "Google", "Chrome", "User Data", "Default")
-	if _, err := captureCommunityCookiesFromProfile(foreign, "https://dabmusic.xyz/"); err == nil {
+	if _, err := captureCommunityCookiesFromProfile(foreign, "https://dab-synthetic.example.test/"); err == nil {
 		t.Fatal("foreign browser profile was read")
 	}
 }
@@ -580,7 +601,7 @@ func TestPlaintextBrowserSessionIsRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	secret := "plaintext-cookie-secret"
-	if err := os.WriteFile(path, []byte(`{"sources":{"dab-xyz":{"cookies":[{"value":"`+secret+`"}]}}}`), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"sources":{"synthetic-plaintext-fixture":{"cookies":[{"value":"`+secret+`"}]}}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	resetSourceVerificationForTest()
