@@ -1,6 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { CommunitySourcesSettings, type CommunitySourcesHandle } from "@/components/CommunitySourcesSettings";
-import { SourceConnectionsSettings } from "@/components/SourceConnectionsSettings";
+import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { flushSync } from "react-dom";
 import { Button } from "@/components/ui/button";
@@ -112,8 +110,6 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
     const { t } = useTranslation();
     const [savedSettings, setSavedSettings] = useState<SettingsType>(getSettings());
     const [tempSettings, setTempSettings] = useState<SettingsType>(savedSettings);
-    const communitySourcesRef = useRef<CommunitySourcesHandle>(null);
-    const [communitySourcesDirty, setCommunitySourcesDirty] = useState(false);
     const [showResetConfirm, setShowResetConfirm] = useState(false);
     const [showMetadataAdvanced, setShowMetadataAdvanced] = useState(false);
     const [showLyricsAdvanced, setShowLyricsAdvanced] = useState(false);
@@ -122,7 +118,7 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
     const [backupAction, setBackupAction] = useState<"backup" | "restore" | "open" | null>(null);
     const [showCustomTidalApiDialog, setShowCustomTidalApiDialog] = useState(false);
     const [showCustomQobuzApiDialog, setShowCustomQobuzApiDialog] = useState(false);
-    const hasUnsavedChanges = communitySourcesDirty || JSON.stringify(savedSettings) !== JSON.stringify(tempSettings);
+    const hasUnsavedChanges = JSON.stringify(savedSettings) !== JSON.stringify(tempSettings);
     const normalizedLyricsLanguageSearch = lyricsLanguageSearch.trim().toLocaleLowerCase();
     const filteredLyricsTranslationLanguages = normalizedLyricsLanguageSearch
         ? LYRICS_TRANSLATION_LANGUAGES.filter((language) => language.code.includes(normalizedLyricsLanguageSearch)
@@ -135,7 +131,6 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
         const freshSavedSettings = getSettings();
         flushSync(() => {
             setTempSettings(freshSavedSettings);
-            communitySourcesRef.current?.reset();
         });
     }, []);
     useEffect(() => {
@@ -176,7 +171,6 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
         loadDefaults();
     }, []);
     const handleSave = async () => {
-        if (await communitySourcesRef.current?.save() === false) return;
         // The page no longer offers a store. Saving applies the visible quality and lets the app pick the file.
         await saveSettings(withAutoQuality(tempSettings, qualityChoice(tempSettings)));
         await i18n.changeLanguage(tempSettings.language);
@@ -188,7 +182,6 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
     };
     const handleReset = async () => {
         const defaultSettings = await resetToDefaultSettings();
-        await communitySourcesRef.current?.resetToDefaults();
         setTempSettings(defaultSettings);
         setSavedSettings(defaultSettings);
         applyThemeMode(defaultSettings.themeMode);
@@ -449,9 +442,6 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
             <Label htmlFor="allow-fallback" className="cursor-pointer text-sm font-normal">{t("translation.migrated.SettingsPage.allowQualityFallback16Bit")}</Label>
           </div>)}
         </section>
-
-        <CommunitySourcesSettings ref={communitySourcesRef} onDirtyChange={setCommunitySourcesDirty} />
-        <SourceConnectionsSettings />
 
         <section className="max-w-3xl space-y-4">
           <h2 className="border-b border-border pb-1.5 text-sm font-semibold tracking-tight">{t("translation.settings.naming")}</h2>

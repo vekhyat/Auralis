@@ -28,22 +28,47 @@ var communitySourcesMu sync.Mutex
 var sourceIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_.-]{1,100}$`)
 var sourceEnvPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// defaultCommunitySources lists only hosts that answered a live check. Each one
+// sits behind a browser check, which runs in the app the first time a download
+// reaches it.
 func defaultCommunitySources() []CommunitySource {
-	var rows []CommunitySource
-	for _, host := range []string{"monochrome-api.samidy.com", "eu-central.monochrome.tf", "us-west.monochrome.tf", "arran.monochrome.tf", "api.monochrome.tf", "triton.squid.wtf", "wolf.qqdl.site", "maus.qqdl.site", "vogel.qqdl.site", "katze.qqdl.site", "hund.qqdl.site", "tidal.kinoplus.online", "hifi.p1nkhamster.xyz"} {
-		rows = append(rows, CommunitySource{ID: "hifi-" + host, Name: "Hi-Fi / " + host, Service: "tidal", Protocol: "hifi", BaseURL: "https://" + host, Enabled: true})
+	return []CommunitySource{
+		{ID: "hifi-monochrome-api.samidy.com", Name: "Hi-Fi / monochrome-api.samidy.com", Service: "tidal", Protocol: "hifi", BaseURL: "https://monochrome-api.samidy.com", Enabled: true},
+		{ID: "lucida-qobuz", Name: "Lucida / Qobuz", Service: "qobuz", Protocol: "lucida", BaseURL: "https://lucida.to", Enabled: true, CredentialEnv: "AURALIS_LUCIDA_COOKIE", CredentialType: "cookie"},
+		{ID: "lucida-amazon", Name: "Lucida / Amazon Music", Service: "amazon", Protocol: "lucida", BaseURL: "https://lucida.to", Enabled: true, CredentialEnv: "AURALIS_LUCIDA_COOKIE", CredentialType: "cookie"},
 	}
-	return append(rows,
-		CommunitySource{ID: "qobuz-squid", Name: "SquidWTF Qobuz", Service: "qobuz", Protocol: "qobuz-dl", BaseURL: "https://qobuz.squid.wtf", Enabled: true},
-		CommunitySource{ID: "dab-xyz", Name: "DAB Music", Service: "qobuz", Protocol: "dab", BaseURL: "https://dabmusic.xyz", Enabled: true, CredentialEnv: "AURALIS_DAB_COOKIE", CredentialType: "cookie"},
-		CommunitySource{ID: "dab-yeet", Name: "DAB Yeet", Service: "qobuz", Protocol: "dab", BaseURL: "https://dab.yeet.su", Enabled: true, CredentialEnv: "AURALIS_DAB_COOKIE", CredentialType: "cookie"},
-		CommunitySource{ID: "lucida-qobuz", Name: "Lucida / Qobuz", Service: "qobuz", Protocol: "lucida", BaseURL: "https://lucida.to", Enabled: true, CredentialEnv: "AURALIS_LUCIDA_COOKIE", CredentialType: "cookie"},
-		CommunitySource{ID: "lucida-amazon", Name: "Lucida / Amazon Music", Service: "amazon", Protocol: "lucida", BaseURL: "https://lucida.to", Enabled: true, CredentialEnv: "AURALIS_LUCIDA_COOKIE", CredentialType: "cookie"},
-		CommunitySource{ID: "qobuz-rest", Name: "Qobuz REST server", Service: "qobuz", Protocol: "qobuz-rest", CredentialEnv: "AURALIS_QOBUZ_REST_KEY", CredentialType: "api_key"},
-		CommunitySource{ID: "qobuz-dl", Name: "Qobuz-DL server", Service: "qobuz", Protocol: "qobuz-dl"},
-		CommunitySource{ID: "bryan-qobuz", Name: "Bryan-DL / Qobuz", Service: "qobuz", Protocol: "qobuz-dl"},
-		CommunitySource{ID: "octo-fiesta", Name: "Octo-Fiesta / Subsonic", Service: "qobuz", Protocol: "subsonic", CredentialEnv: "AURALIS_SUBSONIC_AUTH", CredentialType: "subsonic"},
-	)
+}
+
+// retiredCommunitySources were built in until their hosts stopped resolving or
+// answering, mapped to the URL they shipped with. Saved settings can still name
+// them; a row that still points there is dropped on load so a dead host never
+// returns as a custom source. The server templates shipped without a URL, so a
+// user's own server saved under one of those IDs is kept.
+var retiredCommunitySources = map[string]string{
+	"hifi-eu-central.monochrome.tf": "https://eu-central.monochrome.tf",
+	"hifi-us-west.monochrome.tf":    "https://us-west.monochrome.tf",
+	"hifi-arran.monochrome.tf":      "https://arran.monochrome.tf",
+	"hifi-api.monochrome.tf":        "https://api.monochrome.tf",
+	"hifi-triton.squid.wtf":         "https://triton.squid.wtf",
+	"hifi-wolf.qqdl.site":           "https://wolf.qqdl.site",
+	"hifi-maus.qqdl.site":           "https://maus.qqdl.site",
+	"hifi-vogel.qqdl.site":          "https://vogel.qqdl.site",
+	"hifi-katze.qqdl.site":          "https://katze.qqdl.site",
+	"hifi-hund.qqdl.site":           "https://hund.qqdl.site",
+	"hifi-tidal.kinoplus.online":    "https://tidal.kinoplus.online",
+	"hifi-hifi.p1nkhamster.xyz":     "https://hifi.p1nkhamster.xyz",
+	"qobuz-squid":                   "https://qobuz.squid.wtf",
+	"dab-xyz":                       "https://dabmusic.xyz",
+	"dab-yeet":                      "https://dab.yeet.su",
+	"qobuz-rest":                    "",
+	"qobuz-dl":                      "",
+	"bryan-qobuz":                   "",
+	"octo-fiesta":                   "",
+}
+
+func retiredCommunitySource(row CommunitySource) bool {
+	dead, ok := retiredCommunitySources[strings.TrimSpace(row.ID)]
+	return ok && strings.TrimRight(strings.TrimSpace(row.BaseURL), "/") == dead
 }
 
 func validateCommunitySource(source CommunitySource) (CommunitySource, error) {
@@ -123,6 +148,9 @@ func listCommunitySourcesUnlocked() ([]CommunitySource, error) {
 	}
 	seen := map[string]bool{}
 	for _, row := range stored {
+		if retiredCommunitySource(row) {
+			continue
+		}
 		clean, err := validateCommunitySource(row)
 		if err != nil {
 			return nil, err
@@ -249,7 +277,17 @@ func communitySourceAttempts(service, quality, dest string, track SourceTrack) [
 			continue
 		}
 		out = append(out, sourceDownloadAttempt{id: source.ID, download: func() (string, error) {
+			started := time.Now()
 			path, err := downloadCommunitySource(source, track, quality, dest)
+			if communitySourceNeedsVerification(source, err) {
+				// The first download that reaches a protected source opens
+				// its check in the app; a passed check is retried at once.
+				if verifyErr := verifyCommunitySourceForDownload(source, started); verifyErr == nil {
+					path, err = downloadCommunitySource(source, track, quality, dest)
+				} else if IsDownloadCancelledError(verifyErr) {
+					err = verifyErr
+				}
+			}
 			if err == nil {
 				err = requireCommunityCodec(path, quality)
 			}

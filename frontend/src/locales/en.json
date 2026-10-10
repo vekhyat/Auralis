@@ -1363,12 +1363,12 @@
       "musicService": "Server music provider"
     },
     "sourceVerification": {
-      "title": "Source verification",
-      "manualHelp": "Complete the site's verification or sign-in below, then check the connection. Your session stays on this computer.",
-      "automaticHelp": "Complete the verification below. Auralis will continue automatically when the source accepts it.",
-      "cancel": "Cancel verification",
+      "title": "Quick check",
+      "manualHelp": "Complete the check or sign-in below, then check the connection. Your session stays on this computer.",
+      "automaticHelp": "Complete the check below. Auralis continues automatically.",
+      "cancel": "Cancel",
       "browserLabel": "Source verification page",
-      "opening": "Opening the source in Auralis…",
+      "opening": "Preparing…",
       "checking": "Checking connection…",
       "confirm": "Check connection",
       "connections": "Source connections",

@@ -219,6 +219,54 @@ func verificationRevealAllowed(parentAttached bool, width, height int) bool {
 	return parentAttached && width > 0 && height > 0
 }
 
+// verificationRect is a window rectangle in physical screen pixels.
+type verificationRect struct {
+	left, top, right, bottom int
+}
+
+// verificationFrameInsets is the browser chrome Edge keeps drawing around the
+// page after it becomes a child window: its title bar, caption buttons, and
+// resize border. The embed is shifted by these insets and clipped to the page,
+// so the main window shows only the verification content.
+type verificationFrameInsets struct {
+	left, top, right, bottom int
+}
+
+// grow extends every side by n, used to push the page's own edge past the clip.
+func (i verificationFrameInsets) grow(n int) verificationFrameInsets {
+	return verificationFrameInsets{i.left + n, i.top + n, i.right + n, i.bottom + n}
+}
+
+// Edge's chrome measures about 7px per side and 30px on top at 100% scale.
+// The caps allow 400% scaling with headroom; anything larger means the wrong
+// widget was measured and showing the window could expose the title bar.
+const (
+	verificationMaxSideInset = 64
+	verificationMaxTopInset  = 192
+)
+
+// verificationFrameInsetsFrom derives the chrome around the page from Edge's
+// window rect and its page widget rect. ok=false keeps the embed hidden.
+func verificationFrameInsetsFrom(window, page verificationRect) (verificationFrameInsets, bool) {
+	if page.right <= page.left || page.bottom <= page.top {
+		return verificationFrameInsets{}, false
+	}
+	insets := verificationFrameInsets{
+		left:   page.left - window.left,
+		top:    page.top - window.top,
+		right:  window.right - page.right,
+		bottom: window.bottom - page.bottom,
+	}
+	if insets.left < 0 || insets.top < 0 || insets.right < 0 || insets.bottom < 0 {
+		return verificationFrameInsets{}, false
+	}
+	if insets.left > verificationMaxSideInset || insets.right > verificationMaxSideInset ||
+		insets.bottom > verificationMaxSideInset || insets.top > verificationMaxTopInset {
+		return verificationFrameInsets{}, false
+	}
+	return insets, true
+}
+
 func verificationChildStyle(style uintptr) uintptr {
 	const popupChrome = wsPopupStyle | wsCaptionStyle | wsSysMenuStyle | wsThickFrameStyle | wsMinimizeBoxStyle | wsMaximizeBoxStyle
 	style &^= popupChrome

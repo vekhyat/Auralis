@@ -179,7 +179,7 @@ func TestManualVerificationCancelDoesNotMarkVerified(t *testing.T) {
 	}
 	done := make(chan CommunitySourceCheck, 1)
 	go func() {
-		result, err := VerifyCommunitySource("dab-xyz")
+		result, err := VerifyCommunitySource("lucida-qobuz")
 		if err != nil {
 			t.Errorf("verify: %v", err)
 		}
@@ -207,7 +207,7 @@ func TestManualVerificationCancelDoesNotMarkVerified(t *testing.T) {
 		t.Fatalf("confirm after cancel = %v %v", accepted, err)
 	}
 	for _, row := range GetCommunitySourceChecks() {
-		if row.ID == "dab-xyz" && (row.AudioVerified || row.State == "available" || row.State == "validated") {
+		if row.ID == "lucida-qobuz" && (row.AudioVerified || row.State == "available" || row.State == "validated") {
 			t.Fatalf("cancel stored a verified check: %+v", row)
 		}
 	}
@@ -224,7 +224,7 @@ func TestManualVerificationFollowsDownloadContextCancel(t *testing.T) {
 	sourceVerificationHook.close = func() { closed.Add(1) }
 	done := make(chan CommunitySourceCheck, 1)
 	go func() {
-		result, err := VerifyCommunitySource("dab-xyz")
+		result, err := VerifyCommunitySource("lucida-qobuz")
 		if err != nil {
 			t.Errorf("verify: %v", err)
 		}
@@ -252,7 +252,7 @@ func TestManualVerificationTimeoutDoesNotMarkVerified(t *testing.T) {
 	sourceVerificationHook.timeout = 200 * time.Millisecond
 	sourceVerificationHook.open = func(string) <-chan error { return make(chan error) }
 	sourceVerificationHook.close = func() { closed.Add(1) }
-	result, err := VerifyCommunitySource("dab-xyz")
+	result, err := VerifyCommunitySource("lucida-qobuz")
 	if err != nil || result.State == "available" || result.AudioVerified || closed.Load() == 0 {
 		t.Fatalf("timeout result %+v closed=%d err=%v", result, closed.Load(), err)
 	}
@@ -353,7 +353,7 @@ func TestBrowserSessionCookiesStayOnTheirOrigin(t *testing.T) {
 	t.Cleanup(resetSourceVerificationForTest)
 	wide := storedCookie{Name: "wide", Value: "wide-secret-value", Domain: ".lucida.to", Path: "/", Secure: true}
 	hostOnly := storedCookie{Name: "host", Value: "host-secret-value", Domain: "lucida.to", Path: "/", HostOnly: true, Secure: true}
-	other := storedCookie{Name: "other", Value: "other-secret-value", Domain: "dabmusic.xyz", Path: "/", HostOnly: true, Secure: true}
+	other := storedCookie{Name: "other", Value: "other-secret-value", Domain: "other-source.example", Path: "/", HostOnly: true, Secure: true}
 	source := CommunitySource{ID: "lucida-qobuz", Name: "Lucida", Service: "qobuz", Protocol: "lucida", BaseURL: "https://lucida.to", Enabled: true, CredentialEnv: "AURALIS_TEST_LUCIDA_COOKIE", CredentialType: "cookie"}
 	if err := saveCommunityBrowserSession(source, []storedCookie{wide, hostOnly, other}); err != nil {
 		t.Fatal(err)
@@ -470,21 +470,21 @@ func TestVerificationTargetURLIsExactConfiguredOrigin(t *testing.T) {
 	if err := validateVerificationChallengeURL("https://api.zarz.moe/challenge"); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateVerificationChallengeURL("https://dabmusic.xyz/"); err == nil {
+	if err := validateVerificationChallengeURL("https://lucida.to/"); err == nil {
 		t.Fatal("legacy allowlist accepted a community origin")
 	}
-	if err := validateVerificationTargetURL("https://dabmusic.xyz/login"); err != nil {
+	if err := validateVerificationTargetURL("https://lucida.to/login"); err != nil {
 		t.Fatal(err)
 	}
 	if err := validateVerificationTargetURL("https://api.zarz.moe/challenge"); err != nil {
 		t.Fatal(err)
 	}
 	for _, blocked := range []string{
-		"https://www.dabmusic.xyz/",
-		"https://evil.dabmusic.xyz/",
-		"https://dabmusic.xyz.evil.test/",
-		"https://user:secret@dabmusic.xyz/",
-		"http://dabmusic.xyz/",
+		"https://www.lucida.to/",
+		"https://evil.lucida.to/",
+		"https://lucida.to.evil.test/",
+		"https://user:secret@lucida.to/",
+		"http://lucida.to/",
 		"javascript:alert(1)",
 	} {
 		if err := validateVerificationTargetURL(blocked); err == nil {
@@ -508,7 +508,7 @@ func TestCaptureRequestsOnlyTheSelectedOrigin(t *testing.T) {
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/json/list", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, `[{"type":"page","url":"https://dabmusic.xyz/","webSocketDebuggerUrl":"ws://127.0.0.1:%d/devtools/page/verification"}]`, port)
+		fmt.Fprintf(w, `[{"type":"page","url":"https://lucida.to/","webSocketDebuggerUrl":"ws://127.0.0.1:%d/devtools/page/verification"}]`, port)
 	})
 	mux.HandleFunc("/json/version", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `{"webSocketDebuggerUrl":"ws://127.0.0.1:%d/devtools/browser"}`, port)
@@ -535,7 +535,7 @@ func TestCaptureRequestsOnlyTheSelectedOrigin(t *testing.T) {
 			result := map[string]any{}
 			if req.Method == "Network.getCookies" {
 				result["cookies"] = []map[string]any{
-					{"name": "session", "value": "origin-secret-value", "domain": "dabmusic.xyz", "path": "/", "expires": -1, "secure": true, "httpOnly": true},
+					{"name": "session", "value": "origin-secret-value", "domain": "lucida.to", "path": "/", "expires": -1, "secure": true, "httpOnly": true},
 					{"name": "other", "value": "foreign-secret-value", "domain": "evil.example", "path": "/", "expires": -1, "secure": true},
 				}
 			}
@@ -553,21 +553,21 @@ func TestCaptureRequestsOnlyTheSelectedOrigin(t *testing.T) {
 		_ = server.Shutdown(ctx)
 	}()
 
-	cookies, err := captureCommunityCookiesFromProfile(profile, "https://dabmusic.xyz/")
+	cookies, err := captureCommunityCookiesFromProfile(profile, "https://lucida.to/")
 	if err != nil {
 		t.Fatal(err)
 	}
 	mu.Lock()
 	request := got.String()
 	mu.Unlock()
-	if !strings.Contains(request, "Network.getCookies") || strings.Contains(request, "getAllCookies") || !strings.Contains(request, "https://dabmusic.xyz/") {
+	if !strings.Contains(request, "Network.getCookies") || strings.Contains(request, "getAllCookies") || !strings.Contains(request, "https://lucida.to/") {
 		t.Fatalf("cookie request was not limited to the origin: %s", request)
 	}
 	if len(cookies) != 1 || cookies[0].Name != "session" || cookies[0].Value != "origin-secret-value" {
 		t.Fatalf("cookies %+v", cookies)
 	}
 	foreign := filepath.Join(t.TempDir(), "Google", "Chrome", "User Data", "Default")
-	if _, err := captureCommunityCookiesFromProfile(foreign, "https://dabmusic.xyz/"); err == nil {
+	if _, err := captureCommunityCookiesFromProfile(foreign, "https://lucida.to/"); err == nil {
 		t.Fatal("foreign browser profile was read")
 	}
 }

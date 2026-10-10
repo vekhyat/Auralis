@@ -73,19 +73,41 @@ func TestVerificationChildStyleStripsPopupChrome(t *testing.T) {
 	}
 }
 
+func TestVerificationFrameInsetsFrom(t *testing.T) {
+	window := verificationRect{left: 100, top: 200, right: 594, bottom: 537}
+	cases := []struct {
+		name string
+		page verificationRect
+		want verificationFrameInsets
+		ok   bool
+	}{
+		{"edge chrome", verificationRect{107, 230, 587, 530}, verificationFrameInsets{7, 30, 7, 7}, true},
+		{"no chrome", window, verificationFrameInsets{}, true},
+		{"empty page", verificationRect{107, 230, 107, 530}, verificationFrameInsets{}, false},
+		{"page outside window", verificationRect{90, 230, 587, 530}, verificationFrameInsets{}, false},
+		{"mostly chrome", verificationRect{107, 430, 587, 530}, verificationFrameInsets{}, false},
+	}
+	for _, tc := range cases {
+		got, ok := verificationFrameInsetsFrom(window, tc.page)
+		if got != tc.want || ok != tc.ok {
+			t.Fatalf("%s: got %+v ok=%v, want %+v ok=%v", tc.name, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
 func TestValidateVerificationTargetURL(t *testing.T) {
 	dir := isolateVerificationAppDir(t)
 	writeCommunitySourceFixture(t, dir, `[
 		{"id":"local-subsonic","name":"Local Subsonic","service":"qobuz","protocol":"subsonic","base_url":"http://127.0.0.1:4533","enabled":true}
 	]`)
 
-	if err := validateVerificationChallengeURL("https://dabmusic.xyz/login"); err == nil {
+	if err := validateVerificationChallengeURL("https://lucida.to/login"); err == nil {
 		t.Fatal("legacy challenge validation must still reject a community source host")
 	}
 	if err := validateVerificationTargetURL("https://api.zarz.moe/challenge?id=1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateVerificationTargetURL("https://dabmusic.xyz/login"); err != nil {
+	if err := validateVerificationTargetURL("https://lucida.to/login"); err != nil {
 		t.Fatal(err)
 	}
 	if err := validateVerificationTargetURL("http://127.0.0.1:4533/app"); err != nil {
@@ -93,19 +115,19 @@ func TestValidateVerificationTargetURL(t *testing.T) {
 	}
 	for _, raw := range []string{
 		"http://api.zarz.moe/challenge",
-		"http://dabmusic.xyz/login",
+		"http://lucida.to/login",
 		"http://127.0.0.1:4534/app",
 		"http://example.com",
 		"https://evil.example/turnstile",
-		"https://dabmusic.xyz.evil.com/login",
-		"https://user:secret@dabmusic.xyz/login?token=abc",
+		"https://lucida.to.evil.com/login",
+		"https://user:secret@lucida.to/login?token=abc",
 		"javascript:alert(1)",
 	} {
 		if err := validateVerificationTargetURL(raw); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}
 	}
-	err := validateVerificationTargetURL("https://user:secret@dabmusic.xyz/login?token=abc")
+	err := validateVerificationTargetURL("https://user:secret@lucida.to/login?token=abc")
 	if err == nil || strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "token") {
 		t.Fatalf("credential rejection leaked the URL: %v", err)
 	}
@@ -117,7 +139,7 @@ func TestPresentVerificationAllowsConfiguredOrigin(t *testing.T) {
 	t.Cleanup(release)
 	ForceStopActiveDownloads()
 	if embeddedVerificationSupported() {
-		err := presentVerificationChallenge("https://dabmusic.xyz/login")
+		err := presentVerificationChallenge("https://lucida.to/login")
 		if !IsDownloadCancelledError(err) {
 			t.Fatalf("configured origin should pass validation, got %v", err)
 		}
@@ -130,9 +152,9 @@ func TestPresentVerificationAllowsConfiguredOrigin(t *testing.T) {
 
 func TestValidateVerificationNavigation(t *testing.T) {
 	isolateVerificationAppDir(t)
-	origin := "https://dabmusic.xyz/start"
+	origin := "https://lucida.to/start"
 	tidal := "https://monochrome-api.samidy.com/session"
-	if err := validateVerificationNavigation(origin, "https://dabmusic.xyz/login?next=1"); err != nil {
+	if err := validateVerificationNavigation(origin, "https://lucida.to/login?next=1"); err != nil {
 		t.Fatal(err)
 	}
 	if err := validateVerificationNavigation(origin, "https://www.qobuz.com/login"); err != nil {
@@ -145,13 +167,13 @@ func TestValidateVerificationNavigation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, next := range []string{
-		"https://login.dabmusic.xyz/auth",
+		"https://login.lucida.to/auth",
 		"https://login.tidal.com/authorize",
-		"http://dabmusic.xyz/login",
+		"http://lucida.to/login",
 		"http://www.qobuz.com/login",
 		"https://evil.example/phish",
 		"https://qobuz.com.evil.example/login",
-		"https://user:secret@dabmusic.xyz/login",
+		"https://user:secret@lucida.to/login",
 	} {
 		if err := validateVerificationNavigation(origin, next); err == nil {
 			t.Fatalf("transition to %s was allowed", next)
@@ -169,7 +191,7 @@ func TestVerificationPresentationOmitsSecrets(t *testing.T) {
 	})
 	t.Cleanup(func() { SetVerificationPresentationHandler(nil) })
 
-	raw := "https://dabmusic.xyz/login?token=super-secret#grant"
+	raw := "https://lucida.to/login?token=super-secret#grant"
 	publishVerificationPresentation(VerificationPresentation{
 		ID: atomic.LoadUint64(&verificationRunSeq) + 1, Active: true, Title: verificationGenericTitle, Host: verificationPresentationHost(raw), Ready: false,
 	})
@@ -177,14 +199,14 @@ func TestVerificationPresentationOmitsSecrets(t *testing.T) {
 	select {
 	case snap := <-events:
 		assertPresentationSafe(t, snap, raw)
-		if snap.Host != "dabmusic.xyz" || snap.Title != verificationGenericTitle || !snap.Active || snap.Ready {
+		if snap.Host != "lucida.to" || snap.Title != verificationGenericTitle || !snap.Active || snap.Ready {
 			t.Fatalf("snapshot = %+v", snap)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("presentation handler was not called")
 	}
 
-	if err := OpenVerificationWindow("https://user:secret@dabmusic.xyz/login?token=abc"); err == nil {
+	if err := OpenVerificationWindow("https://user:secret@lucida.to/login?token=abc"); err == nil {
 		t.Fatal("credential URL must be rejected before a browser starts")
 	}
 	failed := GetVerificationPresentation()

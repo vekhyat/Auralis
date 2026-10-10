@@ -90,6 +90,8 @@ type manualSourceVerification struct {
 	runID       uint64
 	result      CommunitySourceCheck
 	probeCancel context.CancelFunc
+	// auto sessions confirm themselves; the window shows no confirm button.
+	auto bool
 }
 
 var (
@@ -157,22 +159,36 @@ func VerifyCommunitySource(id string) (result CommunitySourceCheck, resultErr er
 			CheckedAt: time.Now().UTC().Format(time.RFC3339), Action: "configure",
 		}, nil
 	}
-	if !embeddedVerificationSupported() && sourceVerificationHook.open == nil {
-		return result, errInAppVerificationUnavailable
-	}
-	if currentManual() != nil {
-		return result, fmt.Errorf("a source verification window is already open")
-	}
-	if sourceVerificationHook.open == nil {
-		if attempt := adoptVerificationAttempt(); attempt != nil {
-			return result, fmt.Errorf("a verification window is already open")
-		}
+	if err := communityVerificationPreflight(); err != nil {
+		return result, err
 	}
 	if err := TryBeginTrackedDownload(); err != nil {
 		return result, err
 	}
 	defer EndTrackedDownload()
+	return runCommunitySourceVerification(source, false)
+}
 
+func communityVerificationPreflight() error {
+	if !embeddedVerificationSupported() && sourceVerificationHook.open == nil {
+		return errInAppVerificationUnavailable
+	}
+	if currentManual() != nil {
+		return fmt.Errorf("a source verification window is already open")
+	}
+	if sourceVerificationHook.open == nil {
+		if attempt := adoptVerificationAttempt(); attempt != nil {
+			return fmt.Errorf("a verification window is already open")
+		}
+	}
+	return nil
+}
+
+// runCommunitySourceVerification opens the source in the in-app window and
+// waits for success, cancel, or timeout. In manual mode the user confirms; in
+// auto mode the source API is retried in the background and the window closes
+// by itself once the site accepts the session.
+func runCommunitySourceVerification(source CommunitySource, auto bool) (result CommunitySourceCheck, resultErr error) {
 	target, err := communityVerificationURL(source)
 	if err != nil {
 		return result, err
@@ -180,7 +196,7 @@ func VerifyCommunitySource(id string) (result CommunitySourceCheck, resultErr er
 	if err := validateCommunityVerificationTarget(target); err != nil {
 		return result, err
 	}
-	session, err := beginManualSession(source)
+	session, err := beginManualSession(source, auto)
 	if err != nil {
 		return result, err
 	}
@@ -201,6 +217,11 @@ func VerifyCommunitySource(id string) (result CommunitySourceCheck, resultErr er
 	defer func() { close(readyStop); <-readyDone }()
 	windowErr := openCommunityVerification(session, target)
 	go func() { defer close(readyDone); watchCommunityVerification(session, host, previousRun, readyStop) }()
+	if auto {
+		autoDone := make(chan struct{})
+		defer func() { <-autoDone }()
+		go func() { defer close(autoDone); autoConfirmCommunityVerification(session) }()
+	}
 
 	timer := time.NewTimer(communityManualTimeout())
 	defer timer.Stop()
@@ -310,7 +331,33 @@ func ConfirmSourceVerification() (bool, error) {
 // Grant verification does not use it.
 func SourceVerificationNeedsConfirmation() bool {
 	session := currentManual()
-	return session != nil && !session.isFinished()
+	return session != nil && !session.isFinished() && !session.auto
+}
+
+// communityAutoConfirmInterval paces the background API retries of an auto
+// session: quick enough to close soon after the check passes, slow enough to
+// stay a handful of requests per minute.
+var communityAutoConfirmInterval = 2500 * time.Millisecond
+
+// autoConfirmCommunityVerification keeps trying the source API with the
+// window's cookies until it answers. Rejections are expected while the user
+// is still completing the check, so they are not shown.
+func autoConfirmCommunityVerification(session *manualSourceVerification) {
+	ticker := time.NewTicker(communityAutoConfirmInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-session.done:
+			return
+		case <-ticker.C:
+			if sourceVerificationHook.open == nil && !GetVerificationPresentation().Ready {
+				continue
+			}
+			if accepted, _ := ConfirmSourceVerification(); accepted {
+				return
+			}
+		}
+	}
 }
 
 func communityManualTimeout() time.Duration {
@@ -420,7 +467,7 @@ func validateCommunityVerificationTarget(raw string) error {
 // native worker's exact-origin check.
 var sourceVerificationHookValidate func(string) error
 
-func beginManualSession(source CommunitySource) (*manualSourceVerification, error) {
+func beginManualSession(source CommunitySource, auto bool) (*manualSourceVerification, error) {
 	manualMu.Lock()
 	defer manualMu.Unlock()
 	if manualCurrent != nil && !manualCurrent.isFinished() {
@@ -432,6 +479,7 @@ func beginManualSession(source CommunitySource) (*manualSourceVerification, erro
 		scope:  communitySourceScope(source),
 		done:   make(chan struct{}),
 		cancel: make(chan struct{}),
+		auto:   auto,
 	}
 	manualCurrent = session
 	return session, nil
@@ -1147,6 +1195,7 @@ func resetSourceVerificationForTest() {
 	browserSessionCache.path = ""
 	browserSessionCache.records = nil
 	browserSessionCache.Unlock()
+	resetVerificationDeclinedForTest()
 }
 
 func refuseForeignBrowserProfile(profileDir string) error {

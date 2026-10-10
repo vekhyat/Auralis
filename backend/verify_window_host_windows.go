@@ -34,6 +34,8 @@ const (
 
 	auralisMainWindowClass = "wailsWindow"
 	auralisMainWindowTitle = "Auralis"
+
+	verificationPageWidgetClass = "Chrome_RenderWidgetHostHWND"
 )
 
 var (
@@ -67,6 +69,25 @@ var (
 
 	modKernel32 = windows.NewLazySystemDLL("kernel32.dll")
 
+	modGdi32          = windows.NewLazySystemDLL("gdi32.dll")
+	procCreateRectRgn = modGdi32.NewProc("CreateRectRgn")
+	procDeleteObject  = modGdi32.NewProc("DeleteObject")
+	procSetWindowRgn  = modUser32.NewProc("SetWindowRgn")
+	procGetWindowRect = modUser32.NewProc("GetWindowRect")
+
+	procGetDpiForWindow = modUser32.NewProc("GetDpiForWindow")
+
+	verifyPageOnce sync.Once
+	verifyPageProc uintptr
+	verifyPageMu   sync.Mutex
+	verifyPageBest verificationRect
+	verifyPageArea int
+
+	verifyFrameMu   sync.Mutex
+	verifyFrameHWND windows.HWND
+	verifyFrameLast verificationFrameInsets
+	verifyFrameOK   bool
+
 	auralisWindowOnce  sync.Once
 	auralisWindowProc  uintptr
 	auralisWindowMu    sync.Mutex
@@ -95,9 +116,30 @@ func restyleVerificationJobWindows(job windows.Handle, parent windows.HWND, left
 	_ = windows.EnumWindows(verifyChromeProc, nil)
 	verifyChromeMu.Lock()
 	found := verifyChromeFound
+	show = verifyChromeShow
 	verifyChromeJob = 0
 	verifyChromeMu.Unlock()
+	if found == 0 {
+		found = placeEmbeddedVerificationWindow(job, parent, left, top, width, height, show)
+	}
 	return found
+}
+
+// placeEmbeddedVerificationWindow keeps placing Edge after it became a child.
+// EnumWindows lists only top-level windows, and the reveal waits for a stable
+// frame measurement across ticks, so the docked window must be placed here.
+func placeEmbeddedVerificationWindow(job windows.Handle, parent windows.HWND, left, top, width, height int, show bool) windows.HWND {
+	primary := latchedVerificationWindow()
+	if primary == 0 || parent == 0 || !hwndBelongsToJob(uintptr(primary), job) {
+		return 0
+	}
+	if current, _, _ := procGetParent.Call(uintptr(primary)); current != uintptr(parent) {
+		return 0
+	}
+	if !placeVerificationWindow(primary, parent, left, top, width, height, show) {
+		return 0
+	}
+	return primary
 }
 
 func enumVerificationChromeWindow(hwnd uintptr, _ uintptr) uintptr {
@@ -246,6 +288,12 @@ func placeVerificationWindow(hwnd, parent windows.HWND, left, top, width, height
 		hideVerificationWindow(hwnd)
 		return false
 	}
+	insets, measured := verificationStableFrame(hwnd)
+	if !measured {
+		show = false
+	} else {
+		insets = insets.grow(verificationContentMargin(parent))
+	}
 	style := verificationChildStyle(windowLong(hwnd, verifyGwlStyle))
 	if show {
 		style |= wsVisibleStyle
@@ -268,17 +316,115 @@ func placeVerificationWindow(hwnd, parent windows.HWND, left, top, width, height
 		flags |= swpHideWindow
 		_, _, _ = procShowWindow.Call(uintptr(hwnd), uintptr(swHide))
 	}
+	// Edge still lays out its title bar and border inside the child. Grow the
+	// window by that chrome and clip it back to the page, so the viewport shows
+	// the verification content and never Edge's caption, title, or buttons.
 	_, _, _ = procSetWindowPos.Call(
 		uintptr(hwnd),
 		0,
-		uintptr(int32(left)),
-		uintptr(int32(top)),
-		uintptr(int32(width)),
-		uintptr(int32(height)),
+		uintptr(int32(left-insets.left)),
+		uintptr(int32(top-insets.top)),
+		uintptr(int32(width+insets.left+insets.right)),
+		uintptr(int32(height+insets.top+insets.bottom)),
 		flags,
 	)
+	clipVerificationWindow(hwnd, insets, width, height)
 	got, _, _ := procGetParent.Call(uintptr(hwnd))
 	return got == uintptr(parent)
+}
+
+// verificationContentMargin is how far the page extends past the viewport on
+// every side. Edge draws a rounded border inside its page widget; laying the
+// page out slightly larger keeps that border and its corners outside the clip.
+func verificationContentMargin(parent windows.HWND) int {
+	const logical = 10
+	dpi, _, _ := procGetDpiForWindow.Call(uintptr(parent))
+	if dpi == 0 {
+		dpi = 96
+	}
+	return (logical*int(dpi) + 48) / 96
+}
+
+// clipVerificationWindow limits hwnd to the page rect. Its coordinates are
+// relative to the window's own top-left corner.
+func clipVerificationWindow(hwnd windows.HWND, insets verificationFrameInsets, width, height int) {
+	rgn, _, _ := procCreateRectRgn.Call(
+		uintptr(int32(insets.left)),
+		uintptr(int32(insets.top)),
+		uintptr(int32(insets.left+width)),
+		uintptr(int32(insets.top+height)),
+	)
+	if rgn == 0 {
+		return
+	}
+	// The system owns the region once SetWindowRgn succeeds.
+	if ok, _, _ := procSetWindowRgn.Call(uintptr(hwnd), rgn, 1); ok == 0 {
+		_, _, _ = procDeleteObject.Call(rgn)
+	}
+}
+
+// verificationStableFrame measures Edge's chrome and reports it only once two
+// consecutive measurements agree. Chromium relayouts after the restyle, so a
+// single early reading could reveal a sliver of its title bar.
+func verificationStableFrame(hwnd windows.HWND) (verificationFrameInsets, bool) {
+	insets, ok := measureVerificationFrame(hwnd)
+	verifyFrameMu.Lock()
+	defer verifyFrameMu.Unlock()
+	stable := ok && verifyFrameHWND == hwnd && verifyFrameOK && verifyFrameLast == insets
+	verifyFrameHWND, verifyFrameLast, verifyFrameOK = hwnd, insets, ok
+	return insets, stable
+}
+
+func measureVerificationFrame(hwnd windows.HWND) (verificationFrameInsets, bool) {
+	var window windows.Rect
+	if !verificationWindowRect(hwnd, &window) {
+		return verificationFrameInsets{}, false
+	}
+	page, ok := verificationPageRect(hwnd)
+	if !ok {
+		return verificationFrameInsets{}, false
+	}
+	return verificationFrameInsetsFrom(
+		verificationRect{int(window.Left), int(window.Top), int(window.Right), int(window.Bottom)},
+		page,
+	)
+}
+
+func verificationWindowRect(hwnd windows.HWND, rect *windows.Rect) bool {
+	ok, _, _ := procGetWindowRect.Call(uintptr(hwnd), uintptr(unsafe.Pointer(rect)))
+	return ok != 0
+}
+
+// verificationPageRect finds the largest page widget under hwnd. Chromium
+// sizes this window to the web content, excluding its own frame.
+func verificationPageRect(hwnd windows.HWND) (verificationRect, bool) {
+	verifyPageOnce.Do(func() {
+		verifyPageProc = windows.NewCallback(enumVerificationPageWidget)
+	})
+	verifyPageMu.Lock()
+	defer verifyPageMu.Unlock()
+	verifyPageBest = verificationRect{}
+	verifyPageArea = 0
+	windows.EnumChildWindows(hwnd, verifyPageProc, nil)
+	return verifyPageBest, verifyPageArea > 0
+}
+
+// enumVerificationPageWidget runs synchronously inside EnumChildWindows while
+// verificationPageRect holds verifyPageMu.
+func enumVerificationPageWidget(hwnd uintptr, _ uintptr) uintptr {
+	if verificationWindowClassName(hwnd) != verificationPageWidgetClass {
+		return 1
+	}
+	var rect windows.Rect
+	if !verificationWindowRect(windows.HWND(hwnd), &rect) {
+		return 1
+	}
+	area := int(rect.Right-rect.Left) * int(rect.Bottom-rect.Top)
+	if area > verifyPageArea {
+		verifyPageArea = area
+		verifyPageBest = verificationRect{int(rect.Left), int(rect.Top), int(rect.Right), int(rect.Bottom)}
+	}
+	return 1
 }
 
 func hideVerificationWindow(hwnd windows.HWND) {

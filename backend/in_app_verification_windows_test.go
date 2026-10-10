@@ -27,46 +27,7 @@ func TestNativeConfiguredVerificationConfirmsSession(t *testing.T) {
 	}
 	t.Setenv(appDataDirEnv, t.TempDir())
 	t.Cleanup(resetSourceVerificationForTest)
-	const wsOverlappedWindow = uintptr(0x00CF0000)
-	readyParent := make(chan struct{})
-	stopParent := make(chan struct{})
-	doneParent := make(chan struct{})
-	go func() {
-		runtime.LockOSThread()
-		defer runtime.UnlockOSThread()
-		defer close(doneParent)
-		parent := createTestWindow(t, auralisMainWindowClass, auralisMainWindowTitle, wsOverlappedWindow, 0)
-		close(readyParent)
-		peek := modUser32.NewProc("PeekMessageW")
-		translate := modUser32.NewProc("TranslateMessage")
-		dispatch := modUser32.NewProc("DispatchMessageW")
-		var msg struct {
-			Hwnd           uintptr
-			Message        uint32
-			WParam, LParam uintptr
-			Time           uint32
-			X, Y           int32
-			Private        uint32
-		}
-		for {
-			for {
-				ok, _, _ := peek.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0, 1)
-				if ok == 0 {
-					break
-				}
-				translate.Call(uintptr(unsafe.Pointer(&msg)))
-				dispatch.Call(uintptr(unsafe.Pointer(&msg)))
-			}
-			select {
-			case <-stopParent:
-				procDestroyWindow.Call(uintptr(parent))
-				return
-			case <-time.After(10 * time.Millisecond):
-			}
-		}
-	}()
-	<-readyParent
-	t.Cleanup(func() { close(stopParent); <-doneParent })
+	pumpedAuralisTestWindow(t)
 	var server *httptest.Server
 	var pageServed atomic.Bool
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -136,6 +97,54 @@ func TestNativeConfiguredVerificationConfirmsSession(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatalf("the local verification page did not become ready (host ready=%t, page served=%t)", GetVerificationPresentation().Ready, pageServed.Load())
+}
+
+// pumpedAuralisTestWindow stands in for the Wails window. Like the real one it
+// pumps messages on its own thread, which a reparented Edge window relies on:
+// moves and redraws of a cross-process child wait for the parent to respond.
+func pumpedAuralisTestWindow(t *testing.T) windows.HWND {
+	t.Helper()
+	const wsOverlappedWindow = uintptr(0x00CF0000)
+	readyParent := make(chan windows.HWND)
+	stopParent := make(chan struct{})
+	doneParent := make(chan struct{})
+	go func() {
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+		defer close(doneParent)
+		parent := createTestWindow(t, auralisMainWindowClass, auralisMainWindowTitle, wsOverlappedWindow, 0)
+		readyParent <- parent
+		peek := modUser32.NewProc("PeekMessageW")
+		translate := modUser32.NewProc("TranslateMessage")
+		dispatch := modUser32.NewProc("DispatchMessageW")
+		var msg struct {
+			Hwnd           uintptr
+			Message        uint32
+			WParam, LParam uintptr
+			Time           uint32
+			X, Y           int32
+			Private        uint32
+		}
+		for {
+			for {
+				ok, _, _ := peek.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0, 1)
+				if ok == 0 {
+					break
+				}
+				translate.Call(uintptr(unsafe.Pointer(&msg)))
+				dispatch.Call(uintptr(unsafe.Pointer(&msg)))
+			}
+			select {
+			case <-stopParent:
+				procDestroyWindow.Call(uintptr(parent))
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}()
+	parent := <-readyParent
+	t.Cleanup(func() { close(stopParent); <-doneParent })
+	return parent
 }
 
 const errorClassAlreadyExists = 1410
@@ -298,6 +307,51 @@ func TestSuppressVerificationPopupDoesNotShowIt(t *testing.T) {
 	}
 }
 
+// assertVerificationShowsOnlyPage checks that Edge's page covers the requested
+// viewport and that its window region excludes the title bar and page border.
+func assertVerificationShowsOnlyPage(t *testing.T, job windows.Handle, child, parent windows.HWND, left, top, width, height int) {
+	t.Helper()
+	// The test parent is never shown, so IsWindowVisible stays false; the
+	// child's own WS_VISIBLE bit records whether placement revealed it.
+	deadline := time.Now().Add(10 * time.Second)
+	for windowLong(child, verifyGwlStyle)&wsVisibleStyle == 0 {
+		if time.Now().After(deadline) {
+			insets, ok := measureVerificationFrame(child)
+			t.Fatalf("Edge page never measured a stable frame (last insets %+v ok=%v)", insets, ok)
+		}
+		// The app's appearance loop path, after Edge stopped being top-level.
+		restyleVerificationJobWindows(job, parent, left, top, width, height, true)
+		time.Sleep(200 * time.Millisecond)
+	}
+	page, ok := verificationPageRect(child)
+	if !ok {
+		t.Fatal("Edge page widget disappeared")
+	}
+	var origin struct{ X, Y int32 }
+	clientToScreen := testUser32.NewProc("ClientToScreen")
+	clientToScreen.Call(uintptr(parent), uintptr(unsafe.Pointer(&origin)))
+	// The page overhangs the viewport by the margin so Edge's rounded page
+	// border stays outside the clip.
+	m := verificationContentMargin(parent)
+	got := verificationRect{page.left - int(origin.X), page.top - int(origin.Y), page.right - int(origin.X), page.bottom - int(origin.Y)}
+	if want := (verificationRect{left - m, top - m, left + width + m, top + height + m}); got != want {
+		t.Fatalf("Edge page at %+v in the Auralis window, want %+v", got, want)
+	}
+	var window windows.Rect
+	if !verificationWindowRect(child, &window) {
+		t.Fatal("Edge window rect unavailable")
+	}
+	var box windows.Rect
+	getRgnBox := testUser32.NewProc("GetWindowRgnBox")
+	if kind, _, _ := getRgnBox.Call(uintptr(child), uintptr(unsafe.Pointer(&box))); kind != 2 { // SIMPLEREGION
+		t.Fatalf("Edge window region kind = %d, want a rectangle", kind)
+	}
+	clip := verificationRect{int(box.Left) + int(window.Left), int(box.Top) + int(window.Top), int(box.Right) + int(window.Left), int(box.Bottom) + int(window.Top)}
+	if want := (verificationRect{page.left + m, page.top + m, page.right - m, page.bottom - m}); clip != want {
+		t.Fatalf("Edge clip %+v, want the page %+v inset by %d", clip, page, m)
+	}
+}
+
 func TestNativeVerificationEdgeEmbedsInParent(t *testing.T) {
 	if os.Getenv("AURALIS_VERIFY_NATIVE") == "" {
 		t.Skip("set AURALIS_VERIFY_NATIVE=1 to launch a hidden Edge process")
@@ -306,8 +360,7 @@ func TestNativeVerificationEdgeEmbedsInParent(t *testing.T) {
 	if edge == "" {
 		t.Skip("Microsoft Edge is not installed")
 	}
-	const wsOverlappedWindow = uintptr(0x00CF0000)
-	parent := createTestWindow(t, auralisMainWindowClass, auralisMainWindowTitle, wsOverlappedWindow, 0)
+	parent := pumpedAuralisTestWindow(t)
 	parentStyle := windowLong(parent, verifyGwlStyle)
 	parentTitle := verificationWindowTitle(uintptr(parent))
 	profile := filepath.Join(t.TempDir(), "edge-profile")
@@ -358,6 +411,7 @@ func TestNativeVerificationEdgeEmbedsInParent(t *testing.T) {
 	if windowLong(parent, verifyGwlStyle) != parentStyle || verificationWindowTitle(uintptr(parent)) != parentTitle {
 		t.Fatal("Edge attach changed the Auralis window")
 	}
+	assertVerificationShowsOnlyPage(t, job, child, parent, 12, 16, 220, 140)
 	if !placeVerificationWindow(child, parent, 0, 0, 0, 0, true) {
 		t.Fatal("zero viewport detached Edge")
 	}
