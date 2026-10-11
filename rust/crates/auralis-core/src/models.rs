@@ -33,7 +33,9 @@ pub struct FetchHistoryItem {
     pub timestamp: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Missing fields decode to zero values, as Go's `encoding/json` does.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
 pub struct RecentFetchItem {
     pub id: String,
     pub url: String,

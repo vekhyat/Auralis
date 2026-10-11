@@ -1,4 +1,4 @@
-//! Thread-safe atomic JSON store for recent fetches.
+//! Thread-safe atomic JSON store for recent fetches (port of `backend/recent_fetches.go`).
 
 use auralis_config::write_file_atomic;
 use auralis_core::error::store::StoreError;
@@ -6,8 +6,6 @@ use auralis_core::error::Result;
 use auralis_core::models::RecentFetchItem;
 use std::path::PathBuf;
 use std::sync::Mutex;
-
-const MAX_RECENT_FETCHES: usize = 200;
 
 pub struct RecentFetchesStore {
     path: PathBuf,
@@ -22,74 +20,28 @@ impl RecentFetchesStore {
         }
     }
 
+    /// Mirrors `LoadRecentFetches`: a missing, blank or `null` file is an empty list.
     pub fn load(&self) -> Result<Vec<RecentFetchItem>> {
-        let _guard = self.lock.lock().unwrap();
-        if !self.path.exists() {
-            return Ok(Vec::new());
-        }
-
-        let data = std::fs::read(&self.path)?;
-        let trimmed = std::str::from_utf8(&data)
-            .map_err(|e| {
-                auralis_core::error::AuralisError::Store(StoreError::LegacyParse(e.to_string()))
-            })?
-            .trim();
-        if trimmed.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let items: Vec<RecentFetchItem> = serde_json::from_str(trimmed)?;
-        Ok(items)
-    }
-
-    pub fn save(&self, items: &[RecentFetchItem]) -> Result<()> {
-        let _guard = self.lock.lock().unwrap();
-        let payload = serde_json::to_vec_pretty(items)?;
-        write_file_atomic(&self.path, &payload)?;
-        Ok(())
-    }
-
-    pub fn add(&self, item: RecentFetchItem) -> Result<()> {
-        let _guard = self.lock.lock().unwrap();
-        let mut items = if self.path.exists() {
-            let data = std::fs::read(&self.path)?;
-            let trimmed = std::str::from_utf8(&data)
-                .map_err(|e| {
-                    auralis_core::error::AuralisError::Store(StoreError::LegacyParse(e.to_string()))
-                })?
-                .trim();
-            if !trimmed.is_empty() {
-                serde_json::from_str::<Vec<RecentFetchItem>>(trimmed)?
-            } else {
-                Vec::new()
-            }
-        } else {
-            Vec::new()
+        let _guard = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let data = match std::fs::read(&self.path) {
+            Ok(data) => data,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e.into()),
         };
-
-        // Remove existing duplicate by URL or ID
-        items.retain(|existing| {
-            (!existing.url.is_empty() && existing.url != item.url)
-                && (!existing.id.is_empty() && existing.id != item.id)
-        });
-
-        // Insert at beginning
-        items.insert(0, item);
-
-        // Cap at MAX_RECENT_FETCHES
-        if items.len() > MAX_RECENT_FETCHES {
-            items.truncate(MAX_RECENT_FETCHES);
+        let text = std::str::from_utf8(&data).map_err(|e| {
+            auralis_core::error::AuralisError::Store(StoreError::LegacyParse(e.to_string()))
+        })?;
+        if text.trim().is_empty() {
+            return Ok(Vec::new());
         }
-
-        let payload = serde_json::to_vec_pretty(&items)?;
-        write_file_atomic(&self.path, &payload)?;
-        Ok(())
+        let items: Option<Vec<RecentFetchItem>> = serde_json::from_str(text)?;
+        Ok(items.unwrap_or_default())
     }
 
-    pub fn clear(&self) -> Result<()> {
-        let _guard = self.lock.lock().unwrap();
-        let empty: [RecentFetchItem; 0] = [];
-        let payload = serde_json::to_vec_pretty(&empty)?;
+    /// Mirrors `SaveRecentFetches`: writes the list as 2-space indented JSON, atomically.
+    pub fn save(&self, items: &[RecentFetchItem]) -> Result<()> {
+        let _guard = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let payload = serde_json::to_vec_pretty(items)?;
         write_file_atomic(&self.path, &payload)?;
         Ok(())
     }
@@ -99,70 +51,110 @@ impl RecentFetchesStore {
 mod tests {
     use super::*;
 
+    fn item(id: &str, name: &str, timestamp: i64) -> RecentFetchItem {
+        RecentFetchItem {
+            id: id.into(),
+            url: format!("https://open.spotify.com/track/{id}"),
+            item_type: "track".into(),
+            name: name.into(),
+            artist: "Artist".into(),
+            image: "".into(),
+            is_explicit: false,
+            timestamp,
+        }
+    }
+
+    // Port of TestSaveRecentFetchesIsAtomic.
     #[test]
-    fn test_recent_fetches_crud() {
+    fn save_recent_fetches_is_atomic() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("recent_fetches.json");
-        let store = RecentFetchesStore::new(path);
+        let store = RecentFetchesStore::new(path.clone());
 
-        assert_eq!(store.load().unwrap().len(), 0);
+        let items = vec![item("1", "Song", 10)];
+        store.save(&items).unwrap();
+        let loaded = store.load().unwrap();
+        assert_eq!(loaded, items);
 
-        let item1 = RecentFetchItem {
-            id: "track1".into(),
-            url: "https://open.spotify.com/track/track1".into(),
-            item_type: "track".into(),
-            name: "Song 1".into(),
-            artist: "Artist 1".into(),
-            image: "".into(),
-            is_explicit: false,
-            timestamp: 1000,
-        };
-        store.add(item1).unwrap();
-        assert_eq!(store.load().unwrap().len(), 1);
+        store.save(&[]).unwrap();
+        assert!(store.load().unwrap().is_empty());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[]");
 
-        let item2 = RecentFetchItem {
-            id: "track2".into(),
-            url: "https://open.spotify.com/track/track2".into(),
-            item_type: "track".into(),
-            name: "Song 2".into(),
-            artist: "Artist 2".into(),
-            image: "".into(),
-            is_explicit: false,
-            timestamp: 2000,
-        };
-        store.add(item2).unwrap();
-        assert_eq!(store.load().unwrap().len(), 2);
-
-        store.clear().unwrap();
-        assert_eq!(store.load().unwrap().len(), 0);
+        let leftovers: Vec<_> = std::fs::read_dir(temp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp files left behind");
+        assert!(path.exists());
     }
 
     #[test]
-    fn test_corrupt_payload_never_wipes_store() {
+    fn missing_blank_and_null_files_load_as_empty() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("recent_fetches.json");
-        let corrupt_data = b"<!DOCTYPE html><html>corrupted json data</html>";
-        std::fs::write(&path, corrupt_data).unwrap();
+        let store = RecentFetchesStore::new(path.clone());
+        assert!(store.load().unwrap().is_empty());
+
+        std::fs::write(&path, "  \n").unwrap();
+        assert!(store.load().unwrap().is_empty());
+
+        std::fs::write(&path, "null").unwrap();
+        assert!(store.load().unwrap().is_empty());
+    }
+
+    #[test]
+    fn saves_every_item_without_dedupe_or_cap() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = RecentFetchesStore::new(temp.path().join("recent_fetches.json"));
+        let mut items: Vec<_> = (0..250).map(|i| item("", &format!("S{i}"), i)).collect();
+        items[0].is_explicit = true;
+        store.save(&items).unwrap();
+        let loaded = store.load().unwrap();
+        assert_eq!(loaded.len(), 250);
+        assert_eq!(loaded, items);
+    }
+
+    #[test]
+    fn writes_go_json_shape() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("recent_fetches.json");
+        let store = RecentFetchesStore::new(path.clone());
+        let mut explicit = item("2", "B", 2);
+        explicit.is_explicit = true;
+        store.save(&[item("1", "A", 1), explicit]).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(json[0]["type"], "track");
+        assert!(json[0].get("is_explicit").is_none());
+        assert_eq!(json[1]["is_explicit"], true);
+        assert!(std::fs::read_to_string(&path)
+            .unwrap()
+            .starts_with("[\n  {\n    \"id\": \"1\""));
+    }
+
+    #[test]
+    fn missing_fields_decode_to_zero_values() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("recent_fetches.json");
+        std::fs::write(&path, r#"[{"id":"x","url":"u"}]"#).unwrap();
+        let loaded = RecentFetchesStore::new(path).load().unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, "x");
+        assert_eq!(loaded[0].name, "");
+        assert_eq!(loaded[0].timestamp, 0);
+        assert!(!loaded[0].is_explicit);
+    }
+
+    #[test]
+    fn corrupt_payload_surfaces_error_and_keeps_bytes() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("recent_fetches.json");
+        let corrupt = b"<!DOCTYPE html><html>corrupted json data</html>";
+        std::fs::write(&path, corrupt).unwrap();
 
         let store = RecentFetchesStore::new(path.clone());
-
-        // load must fail and surface error
         assert!(store.load().is_err());
-
-        // add must fail and surface error without wiping
-        let item = RecentFetchItem {
-            id: "item1".into(),
-            url: "http://example.com".into(),
-            item_type: "track".into(),
-            name: "T".into(),
-            artist: "A".into(),
-            image: "".into(),
-            is_explicit: false,
-            timestamp: 100,
-        };
-        assert!(store.add(item).is_err());
-
-        // verify original bytes are completely intact
-        assert_eq!(std::fs::read(&path).unwrap(), corrupt_data);
+        assert_eq!(std::fs::read(&path).unwrap(), corrupt);
     }
 }
