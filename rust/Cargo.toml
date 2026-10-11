@@ -7,6 +7,9 @@ members = [
     "crates/auralis-ffmpeg",
     "crates/auralis-tagger",
     "crates/auralis-providers",
+    "crates/auralis-library",
+    "crates/auralis-taste",
+    "crates/auralis-platform",
 ]
 
 [workspace.package]

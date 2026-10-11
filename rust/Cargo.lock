@@ -85,6 +85,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "auralis-library"
+version = "0.1.0"
+dependencies = [
+ "auralis-config",
+ "auralis-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "auralis-platform"
+version = "0.1.0"
+dependencies = [
+ "auralis-config",
+ "auralis-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "auralis-providers"
 version = "0.1.0"
 dependencies = [
@@ -141,6 +165,18 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "auralis-taste"
+version = "0.1.0"
+dependencies = [
+ "auralis-config",
+ "auralis-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]
