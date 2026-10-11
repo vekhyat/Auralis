@@ -10,3 +10,5 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }
+tokio = { workspace = true }
+tokio-util = "0.7"

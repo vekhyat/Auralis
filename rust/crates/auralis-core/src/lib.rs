@@ -2,6 +2,7 @@
 
 pub mod close_gate;
 pub mod constants;
+pub mod download_cancel;
 pub mod error;
 pub mod gojson;
 pub mod models;

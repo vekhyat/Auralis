@@ -6,10 +6,8 @@
 //! different origin.
 //!
 //! Go's `WithDownloadContext` (tying a request to the active download so Stop
-//! interrupts it) is intentionally not ported: it depends on the
-//! crate-wide download cancellation token owned by the download-cancel scope.
-//! A pass-through would silently drop the interrupt semantics, so callers must
-//! keep wiring cancellation explicitly until that owner lands.
+//! interrupts it) is `auralis_core::download_cancel::with_download_context`:
+//! wrap the request future in it wherever Go calls `WithDownloadContext`.
 
 use std::time::Duration;
 
