@@ -1,0 +1,19 @@
+{
+  "recordings": [
+    {
+      "id": "c1f7b76d-1bf9-4786-9ff5-58fc9f1d0a51",
+      "title": "Come Together",
+      "length": 259000,
+      "releases": [],
+      "artist-credit": [
+        {
+          "artist": {
+            "id": "b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d",
+            "name": "The Beatles"
+          }
+        }
+      ],
+      "tags": []
+    }
+  ]
+}
