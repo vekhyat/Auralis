@@ -112,7 +112,7 @@ impl ZarzResolver {
             .post(ZARZ_RESOLVE_URL)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
-            .header("User-Agent", "Auralis/1.0 tidal-web@1.1.0")
+            .header("User-Agent", zarz_user_agent_for(ZARZ_DEFAULT_APP_VERSION))
             .json(&payload)
             .send()
             .await
@@ -448,8 +448,24 @@ fn unquote(quoted: &str) -> String {
         .unwrap_or_else(|_| quoted.trim_matches(|c| c == '"' || c == '\'').to_string())
 }
 
+/// Default Zarz app version (Go `zarz_session.go` legacy/default `AppVersion`).
+pub const ZARZ_DEFAULT_APP_VERSION: &str = "tidal-web@1.1.0";
+
+/// Port of Go's `zarzUserAgentFor`.
+pub fn zarz_user_agent_for(app_version: &str) -> String {
+    format!("Auralis/{app_version}")
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn zarz_user_agent_matches_go() {
+        assert_eq!(
+            super::zarz_user_agent_for(super::ZARZ_DEFAULT_APP_VERSION),
+            "Auralis/tidal-web@1.1.0"
+        );
+    }
+
     use super::*;
 
     #[test]
