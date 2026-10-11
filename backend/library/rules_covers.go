@@ -15,6 +15,9 @@ var coverRule = Rule{
 		var issues []Issue
 		folderWarned := map[string]bool{}
 		for _, t := range scan.Tracks {
+			if t.Unreadable {
+				continue
+			}
 			if t.CoverBytes == 0 {
 				issues = append(issues, Issue{RuleID: "COVER", Path: t.Path, AlbumDir: t.AlbumDir(), Message: "no embedded cover", Fixable: false})
 			} else {

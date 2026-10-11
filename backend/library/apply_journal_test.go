@@ -120,6 +120,14 @@ func TestMoveThroughIndexAndUndo(t *testing.T) {
 		t.Fatalf("destination missing: %v", err)
 	}
 
+	// The move emptied "Old", so it is removed (and journaled) with the move.
+	if _, err := os.Stat(oldDir); !os.IsNotExist(err) {
+		t.Fatalf("emptied folder should be removed, stat err: %v", err)
+	}
+	if err := os.MkdirAll(oldDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
 	// Never overwrite an existing destination.
 	dest2 := filepath.Join(dir, "Old", "b.flac")
 	makeAudioFile(t, dest2, map[string]string{"title": "B"})

@@ -14,6 +14,10 @@ var pathRule = Rule{
 		var issues []Issue
 		for i := range scan.Tracks {
 			t := &scan.Tracks[i]
+			if t.Unreadable {
+				// No tags to build the template path from.
+				continue
+			}
 			if !pathIsLegal(profile, t.RelPath) {
 				issues = append(issues, Issue{
 					RuleID:   "PATH",
@@ -89,7 +93,9 @@ func expectedRelPath(profile Profile, t *Track) string {
 	fields := TrackFields{
 		Title: t.Title, Artist: t.Artist, AlbumArtist: t.AlbumArtist,
 		Album: t.Album, Year: year4(t.Year),
-		TrackNumber: t.TrackNumber, DiscNumber: t.DiscNumber, DiscTotal: t.DiscTotal,
+		// An untagged number falls back to the file name, so a PATH-only fix does
+		// not strip "03 " from a file that merely lacks the tag.
+		TrackNumber: effectiveTrackNumber(t), DiscNumber: t.DiscNumber, DiscTotal: t.DiscTotal,
 	}
 	return profile.RelativePath(fields)
 }

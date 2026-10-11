@@ -3,6 +3,9 @@ package library
 import (
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"unicode"
 
 	"go.senan.xyz/taglib"
 )
@@ -46,6 +49,7 @@ var rules = []Rule{
 	mixedFormatRule,
 	duplicateRule,
 	orphanRule,
+	unreadableRule,
 }
 
 // Rules returns the registered rule IDs in display order.
@@ -166,29 +170,7 @@ func BuildPlan(scan *Scan, profile Profile, issues []Issue) *Plan {
 	}
 	// Read the current tag values so the preview shows a real before/after
 	// diff. A file that cannot be read simply has no old value shown.
-	for i := range plan.Operations {
-		op := &plan.Operations[i]
-		if op.Type != "tags" || len(op.Set) == 0 {
-			continue
-		}
-		tags, err := taglib.ReadTags(op.Path)
-		if err != nil {
-			continue
-		}
-		old := map[string]string{}
-		byUpper := map[string]string{}
-		for key := range tags {
-			byUpper[strings.ToUpper(key)] = key
-		}
-		for _, key := range append(keysOf(op.Set), op.Delete...) {
-			if actual, ok := byUpper[strings.ToUpper(key)]; ok {
-				old[key] = firstTag(tags, actual)
-			} else {
-				old[key] = ""
-			}
-		}
-		op.Old = old
-	}
+	fillOldTagValues(plan.Operations)
 	// A move that would overwrite another planned destination is unsafe.
 	dests := map[string]int{}
 	for i := range plan.Operations {
@@ -207,6 +189,9 @@ func BuildPlan(scan *Scan, profile Profile, issues []Issue) *Plan {
 		if opOrder[a.Type] != opOrder[b.Type] {
 			return opOrder[a.Type] < opOrder[b.Type]
 		}
+		if a.Type == "rmdir" {
+			return a.Path > b.Path // a folder sorts after the folders inside it
+		}
 		return a.Path < b.Path
 	})
 	return plan
@@ -214,10 +199,61 @@ func BuildPlan(scan *Scan, profile Profile, issues []Issue) *Plan {
 
 var opOrder = map[string]int{"tags": 0, "move": 1, "rmdir": 2}
 
+// fillOldTagValues records, on every tag operation, what its tags hold on disk
+// now. Each read instantiates a WASM module, which dominates the plan for a
+// large library, so the reads share the scan's bounded worker count. Workers
+// touch only their own operation.
+func fillOldTagValues(ops []Operation) {
+	var tagOps []int
+	for i := range ops {
+		if ops[i].Type == "tags" && len(ops[i].Set) > 0 {
+			tagOps = append(tagOps, i)
+		}
+	}
+	var (
+		cursor atomic.Int64
+		wg     sync.WaitGroup
+	)
+	for w := scanWorkers(len(tagOps)); w > 0; w-- {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				n := int(cursor.Add(1)) - 1
+				if n >= len(tagOps) {
+					return
+				}
+				readOldTagValues(&ops[tagOps[n]])
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func readOldTagValues(op *Operation) {
+	tags, err := taglib.ReadTags(op.Path)
+	if err != nil {
+		return
+	}
+	old := map[string]string{}
+	byUpper := map[string]string{}
+	for key := range tags {
+		byUpper[strings.ToUpper(key)] = key
+	}
+	for _, key := range append(keysOf(op.Set), op.Delete...) {
+		if actual, ok := byUpper[strings.ToUpper(key)]; ok {
+			old[key] = firstTag(tags, actual)
+		} else {
+			old[key] = ""
+		}
+	}
+	op.Old = old
+}
+
 // projectTags returns a copy of scan with the planned tag writes applied to
 // the fields a path template reads. Tracks are copied; scan is not changed.
 func projectTags(scan *Scan, ops []Operation) *Scan {
-	projected := *scan
+	projected := scan.shallowCopy()
 	projected.Tracks = append([]Track(nil), scan.Tracks...)
 	byPath := make(map[string]*Track, len(projected.Tracks))
 	for i := range projected.Tracks {
@@ -244,7 +280,7 @@ func projectTags(scan *Scan, ops []Operation) *Scan {
 			_, t.DiscTotal = splitNumberTotal(raw)
 		}
 	}
-	return &projected
+	return projected
 }
 
 // mergeTagOps folds src into dst, which fix the same file. Two rules that
@@ -300,14 +336,11 @@ func operationKey(op Operation) string {
 	return b.String()
 }
 
-// TrackByPath finds a scanned track by its absolute path.
+// TrackByPath finds a scanned track by its absolute path, ignoring case as
+// strings.EqualFold does. When several tracks match, the first one wins. The
+// first lookup on a scan builds an index; later ones are map reads.
 func TrackByPath(scan *Scan, path string) *Track {
-	for i := range scan.Tracks {
-		if strings.EqualFold(scan.Tracks[i].Path, path) {
-			return &scan.Tracks[i]
-		}
-	}
-	return nil
+	return scan.index().byPath[foldKey(path)]
 }
 
 // singleAlbum reports whether a folder's tracks can be treated as one release.
@@ -327,14 +360,112 @@ func singleAlbum(dir string, tracks []*Track) bool {
 	return len(albums) <= 1
 }
 
-// Albums groups track indexes by album directory.
+// Albums groups tracks by album directory. Unreadable files are left out: they
+// carry no tags, so counting them would invent missing-tag issues and let
+// album-wide fixes target a file that cannot be written. The UNREADABLE and
+// ORPHAN rules walk scan.Tracks directly and still see them.
+//
+// The grouping is built once per scan and shared by every caller and every
+// goroutine, so the map and its slices must be treated as read-only.
 func Albums(scan *Scan) map[string][]*Track {
-	groups := map[string][]*Track{}
-	for i := range scan.Tracks {
-		dir := scan.Tracks[i].AlbumDir()
-		groups[dir] = append(groups[dir], &scan.Tracks[i])
+	return scan.index().albums
+}
+
+// scanIndexMu guards installing Scan.idx. Scan is copied by value (see
+// shallowCopy), so it cannot carry a lock of its own; the critical section is a
+// pointer swap, and the build itself runs outside it under the index's Once.
+var scanIndexMu sync.Mutex
+
+// scanIndex holds the lookups the fix functions repeat once per issue. It is
+// built on first use and not changed afterwards, so any number of goroutines
+// can read it.
+type scanIndex struct {
+	once sync.Once
+	// first and n identify the Tracks slice the index describes. A Scan copied
+	// by value and given other Tracks thus never reads its source's index.
+	first *Track
+	n     int
+
+	albums map[string][]*Track // readable tracks by album directory
+	byPath map[string]*Track   // first track for each case-folded path
+}
+
+// index returns the lookup tables for the scan's current Tracks, building them
+// on first use. Tracks must not be reordered or have Path, RelPath or
+// Unreadable edited in place once a scan is shared; other fields may change
+// freely because the tables hold pointers into Tracks.
+func (s *Scan) index() *scanIndex {
+	tracks := s.Tracks
+	var first *Track
+	if len(tracks) > 0 {
+		first = &tracks[0]
 	}
-	return groups
+	scanIndexMu.Lock()
+	idx := s.idx
+	if idx == nil || idx.first != first || idx.n != len(tracks) {
+		idx = &scanIndex{first: first, n: len(tracks)}
+		s.idx = idx
+	}
+	scanIndexMu.Unlock()
+	idx.once.Do(func() { idx.build(tracks) })
+	return idx
+}
+
+func (idx *scanIndex) build(tracks []Track) {
+	idx.albums = map[string][]*Track{}
+	idx.byPath = make(map[string]*Track, len(tracks))
+	for i := range tracks {
+		t := &tracks[i]
+		key := foldKey(t.Path)
+		if _, taken := idx.byPath[key]; !taken {
+			idx.byPath[key] = t
+		}
+		if t.Unreadable {
+			continue
+		}
+		dir := t.AlbumDir()
+		idx.albums[dir] = append(idx.albums[dir], t)
+	}
+	// Clip each group so a caller appending to one cannot write into the
+	// spare capacity of a slice other callers share.
+	for dir, group := range idx.albums {
+		idx.albums[dir] = group[:len(group):len(group)]
+	}
+}
+
+// shallowCopy returns a copy of the scan that shares Tracks and the other
+// slices but not the lookup index, for a caller about to replace Tracks.
+func (s *Scan) shallowCopy() *Scan {
+	scanIndexMu.Lock()
+	c := *s
+	scanIndexMu.Unlock()
+	c.idx = nil
+	return &c
+}
+
+// foldKey maps a path to a key that is equal for exactly the paths
+// strings.EqualFold treats as equal.
+func foldKey(s string) string {
+	return strings.Map(foldRune, s)
+}
+
+// foldRune returns the smallest rune in r's simple case-folding orbit, the
+// same equivalence EqualFold compares by. ASCII letters fold to upper case,
+// which is the smallest member of their orbit ('K' also folds with U+212A).
+func foldRune(r rune) rune {
+	if r <= unicode.MaxASCII {
+		if 'a' <= r && r <= 'z' {
+			r -= 'a' - 'A'
+		}
+		return r
+	}
+	smallest := r
+	for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+		if f < smallest {
+			smallest = f
+		}
+	}
+	return smallest
 }
 
 func groupDistinct(values []string) map[string]int {

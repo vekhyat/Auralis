@@ -1,6 +1,7 @@
 package library
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -311,5 +312,60 @@ func TestBuildPlanKeepsTagOpsFromDifferentRules(t *testing.T) {
 		if !sawAlbumArtist || !sawTrack {
 			t.Fatalf("plan %d lost an operation: %+v", i, plan.Operations)
 		}
+	}
+}
+
+func TestCompilationSkipsAlbumWithOneAlbumArtist(t *testing.T) {
+	// Featured artists make three distinct track artists, but one ALBUMARTIST
+	// means a normal release, not a compilation.
+	scan := &Scan{Tracks: []Track{
+		{Path: `C:\m\D\L\1.flac`, RelPath: "D/L/1.flac", Album: "L", Artist: "Drake", AlbumArtist: "Drake"},
+		{Path: `C:\m\D\L\2.flac`, RelPath: "D/L/2.flac", Album: "L", Artist: "Drake feat. Rihanna", AlbumArtist: "Drake"},
+		{Path: `C:\m\D\L\3.flac`, RelPath: "D/L/3.flac", Album: "L", Artist: "Drake & Future", AlbumArtist: "Drake"},
+	}}
+	if issues := compilationRule.Detect(scan, ProfileByID(ProfilePoweramp)); len(issues) != 0 {
+		t.Fatalf("expected no compilation issue, got %+v", issues)
+	}
+}
+
+func TestCompilationAndAlbumArtistFixesDoNotConflict(t *testing.T) {
+	scan := &Scan{Root: `C:\m`, Tracks: []Track{
+		{Path: `C:\m\V\C\1.flac`, RelPath: "V/C/1.flac", Format: "flac", Album: "C", Artist: "A"},
+		{Path: `C:\m\V\C\2.flac`, RelPath: "V/C/2.flac", Format: "flac", Album: "C", Artist: "B"},
+		{Path: `C:\m\V\C\3.flac`, RelPath: "V/C/3.flac", Format: "flac", Album: "C", Artist: "C"},
+	}}
+	profile := ProfileByID(ProfilePoweramp)
+	plan := BuildPlan(scan, profile, DetectAll(scan, profile))
+	for _, op := range plan.Operations {
+		if op.Type == "tags" && op.Error != "" {
+			t.Fatalf("conflicting fixes: %+v", op)
+		}
+	}
+}
+
+func TestPathRuleKeepsFilenameTrackNumberWhenTagMissing(t *testing.T) {
+	scan := &Scan{Root: `C:\m`, Tracks: []Track{
+		{Path: `C:\m\A\L\03. Song.flac`, RelPath: "A/L/03. Song.flac", Format: "flac", Title: "Song", Artist: "A", AlbumArtist: "A", Album: "L"},
+	}}
+	if issues := pathRule.Detect(scan, ProfileByID(ProfilePoweramp)); len(issues) != 0 {
+		t.Fatalf("file name number must count as the track number, got %+v", issues)
+	}
+}
+
+func TestNestedEmptyFoldersAreRemovedDeepestFirst(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "Empty", "Inner"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	scan := &Scan{Root: root, Dirs: []string{"Empty", "Empty/Inner"}}
+	profile := ProfileByID(ProfilePoweramp)
+	plan := BuildPlan(scan, profile, DetectAll(scan, profile))
+	if len(plan.Operations) != 2 || plan.Operations[0].Path != filepath.Join(root, "Empty", "Inner") {
+		t.Fatalf("expected inner folder first, got %+v", plan.Operations)
+	}
+	journal := filepath.Join(t.TempDir(), "j.jsonl")
+	result, err := Apply(context.Background(), root, journal, plan)
+	if err != nil || result.Applied != 2 || len(result.Errors) != 0 {
+		t.Fatalf("apply: %+v %v", result, err)
 	}
 }
