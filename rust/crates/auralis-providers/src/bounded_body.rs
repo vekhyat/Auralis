@@ -73,10 +73,7 @@ mod tests {
         let err = read_bounded_body(std::io::Cursor::new(b"12345"), 4)
             .await
             .expect_err("over-limit body must be rejected");
-        assert_eq!(
-            err.to_string(),
-            "response exceeds 4-byte limit"
-        );
+        assert_eq!(err.to_string(), "response exceeds 4-byte limit");
     }
 
     #[tokio::test]
