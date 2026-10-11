@@ -1,6 +1,7 @@
 //! Configuration, path resolution, atomic file operations, and settings layout for Auralis.
 
 pub mod atomic_file;
+pub mod credentials;
 pub mod file_acl;
 pub mod layout;
 pub mod paths;
