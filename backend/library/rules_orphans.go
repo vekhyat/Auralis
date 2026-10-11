@@ -28,7 +28,9 @@ var orphanRule = Rule{
 			if audioDirs[dir] {
 				continue
 			}
-			if dirIsEmpty(filepath.Join(scan.Root, filepath.FromSlash(dir))) {
+			// Folders holding only empty folders count too; they are removed
+			// deepest first, so each is empty by the time its turn comes.
+			if dirIsEmptyTree(filepath.Join(scan.Root, filepath.FromSlash(dir))) {
 				issues = append(issues, Issue{
 					RuleID:   "ORPHAN",
 					Path:     filepath.Join(scan.Root, filepath.FromSlash(dir)),
@@ -78,6 +80,20 @@ var orphanRule = Rule{
 		}
 		return ops
 	},
+}
+
+// dirIsEmptyTree reports whether dir holds no files at any depth.
+func dirIsEmptyTree(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !dirIsEmptyTree(filepath.Join(dir, entry.Name())) {
+			return false
+		}
+	}
+	return true
 }
 
 func dirIsEmpty(dir string) bool {

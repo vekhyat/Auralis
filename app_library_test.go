@@ -94,8 +94,8 @@ func TestAppLibraryScanAndDoctorWorkflow(t *testing.T) {
 		t.Fatalf("GetLibraryReport failed: %v", err)
 	}
 
-	// Preview fix for empty dir
-	plan, err := app.PreviewLibraryFixes(nil)
+	// Preview fix for empty dir; an empty ID list now means no fixes at all.
+	plan, err := app.PreviewLibraryFixes(fixableIssueIDs(report))
 	if err != nil {
 		t.Fatalf("PreviewLibraryFixes failed: %v", err)
 	}

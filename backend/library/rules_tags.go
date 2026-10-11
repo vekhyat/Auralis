@@ -71,6 +71,11 @@ var albumArtistRule = Rule{
 			if target == "" {
 				target = mostCommon(groupDistinct(artistValues(tracks)))
 			}
+			// The COMPILATION rule writes the same value, so the two fixes
+			// merge instead of reporting a conflict.
+			if looksLikeCompilation(tracks) {
+				target = "Various Artists"
+			}
 			if target == "" {
 				target = "Unknown Artist"
 			}
@@ -103,6 +108,30 @@ func artistValues(tracks []*Track) []string {
 
 // --- Compilation -----------------------------------------------------------
 
+// looksLikeCompilation reports whether a single album folder holds three or
+// more artists without being marked as a compilation. An album whose tracks all
+// share one ALBUMARTIST is a normal release with featured artists, however
+// many distinct track artists it lists.
+func looksLikeCompilation(tracks []*Track) bool {
+	artists := map[string]bool{}
+	for _, t := range tracks {
+		if a := strings.ToLower(strings.TrimSpace(t.Artist)); a != "" {
+			artists[a] = true
+		}
+		if t.Compilation {
+			return false
+		}
+	}
+	if len(artists) < 3 {
+		return false
+	}
+	albumArtists := groupDistinct(albumArtistValues(tracks))
+	if len(albumArtists) == 1 {
+		return false
+	}
+	return strings.ToLower(mostCommon(albumArtists)) != "various artists"
+}
+
 var compilationRule = Rule{
 	ID:       "COMPILATION",
 	Severity: SeverityWarning,
@@ -112,23 +141,7 @@ var compilationRule = Rule{
 			if !singleAlbum(dir, tracks) {
 				continue
 			}
-			artists := map[string]bool{}
-			for _, t := range tracks {
-				if a := strings.ToLower(strings.TrimSpace(t.Artist)); a != "" {
-					artists[a] = true
-				}
-			}
-			if len(artists) < 3 {
-				continue
-			}
-			albumArtist := strings.ToLower(mostCommon(groupDistinct(albumArtistValues(tracks))))
-			marked := false
-			for _, t := range tracks {
-				if t.Compilation {
-					marked = true
-				}
-			}
-			if albumArtist == "various artists" || marked {
+			if !looksLikeCompilation(tracks) {
 				continue
 			}
 			issues = append(issues, Issue{
@@ -189,7 +202,7 @@ var trackNumberRule = Rule{
 					if t.TrackNumber > maxNum {
 						maxNum = t.TrackNumber
 					}
-					if t.Format == "flac" && strings.Contains(t.TrackNumberRaw, "/") {
+					if usesVorbisComments(t.Format) && strings.Contains(t.TrackNumberRaw, "/") {
 						issues = append(issues, Issue{Path: t.Path, AlbumDir: dir, Message: "track number stored as \"" + t.TrackNumberRaw + "\" instead of separate TRACKNUMBER/TRACKTOTAL", Fixable: true})
 					}
 				}
@@ -199,7 +212,12 @@ var trackNumberRule = Rule{
 						issues = append(issues, Issue{Path: t.Path, AlbumDir: dir, Message: "track total " + strconv.Itoa(t.TrackTotal) + " is lower than track number " + strconv.Itoa(highest), Fixable: true})
 					}
 				}
-				if maxNum > len(seen) {
+				// A gap in the numbers is evidence of a missing file only when
+				// the disc holds fewer files than its highest number. Files
+				// that repeat a number or carry none are reported above, and
+				// renumbering them can close the gap, so counting distinct
+				// numbers alone would blame a missing track for a duplicate.
+				if maxNum > len(discTracks) {
 					issues = append(issues, Issue{Path: dir, AlbumDir: dir, Message: "disc " + strconv.Itoa(disc) + " has " + strconv.Itoa(len(seen)) + " numbered tracks up to " + strconv.Itoa(maxNum) + "; some tracks may be missing"})
 				}
 			}
@@ -350,10 +368,21 @@ func tagOp(t *Track, set map[string]string, reason string) Operation {
 	}
 }
 
+// usesVorbisComments reports whether a format stores tags as Vorbis comments,
+// which keep the track and disc totals in their own fields rather than as
+// "number/total".
+func usesVorbisComments(format string) bool {
+	switch format {
+	case "flac", "ogg", "opus":
+		return true
+	}
+	return false
+}
+
 // trackSet returns the container-appropriate tag overlay for a track number.
 func trackSet(format string, number, total int) map[string]string {
-	switch format {
-	case "flac", "ogg":
+	switch {
+	case usesVorbisComments(format):
 		m := map[string]string{"TRACKNUMBER": strconv.Itoa(number)}
 		if total > 0 {
 			m["TRACKTOTAL"] = strconv.Itoa(total)
@@ -369,8 +398,8 @@ func trackSet(format string, number, total int) map[string]string {
 }
 
 func discSet(format string, number, total int) map[string]string {
-	switch format {
-	case "flac", "ogg":
+	switch {
+	case usesVorbisComments(format):
 		m := map[string]string{"DISCNUMBER": strconv.Itoa(number)}
 		if total > 0 {
 			m["DISCTOTAL"] = strconv.Itoa(total)

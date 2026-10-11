@@ -76,3 +76,30 @@ func TestScanLibraryCancellation(t *testing.T) {
 		t.Fatal("expected cancellation error")
 	}
 }
+
+func TestScanTreatsAncestorFoldersOfAudioAsNotStray(t *testing.T) {
+	root := t.TempDir()
+	disc := filepath.Join(root, "Artist", "Album", "CD1")
+	if err := os.MkdirAll(disc, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	makeAudioFile(t, filepath.Join(disc, "01. Song.flac"), map[string]string{"title": "Song"})
+	for _, p := range []string{
+		filepath.Join(root, "Artist", "folder.jpg"),
+		filepath.Join(root, "Artist", "Album", "cover.jpg"),
+	} {
+		if err := os.WriteFile(p, []byte{0xFF, 0xD8, 0xFF, 0xD9}, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scan, err := ScanLibrary(context.Background(), root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scan.StrayFiles) != 0 {
+		t.Fatalf("artist and album art above audio is not stray: %+v", scan.StrayFiles)
+	}
+	if !scan.Tracks[0].FolderCover {
+		t.Fatal("a disc folder should use the album folder's cover.jpg")
+	}
+}

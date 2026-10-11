@@ -386,6 +386,7 @@ func (a *App) shutdown(ctx context.Context) {
 		a.libraryScanCancel = nil
 	}
 	a.libraryScanMu.Unlock()
+	a.CancelLibraryApply()
 	a.closeTaste()
 	a.stopIPodWatch()
 	a.stopSyncWatch()

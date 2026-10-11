@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { t } from "@/i18n";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import i18n, { t } from "@/i18n";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -23,19 +23,42 @@ import {
 } from "@/components/ui/select";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { getSettings } from "@/lib/settings";
+import {
+    ALBUMS_PER_PAGE,
+    ISSUES_PER_PAGE,
+    OPERATIONS_PER_PAGE,
+    albumStateKey,
+    buildProfileOptions,
+    classifyApplyResult,
+    classifyLibraryError,
+    classifyUndoResult,
+    errorMessage,
+    formatBatchTime,
+    groupIssuesByAlbum,
+    groupIssuesByRule,
+    nextPageLimit,
+    pageWindow,
+    progressPercent,
+    resolveIssueFolder,
+    shouldRescanAfterApply,
+    summarizeBatchTypes,
+} from "@/lib/library-health";
 import { cn } from "@/lib/utils";
 import {
     ApplyLibraryPlan,
+    CancelLibraryApply,
     CancelLibraryScan,
+    GetLastLibraryBatch,
     GetLibraryReport,
     LibraryProfiles,
+    OpenFolder,
     PreviewLibraryFixes,
     SelectFolder,
     StartLibraryScan,
     UndoLastLibraryFix,
 } from "../../wailsjs/go/main/App";
 import { library, main } from "../../wailsjs/go/models";
-import { EventsOff, EventsOn } from "../../wailsjs/runtime/runtime";
+import { EventsOn } from "../../wailsjs/runtime/runtime";
 import {
     Activity,
     Check,
@@ -48,6 +71,7 @@ import {
     Play,
     RefreshCw,
     Square,
+    TriangleAlert,
     Undo2,
     Wrench,
 } from "lucide-react";
@@ -58,6 +82,154 @@ interface ScanProgressPayload {
     total: number;
     path: string;
 }
+
+interface ApplyProgressPayload {
+    current: number;
+    total: number;
+    path: string;
+}
+
+// A warning with a batch ID in it is worth reading; keep it up longer.
+const LONG_TOAST_MS = 10000;
+
+const getScoreColor = (score: number) => {
+    if (score >= 90) return "text-emerald-500 border-emerald-500/30 bg-emerald-500/10";
+    if (score >= 70) return "text-amber-500 border-amber-500/30 bg-amber-500/10";
+    return "text-destructive border-destructive/30 bg-destructive/10";
+};
+
+const getRuleTitle = (ruleId: string): string => {
+    // The backend emits upper-case IDs (ALBUMARTIST, MIXEDFORMAT, ...).
+    switch (ruleId.toLowerCase().replace(/_/g, "")) {
+        case "albumartist":
+            return t("translation.libraryHealth.ruleAlbumArtist");
+        case "compilation":
+            return t("translation.libraryHealth.ruleCompilation");
+        case "tracknumber":
+            return t("translation.libraryHealth.ruleTrackNumber");
+        case "discnumber":
+            return t("translation.libraryHealth.ruleDiscNumber");
+        case "cover":
+            return t("translation.libraryHealth.ruleCover");
+        case "path":
+            return t("translation.libraryHealth.rulePath");
+        case "mixedformat":
+            return t("translation.libraryHealth.ruleMixedFormat");
+        case "duplicate":
+        case "duplicates":
+            return t("translation.libraryHealth.ruleDuplicate");
+        case "orphan":
+            return t("translation.libraryHealth.ruleOrphan");
+        case "unreadable":
+            return t("translation.libraryHealth.ruleUnreadable");
+        default:
+            return ruleId;
+    }
+};
+
+const getOperationTypeLabel = (type: string): string => {
+    switch (type) {
+        case "tags":
+            return t("translation.libraryHealth.diffTags");
+        case "move":
+            return t("translation.libraryHealth.diffMove");
+        case "rmdir":
+            return t("translation.libraryHealth.diffRmdir");
+        default:
+            return type;
+    }
+};
+
+interface IssueRowProps {
+    issue: library.Issue;
+    checked: boolean;
+    canFix: boolean;
+    root: string;
+    onSelect: (id: string, checked: boolean) => void;
+    onPreview: (id: string) => void;
+    onOpenFolder: (folder: string) => void;
+}
+
+const IssueRow = memo(function IssueRow({
+    issue,
+    checked,
+    canFix,
+    root,
+    onSelect,
+    onPreview,
+    onOpenFolder,
+}: IssueRowProps) {
+    // A row with a preview button has its own way forward. Every other row can
+    // only be dealt with by hand, fixable ones in a report restored from an
+    // earlier session included, so give it a way to reach the folder.
+    const hasFixAction = issue.fixable && canFix;
+    const folder = hasFixAction ? null : resolveIssueFolder(issue, root);
+
+    return (
+        <div className="px-3 py-2.5 flex items-start justify-between gap-3 text-xs">
+            <div className="flex items-start gap-2.5 min-w-0">
+                {issue.fixable && canFix ? (
+                    <Checkbox
+                        checked={checked}
+                        onCheckedChange={(value) => onSelect(issue.id, !!value)}
+                        className="mt-0.5"
+                    />
+                ) : (
+                    <div className="size-4 shrink-0 mt-0.5 flex items-center justify-center text-muted-foreground">
+                        <Info className="size-3.5" />
+                    </div>
+                )}
+                <div className="flex flex-col gap-1 min-w-0">
+                    <span className="text-foreground leading-snug">{issue.message}</span>
+                    {issue.path && (
+                        <span className="font-mono text-[11px] text-muted-foreground truncate">
+                            {issue.path}
+                        </span>
+                    )}
+                </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+                {issue.severity === "error" && (
+                    <Badge variant="destructive" className="text-[10px] uppercase font-mono">
+                        {t("translation.libraryHealth.severityError")}
+                    </Badge>
+                )}
+                {issue.severity === "warning" && (
+                    <Badge
+                        variant="secondary"
+                        className="text-[10px] uppercase font-mono text-amber-500 border border-amber-500/30"
+                    >
+                        {t("translation.libraryHealth.severityWarning")}
+                    </Badge>
+                )}
+                {issue.fixable && canFix && (
+                    <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onPreview(issue.id)}
+                        className="h-6 px-2 text-[11px] text-primary hover:text-primary"
+                    >
+                        {t("translation.libraryHealth.previewFixes")}
+                    </Button>
+                )}
+                {folder && (
+                    <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onOpenFolder(folder)}
+                        className="h-6 gap-1 px-2 text-[11px]"
+                    >
+                        <FolderOpen className="size-3" />
+                        <span>{t("translation.common.openFolder")}</span>
+                    </Button>
+                )}
+            </div>
+        </div>
+    );
+});
 
 export function LibraryHealthPage() {
     const [rootFolder, setRootFolder] = useState<string>(() => {
@@ -76,10 +248,20 @@ export function LibraryHealthPage() {
     const [report, setReport] = useState<main.LibraryReport | null>(null);
     const [expandedRules, setExpandedRules] = useState<Record<string, boolean>>({});
     const [expandedAlbums, setExpandedAlbums] = useState<Record<string, boolean>>({});
+    // How many rows the user has asked to see, per album key / per rule ID.
+    // Missing means the first page.
+    const [issueLimits, setIssueLimits] = useState<Record<string, number>>({});
+    const [albumLimits, setAlbumLimits] = useState<Record<string, number>>({});
+    const [previewOpLimit, setPreviewOpLimit] = useState<number | undefined>(undefined);
     const [selectedIssueIds, setSelectedIssueIds] = useState<Record<string, boolean>>({});
     const [previewPlan, setPreviewPlan] = useState<library.Plan | null>(null);
     const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(false);
     const [isApplying, setIsApplying] = useState<boolean>(false);
+    const [isCancellingApply, setIsCancellingApply] = useState<boolean>(false);
+    const [applyProgress, setApplyProgress] = useState<ApplyProgressPayload | null>(null);
+    const [undoBatch, setUndoBatch] = useState<library.BatchInfo | null>(null);
+    const [isUndoConfirmOpen, setIsUndoConfirmOpen] = useState<boolean>(false);
+    const [isLoadingBatch, setIsLoadingBatch] = useState<boolean>(false);
     const [isUndoing, setIsUndoing] = useState<boolean>(false);
 
     // Load initial settings and profiles
@@ -109,7 +291,7 @@ export function LibraryHealthPage() {
         };
     }, []);
 
-    // Listen for scan events
+    // Listen for scan and apply events
     useEffect(() => {
         const onProgress = (data: ScanProgressPayload) => {
             setScanProgress(data);
@@ -122,6 +304,8 @@ export function LibraryHealthPage() {
             setIsCancelling(false);
             setScanProgress(null);
             setSelectedIssueIds({});
+            setIssueLimits({});
+            setAlbumLimits({});
         };
 
         const onError = (errMsg: string) => {
@@ -138,16 +322,20 @@ export function LibraryHealthPage() {
             toast.info(t("translation.libraryHealth.scanCancelledToast"));
         };
 
-        EventsOn("library:scan-progress", onProgress);
-        EventsOn("library:scan-complete", onComplete);
-        EventsOn("library:scan-error", onError);
-        EventsOn("library:scan-cancelled", onCancelled);
+        const onApplyProgress = (data: ApplyProgressPayload) => {
+            setApplyProgress(data);
+        };
+
+        const unsubscribers = [
+            EventsOn("library:scan-progress", onProgress),
+            EventsOn("library:scan-complete", onComplete),
+            EventsOn("library:scan-error", onError),
+            EventsOn("library:scan-cancelled", onCancelled),
+            EventsOn("library:apply-progress", onApplyProgress),
+        ];
 
         return () => {
-            EventsOff("library:scan-progress");
-            EventsOff("library:scan-complete");
-            EventsOff("library:scan-error");
-            EventsOff("library:scan-cancelled");
+            unsubscribers.forEach((off) => off());
         };
     }, []);
 
@@ -162,20 +350,19 @@ export function LibraryHealthPage() {
         }
     };
 
-    const handleStartScan = async () => {
-        if (!rootFolder || rootFolder.trim() === "") {
+    const handleStartScan = async (root: string = rootFolder, profileId: string = selectedProfile) => {
+        if (!root || root.trim() === "") {
             toast.error(t("translation.libraryHealth.noFolderSelected"));
             return;
         }
         setIsScanning(true);
         setIsCancelling(false);
-        setScanProgress({ phase: "starting", current: 0, total: 1, path: rootFolder });
+        setScanProgress({ phase: "starting", current: 0, total: 1, path: root });
         try {
-            await StartLibraryScan(rootFolder, selectedProfile);
+            await StartLibraryScan(root, profileId);
         } catch (err: unknown) {
             setIsScanning(false);
-            const msg = err instanceof Error ? err.message : String(err);
-            toast.error(t("translation.libraryHealth.scanErrorToast", { error: msg }));
+            toast.error(t("translation.libraryHealth.scanErrorToast", { error: errorMessage(err) }));
         }
     };
 
@@ -196,9 +383,17 @@ export function LibraryHealthPage() {
         setExpandedAlbums((prev) => ({ ...prev, [key]: !prev[key] }));
     };
 
-    const handleSelectIssue = (id: string, checked: boolean) => {
-        setSelectedIssueIds((prev) => ({ ...prev, [id]: checked }));
+    const showMoreIssues = (albumKey: string) => {
+        setIssueLimits((prev) => ({ ...prev, [albumKey]: nextPageLimit(prev[albumKey], ISSUES_PER_PAGE) }));
     };
+
+    const showMoreAlbums = (ruleId: string) => {
+        setAlbumLimits((prev) => ({ ...prev, [ruleId]: nextPageLimit(prev[ruleId], ALBUMS_PER_PAGE) }));
+    };
+
+    const handleSelectIssue = useCallback((id: string, checked: boolean) => {
+        setSelectedIssueIds((prev) => ({ ...prev, [id]: checked }));
+    }, []);
 
     const handleSelectRuleIssues = (ruleIssues: library.Issue[], selectAll: boolean) => {
         setSelectedIssueIds((prev) => {
@@ -212,29 +407,48 @@ export function LibraryHealthPage() {
         });
     };
 
-    const handlePreviewFixes = useCallback(
-        async (specificIds?: string[]) => {
+    // Failures of a preview or an undo. A stale preview gets a message in the
+    // user's language; the backend's own text is English only.
+    const reportFailure = useCallback((err: unknown) => {
+        const failure = classifyLibraryError(err);
+        if (failure.kind === "stale-preview") {
+            toast.warning(t("translation.libraryHealth.previewStaleToast"));
+        } else {
+            toast.error(failure.message);
+        }
+    }, []);
+
+    const openPreview = useCallback(
+        async (ids: string[]) => {
             try {
-                let idsToPreview: string[] = [];
-                if (specificIds) {
-                    idsToPreview = specificIds;
-                } else {
-                    idsToPreview = Object.keys(selectedIssueIds).filter((id) => selectedIssueIds[id]);
-                }
-                const plan = await PreviewLibraryFixes(idsToPreview);
+                const plan = await PreviewLibraryFixes(ids);
+                setPreviewOpLimit(undefined);
                 setPreviewPlan(plan);
                 setIsPreviewOpen(true);
             } catch (err) {
-                const msg = err instanceof Error ? err.message : String(err);
-                toast.error(msg);
+                reportFailure(err);
             }
         },
-        [selectedIssueIds]
+        [reportFailure]
     );
+
+    const handlePreviewIssue = useCallback(
+        (id: string) => {
+            void openPreview([id]);
+        },
+        [openPreview]
+    );
+
+    const handlePreviewSelected = async () => {
+        const ids = Object.keys(selectedIssueIds).filter((id) => selectedIssueIds[id]);
+        // The backend treats an empty list as an empty plan.
+        if (ids.length === 0) return;
+        await openPreview(ids);
+    };
 
     // "Safe" means tag edits and empty-folder removal. Path fixes move files
     // around the library, so they are only planned when picked explicitly.
-    const handlePreviewAllSafe = useCallback(async () => {
+    const handlePreviewAllSafe = async () => {
         const safeIds = (report?.issues ?? [])
             .filter((issue) => issue.fixable && issue.rule_id !== "PATH")
             .map((issue) => issue.id);
@@ -242,117 +456,169 @@ export function LibraryHealthPage() {
             toast.info(t("translation.libraryHealth.noSafeFixes"));
             return;
         }
+        await openPreview(safeIds);
+    };
+
+    const handleOpenFolder = useCallback(async (folder: string) => {
         try {
-            const plan = await PreviewLibraryFixes(safeIds);
-            setPreviewPlan(plan);
-            setIsPreviewOpen(true);
+            await OpenFolder(folder);
         } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            toast.error(msg);
+            toast.error(t("translation.libraryHealth.openFolderFailed", { error: errorMessage(err) }));
         }
-    }, [report]);
+    }, []);
 
     const handleApplyPlan = async () => {
-        if (!previewPlan) return;
+        if (!previewPlan || isApplying) return;
         setIsApplying(true);
+        setIsCancellingApply(false);
+        setApplyProgress(null);
         try {
             const result = await ApplyLibraryPlan(previewPlan);
             setIsPreviewOpen(false);
             setPreviewPlan(null);
-            if (result.errors && result.errors.length > 0) {
-                toast.warning(
-                    t("translation.libraryHealth.fixAppliedToastErrors", {
-                        applied: result.applied,
-                        errors: result.errors.length,
-                    })
-                );
-            } else {
-                toast.success(
-                    t("translation.libraryHealth.fixAppliedToast", {
-                        applied: result.applied,
-                    })
-                );
+            switch (classifyApplyResult(result)) {
+                case "cancelled":
+                    toast.warning(
+                        t("translation.libraryHealth.applyCancelledToast", {
+                            applied: result.applied,
+                        }),
+                        { duration: LONG_TOAST_MS }
+                    );
+                    break;
+                case "cancelled-empty":
+                    toast.info(t("translation.libraryHealth.applyCancelledNothingToast"));
+                    break;
+                case "with-errors":
+                    toast.warning(
+                        t("translation.libraryHealth.fixAppliedToastErrors", {
+                            applied: result.applied,
+                            errors: result.errors.length,
+                        }),
+                        { description: result.errors[0] }
+                    );
+                    break;
+                default:
+                    toast.success(
+                        t("translation.libraryHealth.fixAppliedToast", {
+                            applied: result.applied,
+                        })
+                    );
             }
-            // Trigger background scan to refresh status
-            await handleStartScan();
+            if (shouldRescanAfterApply(result)) {
+                // Refresh the report that was just fixed, not a folder picked since.
+                await handleStartScan(report?.root || rootFolder, report?.profile_id || selectedProfile);
+            }
         } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            toast.error(msg);
+            const failure = classifyLibraryError(err);
+            if (failure.kind === "stale-preview") {
+                // The plan the dialog holds is gone. Nothing else changed, so
+                // only ask for a new preview.
+                setIsPreviewOpen(false);
+                setPreviewPlan(null);
+                toast.warning(t("translation.libraryHealth.previewStaleToast"));
+            } else {
+                toast.error(failure.message);
+            }
         } finally {
             setIsApplying(false);
+            setIsCancellingApply(false);
+            setApplyProgress(null);
         }
     };
 
+    const handleCancelApply = async () => {
+        setIsCancellingApply(true);
+        try {
+            await CancelLibraryApply();
+        } catch (err) {
+            console.error("Failed to cancel apply", err);
+            setIsCancellingApply(false);
+        }
+    };
+
+    // First step of an undo: describe what it would revert and ask.
     const handleUndoLastFix = async () => {
+        if (isLoadingBatch || isUndoing) return;
+        setIsLoadingBatch(true);
+        try {
+            const batch = await GetLastLibraryBatch();
+            if (!batch) {
+                toast.info(t("translation.libraryHealth.undoNoBatch"));
+                return;
+            }
+            setUndoBatch(batch);
+            setIsUndoConfirmOpen(true);
+        } catch (err) {
+            reportFailure(err);
+        } finally {
+            setIsLoadingBatch(false);
+        }
+    };
+
+    const handleConfirmUndo = async () => {
+        if (isUndoing) return;
         setIsUndoing(true);
         try {
             const result = await UndoLastLibraryFix();
-            if (!result || result.applied === 0) {
-                toast.info(t("translation.libraryHealth.undoNoBatch"));
-            } else {
+            setIsUndoConfirmOpen(false);
+            setUndoBatch(null);
+            const outcome = classifyUndoResult(result);
+            if (outcome.kind === "partial") {
+                toast.warning(
+                    t("translation.libraryHealth.undoPartialToast", {
+                        applied: outcome.applied,
+                        errors: outcome.errorCount,
+                    }),
+                    { description: result?.errors?.[0], duration: LONG_TOAST_MS }
+                );
+            } else if (outcome.kind === "restored") {
                 toast.success(
                     t("translation.libraryHealth.undoAppliedToast", {
-                        applied: result.applied,
+                        applied: outcome.applied,
                     })
                 );
-                // Trigger background scan to refresh status
-                await handleStartScan();
+            } else if (!outcome.abandonedBatchId) {
+                toast.info(t("translation.libraryHealth.undoNoBatch"));
+            }
+            if (outcome.abandonedBatchId) {
+                toast.warning(t("translation.libraryHealth.undoAbandonedToast"), {
+                    description: outcome.abandonedBatchId,
+                    duration: LONG_TOAST_MS,
+                });
+            }
+            if (outcome.applied > 0) {
+                await handleStartScan(report?.root || rootFolder, report?.profile_id || selectedProfile);
             }
         } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            toast.error(msg);
+            reportFailure(err);
         } finally {
             setIsUndoing(false);
         }
     };
 
-    // Group issues by rule
-    const groupedIssues: Record<string, library.Issue[]> = {};
-    if (report && report.issues) {
-        for (const issue of report.issues) {
-            const rId = issue.rule_id || "other";
-            if (!groupedIssues[rId]) {
-                groupedIssues[rId] = [];
-            }
-            groupedIssues[rId].push(issue);
-        }
-    }
+    // Group issues by rule: worst severity first, then the biggest group.
+    const ruleGroups = useMemo(() => groupIssuesByRule<library.Issue>(report?.issues), [report]);
+
+    // Operations the backend already marked as unsafe are skipped on apply.
+    const runnableOps = previewPlan?.operations?.filter((op) => !op.error).length ?? 0;
+    const previewOps = previewPlan?.operations ?? [];
+    const previewWindow = pageWindow(previewOps.length, previewOpLimit, OPERATIONS_PER_PAGE);
 
     const totalIssuesCount = report?.issues ? report.issues.length : 0;
     const fixableIssuesCount = report?.issues ? report.issues.filter((i) => i.fixable).length : 0;
     const selectedCount = Object.values(selectedIssueIds).filter(Boolean).length;
     const healthScore = report ? Math.round(report.health_score) : 100;
+    // A report restored from a previous session has no live scan behind it.
+    const canFix = !!report && !report.persisted;
+    const reportRoot = report?.root || rootFolder;
 
-    const getScoreColor = (score: number) => {
-        if (score >= 90) return "text-emerald-500 border-emerald-500/30 bg-emerald-500/10";
-        if (score >= 70) return "text-amber-500 border-amber-500/30 bg-amber-500/10";
-        return "text-destructive border-destructive/30 bg-destructive/10";
-    };
+    // Folders the scan could not read are missing from every number above.
+    const skippedDirs = report?.skipped_dirs ?? 0;
+    const skippedSample = report?.skipped_sample ?? [];
+    const skippedMore = Math.max(0, skippedDirs - skippedSample.length);
 
-    const getRuleTitle = (ruleId: string): string => {
-        switch (ruleId) {
-            case "album_artist":
-                return t("translation.libraryHealth.ruleAlbumArtist");
-            case "compilation":
-                return t("translation.libraryHealth.ruleCompilation");
-            case "track_number":
-                return t("translation.libraryHealth.ruleTrackNumber");
-            case "disc_number":
-                return t("translation.libraryHealth.ruleDiscNumber");
-            case "cover":
-                return t("translation.libraryHealth.ruleCover");
-            case "path":
-                return t("translation.libraryHealth.rulePath");
-            case "mixed_format":
-                return t("translation.libraryHealth.ruleMixedFormat");
-            case "duplicate":
-                return t("translation.libraryHealth.ruleDuplicate");
-            case "orphan":
-                return t("translation.libraryHealth.ruleOrphan");
-            default:
-                return ruleId;
-        }
-    };
+    const profileOptions = buildProfileOptions(profiles, selectedProfile, (key) => t(key));
+    const undoTypes = summarizeBatchTypes(undoBatch?.types);
 
     return (
         <div className="flex flex-col gap-6 max-w-5xl mx-auto pb-16">
@@ -410,31 +676,11 @@ export function LibraryHealthPage() {
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {profiles.length > 0 ? (
-                                        profiles.map((p) => (
-                                            <SelectItem key={p.id} value={p.id}>
-                                                {p.label || p.id}
-                                            </SelectItem>
-                                        ))
-                                    ) : (
-                                        <>
-                                            <SelectItem value="poweramp">
-                                                {t("translation.libraryHealth.profilePoweramp")}
-                                            </SelectItem>
-                                            <SelectItem value="rockbox">
-                                                {t("translation.libraryHealth.profileRockbox")}
-                                            </SelectItem>
-                                            <SelectItem value="apple">
-                                                {t("translation.libraryHealth.profileApple")}
-                                            </SelectItem>
-                                            <SelectItem value="mediaserver">
-                                                {t("translation.libraryHealth.profileMediaserver")}
-                                            </SelectItem>
-                                            <SelectItem value="vanilla">
-                                                {t("translation.libraryHealth.profileVanilla")}
-                                            </SelectItem>
-                                        </>
-                                    )}
+                                    {profileOptions.map((option) => (
+                                        <SelectItem key={option.id} value={option.id}>
+                                            {option.label}
+                                        </SelectItem>
+                                    ))}
                                 </SelectContent>
                             </Select>
                         </div>
@@ -461,7 +707,8 @@ export function LibraryHealthPage() {
                             ) : (
                                 <Button
                                     type="button"
-                                    onClick={handleStartScan}
+                                    onClick={() => handleStartScan()}
+                                    disabled={isApplying || isUndoing}
                                     className="gap-2 bg-primary hover:bg-primary/90 text-primary-foreground font-medium"
                                 >
                                     <Play className="size-4 fill-current" />
@@ -473,7 +720,7 @@ export function LibraryHealthPage() {
                                 type="button"
                                 variant="outline"
                                 onClick={handleUndoLastFix}
-                                disabled={isScanning || isUndoing}
+                                disabled={isScanning || isApplying || isLoadingBatch || isUndoing}
                                 className="gap-2"
                             >
                                 <Undo2 className="size-4" />
@@ -485,13 +732,13 @@ export function LibraryHealthPage() {
                             </Button>
                         </div>
 
-                        {report && report.issues && report.issues.some((i) => i.fixable) && !isScanning && (
+                        {report && report.issues && report.issues.some((i) => i.fixable) && canFix && !isScanning && (
                             <div className="flex items-center gap-2">
                                 {selectedCount > 0 && (
                                     <Button
                                         type="button"
                                         variant="outline"
-                                        onClick={() => handlePreviewFixes()}
+                                        onClick={handlePreviewSelected}
                                         className="gap-2"
                                     >
                                         <Wrench className="size-4" />
@@ -618,6 +865,43 @@ export function LibraryHealthPage() {
                 </div>
             )}
 
+            {/* Folders the scan could not read */}
+            {report && skippedDirs > 0 && (
+                <Card className="border-amber-500/30 bg-amber-500/5" role="alert">
+                    <CardContent className="py-4 flex items-start gap-3">
+                        <TriangleAlert className="size-5 text-amber-500 shrink-0 mt-0.5" />
+                        <div className="flex flex-col gap-1.5 min-w-0">
+                            <p className="text-sm font-medium text-amber-500">
+                                {t("translation.libraryHealth.skippedFoldersTitle", { count: skippedDirs })}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                                {t("translation.libraryHealth.skippedFoldersDescription")}
+                            </p>
+                            {skippedSample.length > 0 && (
+                                <ul className="flex flex-col gap-0.5 font-mono text-[11px] text-muted-foreground">
+                                    {skippedSample.map((sample) => (
+                                        <li key={sample} className="truncate">
+                                            {sample}
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                            {skippedMore > 0 && (
+                                <p className="text-[11px] text-muted-foreground">
+                                    {t("translation.libraryHealth.skippedFoldersMore", { count: skippedMore })}
+                                </p>
+                            )}
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
+
+            {report?.persisted && (
+                <p className="text-xs text-muted-foreground">
+                    {t("translation.libraryHealth.persistedNotice")}
+                </p>
+            )}
+
             {/* Empty State / Perfect Health */}
             {!report && !isScanning && (
                 <Card className="border-border bg-card/50 border-dashed">
@@ -630,7 +914,8 @@ export function LibraryHealthPage() {
                 </Card>
             )}
 
-            {report && totalIssuesCount === 0 && (
+            {/* Not claimed when part of the library was never read. */}
+            {report && totalIssuesCount === 0 && skippedDirs === 0 && (
                 <Card className="border-emerald-500/20 bg-emerald-500/5">
                     <CardContent className="py-10 flex flex-col items-center justify-center text-center gap-3">
                         <CheckCircle2 className="size-12 text-emerald-500" />
@@ -644,20 +929,16 @@ export function LibraryHealthPage() {
             {/* Issues Grouped By Rule */}
             {report && totalIssuesCount > 0 && (
                 <div className="flex flex-col gap-3">
-                    {Object.entries(groupedIssues).map(([ruleId, ruleIssues]) => {
+                    {ruleGroups.map(({ ruleId, issues: ruleIssues }) => {
                         const isExpanded = !!expandedRules[ruleId];
                         const fixableInRule = ruleIssues.filter((i) => i.fixable);
                         const hasFixable = fixableInRule.length > 0;
                         const allSelected =
                             hasFixable && fixableInRule.every((i) => selectedIssueIds[i.id]);
 
-                        // Group per album within the rule
-                        const issuesByAlbum: Record<string, library.Issue[]> = {};
-                        for (const iss of ruleIssues) {
-                            const alb = iss.album_dir || "General";
-                            if (!issuesByAlbum[alb]) issuesByAlbum[alb] = [];
-                            issuesByAlbum[alb].push(iss);
-                        }
+                        // Group per album within the rule, only once it is open.
+                        const albumGroups = isExpanded ? groupIssuesByAlbum(ruleIssues) : [];
+                        const albumWindow = pageWindow(albumGroups.length, albumLimits[ruleId], ALBUMS_PER_PAGE);
 
                         return (
                             <Card key={ruleId} className="border-border bg-card overflow-hidden">
@@ -681,7 +962,7 @@ export function LibraryHealthPage() {
                                             )}
                                         </button>
 
-                                        {hasFixable && (
+                                        {hasFixable && canFix && (
                                             <div
                                                 onClick={(e) => e.stopPropagation()}
                                                 className="flex items-center"
@@ -719,10 +1000,15 @@ export function LibraryHealthPage() {
 
                                 {isExpanded && (
                                     <CardContent className="pt-0 pb-4 px-4 border-t border-border/50 bg-background/50 flex flex-col gap-3">
-                                        {Object.entries(issuesByAlbum).map(([albumName, albIssues]) => {
-                                            const albumKey = `${ruleId}:${albumName}`;
+                                        {albumGroups.slice(0, albumWindow.shown).map(({ albumDir, issues: albIssues }) => {
+                                            const albumKey = albumStateKey(ruleId, albumDir);
                                             const isAlbumExpanded =
                                                 expandedAlbums[albumKey] !== false; // default open
+                                            const issueWindow = pageWindow(
+                                                albIssues.length,
+                                                issueLimits[albumKey],
+                                                ISSUES_PER_PAGE
+                                            );
 
                                             return (
                                                 <div
@@ -741,90 +1027,65 @@ export function LibraryHealthPage() {
                                                             )}
                                                             <Folder className="size-3.5 text-primary shrink-0" />
                                                             <span className="font-semibold truncate">
-                                                                {albumName}
+                                                                {albumDir || t("translation.libraryHealth.libraryRoot")}
                                                             </span>
                                                         </div>
                                                         <span className="text-muted-foreground shrink-0">
-                                                            {albIssues.length} issues
+                                                            {t("translation.libraryHealth.albumIssueCount", {
+                                                                count: albIssues.length,
+                                                            })}
                                                         </span>
                                                     </div>
 
                                                     {isAlbumExpanded && (
                                                         <div className="divide-y divide-border/50">
-                                                            {albIssues.map((issue) => (
-                                                                <div
+                                                            {albIssues.slice(0, issueWindow.shown).map((issue) => (
+                                                                <IssueRow
                                                                     key={issue.id}
-                                                                    className="px-3 py-2.5 flex items-start justify-between gap-3 text-xs"
-                                                                >
-                                                                    <div className="flex items-start gap-2.5 min-w-0">
-                                                                        {issue.fixable ? (
-                                                                            <Checkbox
-                                                                                checked={
-                                                                                    !!selectedIssueIds[issue.id]
-                                                                                }
-                                                                                onCheckedChange={(checked) =>
-                                                                                    handleSelectIssue(
-                                                                                        issue.id,
-                                                                                        !!checked
-                                                                                    )
-                                                                                }
-                                                                                className="mt-0.5"
-                                                                            />
-                                                                        ) : (
-                                                                            <div className="size-4 shrink-0 mt-0.5 flex items-center justify-center text-muted-foreground">
-                                                                                <Info className="size-3.5" />
-                                                                            </div>
-                                                                        )}
-                                                                        <div className="flex flex-col gap-1 min-w-0">
-                                                                            <span className="text-foreground leading-snug">
-                                                                                {issue.message}
-                                                                            </span>
-                                                                            {issue.path && (
-                                                                                <span className="font-mono text-[11px] text-muted-foreground truncate">
-                                                                                    {issue.path}
-                                                                                </span>
-                                                                            )}
-                                                                        </div>
-                                                                    </div>
-
-                                                                    <div className="flex items-center gap-2 shrink-0">
-                                                                        {issue.severity === "error" && (
-                                                                            <Badge
-                                                                                variant="destructive"
-                                                                                className="text-[10px] uppercase font-mono"
-                                                                            >
-                                                                                {t("translation.libraryHealth.severityError")}
-                                                                            </Badge>
-                                                                        )}
-                                                                        {issue.severity === "warning" && (
-                                                                            <Badge
-                                                                                variant="secondary"
-                                                                                className="text-[10px] uppercase font-mono text-amber-500 border border-amber-500/30"
-                                                                            >
-                                                                                {t("translation.libraryHealth.severityWarning")}
-                                                                            </Badge>
-                                                                        )}
-                                                                        {issue.fixable && (
-                                                                            <Button
-                                                                                type="button"
-                                                                                size="sm"
-                                                                                variant="ghost"
-                                                                                onClick={() =>
-                                                                                    handlePreviewFixes([issue.id])
-                                                                                }
-                                                                                className="h-6 px-2 text-[11px] text-primary hover:text-primary"
-                                                                            >
-                                                                                {t("translation.libraryHealth.previewFixes")}
-                                                                            </Button>
-                                                                        )}
-                                                                    </div>
-                                                                </div>
+                                                                    issue={issue}
+                                                                    checked={!!selectedIssueIds[issue.id]}
+                                                                    canFix={canFix}
+                                                                    root={reportRoot}
+                                                                    onSelect={handleSelectIssue}
+                                                                    onPreview={handlePreviewIssue}
+                                                                    onOpenFolder={handleOpenFolder}
+                                                                />
                                                             ))}
+                                                            {issueWindow.hidden > 0 && (
+                                                                <div className="px-3 py-2 flex justify-center">
+                                                                    <Button
+                                                                        type="button"
+                                                                        size="sm"
+                                                                        variant="ghost"
+                                                                        onClick={() => showMoreIssues(albumKey)}
+                                                                        className="h-7 px-3 text-[11px]"
+                                                                    >
+                                                                        {t("translation.libraryHealth.showMore", {
+                                                                            count: issueWindow.step,
+                                                                        })}
+                                                                    </Button>
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     )}
                                                 </div>
                                             );
                                         })}
+                                        {albumWindow.hidden > 0 && (
+                                            <div className="flex justify-center pt-1">
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={() => showMoreAlbums(ruleId)}
+                                                    className="h-8 px-4 text-xs"
+                                                >
+                                                    {t("translation.libraryHealth.showMoreAlbums", {
+                                                        count: albumWindow.step,
+                                                    })}
+                                                </Button>
+                                            </div>
+                                        )}
                                     </CardContent>
                                 )}
                             </Card>
@@ -834,8 +1095,15 @@ export function LibraryHealthPage() {
             )}
 
             {/* Preview Plan Dialog */}
-            <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
-                <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+            <Dialog
+                open={isPreviewOpen}
+                onOpenChange={(open) => {
+                    // Closing mid-apply would hide a batch that is still changing files.
+                    if (!open && isApplying) return;
+                    setIsPreviewOpen(open);
+                }}
+            >
+                <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col" showCloseButton={!isApplying}>
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
                             <Wrench className="size-5 text-primary" />
@@ -851,29 +1119,59 @@ export function LibraryHealthPage() {
                             <div className="flex items-center justify-between text-xs font-mono text-muted-foreground px-1">
                                 <span>
                                     {t("translation.libraryHealth.previewOperationCount", {
-                                        count: previewPlan.operations ? previewPlan.operations.length : 0,
+                                        count: runnableOps,
                                     })}
                                 </span>
                             </div>
 
+                            {isApplying && (
+                                <div className="flex flex-col gap-2 px-1" role="status" aria-live="polite">
+                                    <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground font-mono">
+                                        <span className="truncate min-w-0">
+                                            {applyProgress?.path || t("translation.libraryHealth.applyingFixes")}
+                                        </span>
+                                        {applyProgress && (
+                                            <span className="shrink-0">
+                                                {t("translation.libraryHealth.applyProgress", {
+                                                    current: applyProgress.current,
+                                                    total: applyProgress.total,
+                                                })}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <Progress
+                                        value={
+                                            applyProgress
+                                                ? progressPercent(applyProgress.current, applyProgress.total)
+                                                : 0
+                                        }
+                                        className="h-2"
+                                    />
+                                </div>
+                            )}
+
                             <ScrollArea className="flex-1 border border-border rounded-md p-3 bg-muted/20">
                                 <div className="flex flex-col gap-2.5">
-                                    {previewPlan.operations && previewPlan.operations.length > 0 ? (
-                                        previewPlan.operations.map((op, idx) => (
+                                    {previewOps.length > 0 ? (
+                                        previewOps.slice(0, previewWindow.shown).map((op, idx) => (
                                             <div
                                                 key={idx}
                                                 className="p-2.5 rounded border border-border bg-card text-xs flex flex-col gap-1.5"
                                             >
                                                 <div className="flex items-center justify-between font-mono">
                                                     <Badge variant="outline" className="text-[10px] uppercase font-mono">
-                                                        {op.type === "tags" && t("translation.libraryHealth.diffTags")}
-                                                        {op.type === "move" && t("translation.libraryHealth.diffMove")}
-                                                        {op.type === "rmdir" && t("translation.libraryHealth.diffRmdir")}
+                                                        {getOperationTypeLabel(op.type)}
                                                     </Badge>
                                                     <span className="text-[11px] text-muted-foreground truncate max-w-xs">
                                                         {op.path}
                                                     </span>
                                                 </div>
+
+                                                {op.error && (
+                                                    <div className="text-[11px] text-destructive">
+                                                        {t("translation.libraryHealth.opSkipped", { error: op.error })}
+                                                    </div>
+                                                )}
 
                                                 {op.type === "tags" && op.set && (
                                                     <div className="font-mono text-[11px] bg-background/60 p-2 rounded border border-border/50 divide-y divide-border/30">
@@ -915,28 +1213,60 @@ export function LibraryHealthPage() {
                                             {t("translation.libraryHealth.previewEmpty")}
                                         </div>
                                     )}
+                                    {previewWindow.hidden > 0 && (
+                                        <div className="flex justify-center">
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="ghost"
+                                                onClick={() =>
+                                                    setPreviewOpLimit((prev) =>
+                                                        nextPageLimit(prev, OPERATIONS_PER_PAGE)
+                                                    )
+                                                }
+                                                className="h-7 px-3 text-[11px]"
+                                            >
+                                                {t("translation.libraryHealth.showMore", {
+                                                    count: previewWindow.step,
+                                                })}
+                                            </Button>
+                                        </div>
+                                    )}
                                 </div>
                             </ScrollArea>
                         </div>
                     )}
 
                     <DialogFooter className="gap-2 sm:gap-0">
-                        <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => setIsPreviewOpen(false)}
-                            disabled={isApplying}
-                        >
-                            {t("translation.libraryHealth.close")}
-                        </Button>
+                        {isApplying ? (
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={handleCancelApply}
+                                disabled={isCancellingApply}
+                                className="gap-2"
+                            >
+                                <Square className="size-4 fill-current" />
+                                <span>
+                                    {isCancellingApply
+                                        ? t("translation.libraryHealth.cancelling")
+                                        : t("translation.libraryHealth.cancelApply")}
+                                </span>
+                            </Button>
+                        ) : (
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => setIsPreviewOpen(false)}
+                            >
+                                {t("translation.libraryHealth.close")}
+                            </Button>
+                        )}
                         <Button
                             type="button"
                             onClick={handleApplyPlan}
                             disabled={
-                                isApplying ||
-                                !previewPlan ||
-                                !previewPlan.operations ||
-                                previewPlan.operations.length === 0
+                                isApplying || runnableOps === 0
                             }
                             className="bg-primary text-primary-foreground gap-2"
                         >
@@ -949,6 +1279,116 @@ export function LibraryHealthPage() {
                                 <>
                                     <Check className="size-4" />
                                     <span>{t("translation.libraryHealth.applyFixes")}</span>
+                                </>
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Undo Confirmation Dialog */}
+            <Dialog
+                open={isUndoConfirmOpen}
+                onOpenChange={(open) => {
+                    if (!open && isUndoing) return;
+                    setIsUndoConfirmOpen(open);
+                }}
+            >
+                <DialogContent className="max-w-lg" showCloseButton={!isUndoing}>
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Undo2 className="size-5 text-primary" />
+                            <span>{t("translation.libraryHealth.undoConfirmTitle")}</span>
+                        </DialogTitle>
+                        <DialogDescription>
+                            {t("translation.libraryHealth.undoConfirmDescription")}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    {undoBatch && (
+                        <div className="flex flex-col gap-3 py-1">
+                            {undoBatch.abandoned_batch_id && (
+                                <div
+                                    role="alert"
+                                    className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-500"
+                                >
+                                    <TriangleAlert className="size-4 shrink-0 mt-0.5" />
+                                    <span className="leading-snug">
+                                        {t("translation.libraryHealth.undoAbandonedNotice")}
+                                    </span>
+                                </div>
+                            )}
+
+                            <div className="rounded-md border border-border bg-muted/20 p-3 flex flex-col gap-2.5 text-xs">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <span className="text-muted-foreground">
+                                        {t("translation.libraryHealth.undoBatchTime", {
+                                            time: formatBatchTime(undoBatch.time, i18n.language),
+                                        })}
+                                    </span>
+                                    <span className="font-mono font-medium text-foreground">
+                                        {t("translation.libraryHealth.undoBatchCount", {
+                                            count: undoBatch.count,
+                                        })}
+                                    </span>
+                                </div>
+
+                                {undoTypes.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {undoTypes.map(({ type, count }) => (
+                                            <Badge
+                                                key={type}
+                                                variant="outline"
+                                                className="text-[10px] font-mono"
+                                            >
+                                                {getOperationTypeLabel(type)}: {count}
+                                            </Badge>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {undoBatch.paths && undoBatch.paths.length > 0 && (
+                                    <div className="flex flex-col gap-1">
+                                        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                            {t("translation.libraryHealth.undoBatchSamples")}
+                                        </span>
+                                        <ul className="flex flex-col gap-0.5 font-mono text-[11px] text-muted-foreground">
+                                            {undoBatch.paths.map((samplePath) => (
+                                                <li key={samplePath} className="truncate" title={samplePath}>
+                                                    {samplePath}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    <DialogFooter className="gap-2 sm:gap-0">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setIsUndoConfirmOpen(false)}
+                            disabled={isUndoing}
+                        >
+                            {t("translation.common.cancel")}
+                        </Button>
+                        <Button
+                            type="button"
+                            onClick={handleConfirmUndo}
+                            disabled={isUndoing}
+                            className="bg-primary text-primary-foreground gap-2"
+                        >
+                            {isUndoing ? (
+                                <>
+                                    <RefreshCw className="size-4 animate-spin" />
+                                    <span>{t("translation.libraryHealth.undoing")}</span>
+                                </>
+                            ) : (
+                                <>
+                                    <Undo2 className="size-4" />
+                                    <span>{t("translation.libraryHealth.undoConfirm")}</span>
                                 </>
                             )}
                         </Button>
