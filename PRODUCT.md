@@ -4,7 +4,7 @@ Product truth for Auralis. Visual/interaction decisions in `DESIGN.md` defer to 
 
 ## What it is
 
-Auralis is a **Windows desktop app** (Wails, frameless window) for fetching lossless audio.
+Auralis is a **Windows desktop app** (Tauri v2, frameless window) for fetching lossless audio.
 The user pastes a streaming link (Spotify URL/URI) or types a search, inspects the result,
 and downloads tracks, albums, playlists, or artist collections in one action. A persistent
 worker starts automatically and handles later requests in the background. Files are fetched in
@@ -14,7 +14,7 @@ file quality and fallback preferences, never provider lists, API checks, or serv
 credentials. Other provider implementations remain for compatibility, but routes
 without current working-audio evidence are excluded from automatic downloads.
 
-- Stack: Go backend + Wails v2 + React 19 + Tailwind CSS v4 + shadcn/radix primitives.
+- Stack: Rust backend + Tauri v2 + React 19 + Tailwind CSS v4 + shadcn/radix primitives.
 - Config and data live under `~/.auralis`; custom protocol `auralis://`.
 - MIT fork of **SpotiFLAC**: original LICENSE copyright and README credit remain; community
   hosts and session User-Agents are unchanged.
@@ -51,9 +51,9 @@ artwork-led browsing, compact track rows, quiet chrome, keyboard-first entry (pa
 
 ## Non-negotiables when changing code
 
-- Wails `App` binding method names do not change (frontend↔backend contract).
+- Wails `App` binding method names (124 IPC methods) do not change (frontend↔backend contract).
 - i18n key IDs stay stable; English copy changes only when a label's job changes.
 - Provider protocols, community session encryption, provider hosts, and User-Agents
   remain product constants. Download requests use the shared execution lease and persistent store.
-- Desktop runtime stays **Go + Wails v2 + Windows WebView2**. The user explicitly
+- Desktop runtime stays **Rust + Tauri v2 + WebView2**. The user explicitly
   excludes Electron. React is the UI, not a change of desktop framework.
