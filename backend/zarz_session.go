@@ -488,7 +488,12 @@ func runZarzBootstrapLocked(record *zarzSessionRecord, appVersion string) error 
 	if challenge == "" {
 		return fmt.Errorf("zarz bootstrap did not return a session or challenge: %s", zarzPreviewBody(body, 240))
 	}
+	key := "zarz:" + appVersion
+	if verificationSkipped(key) {
+		return errVerificationSkipped
+	}
 	grant, err := completeZarzChallenge(record, challenge)
+	noteVerificationOutcome(key, err)
 	if err != nil {
 		return err
 	}

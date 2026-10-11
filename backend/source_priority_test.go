@@ -62,6 +62,9 @@ func TestSourceRankingPersistenceAndCancellation(t *testing.T) {
 
 func TestDownloadSourcesRejectInvalidAudioAndTryNext(t *testing.T) {
 	t.Setenv(appDataDirEnv, t.TempDir())
+	previousCodecReader := communityCodecReader
+	communityCodecReader = func(string) (string, error) { return "flac", nil }
+	t.Cleanup(func() { communityCodecReader = previousCodecReader })
 	file := filepath.Join(t.TempDir(), "sample.flac")
 	SetAudioDurationReaderForTest(func(path string) (float64, error) {
 		if _, err := os.Stat(path); err != nil {
@@ -102,10 +105,12 @@ func TestDownloadSourcesStopOnCancellation(t *testing.T) {
 	}
 }
 
-func TestSourceRegistryDoesNotUseMetadataHostForDownloads(t *testing.T) {
-	for _, source := range DownloadSources() {
-		if source.ID == "samidy-catalog" {
-			t.Fatal("metadata-only source enabled for downloads")
+func TestSourceRegistryOmitsRetiredHosts(t *testing.T) {
+	t.Setenv(appDataDirEnv, t.TempDir())
+	for _, source := range append(DownloadSources(), ResourceSources()...) {
+		host := canonicalCommunitySourceHost(source.URL)
+		if _, retired := retiredCommunitySourceHosts[host]; retired || host == "saavn.dev" {
+			t.Fatalf("%s still points at retired host %s", source.ID, host)
 		}
 	}
 	if sourceQuality("lossy") != "lossy" {

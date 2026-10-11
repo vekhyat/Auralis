@@ -1282,6 +1282,8 @@
       "waitingCount_one": "{{count}} request waiting",
       "quality": "Quality",
       "qualityHint": "Choose the file for new downloads. If that quality is not available, the next best file is saved.",
+      "qualitySmallerFile": "{{kbps}} kbps · kleiner bestand",
+      "qualitySmallerFileHint": "Kleinere bestanden voor telefoons en weinig opslag. Ze zijn gecomprimeerd, dus niet verliesvrij.",
       "couldntGet": "Couldn't save this",
       "couldntSave": "This one did not save. Try again in a moment.",
       "tryAgain": "Try again",

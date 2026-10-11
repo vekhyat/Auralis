@@ -1,6 +1,8 @@
 import { GetDefaults, LoadFonts as LoadFontsFromBackend, LoadSettings, SaveFonts as SaveFontsToBackend, SaveSettings as SaveToBackend, } from "../../wailsjs/go/main/App";
 import { getFirstArtist } from "./utils";
 import { isAppLanguage, t, type AppLanguage } from "@/i18n";
+import { DEFAULT_AUTO_ORDER, extendAutoServices, isSupportedAutoService, sanitizeAutoServices } from "./source-priority";
+import { isDownloadQuality, type DownloadQuality } from "./quality";
 import { normalizeBaseColorName, normalizeThemeName, type BaseColorName, type ThemeName } from "./themes";
 export type BuiltInFontFamily = "google-sans" | "inter" | "poppins" | "roboto" | "dm-sans" | "plus-jakarta-sans" | "manrope" | "space-grotesk" | "noto-sans" | "nunito-sans" | "figtree" | "raleway" | "public-sans" | "outfit" | "jetbrains-mono" | "geist-sans" | "bricolage-grotesque";
 export type CustomFontFamily = `custom-${string}`;
@@ -72,7 +74,7 @@ export interface Settings {
     qobuzQuality: "6" | "7" | "27";
     amazonQuality: "16" | "24" | "atmos";
     autoOrder: "tidal-qobuz-amazon" | "tidal-amazon-qobuz" | "qobuz-tidal-amazon" | "qobuz-amazon-tidal" | "amazon-tidal-qobuz" | "amazon-qobuz-tidal" | string;
-    autoQuality: "16" | "24" | "atmos";
+    autoQuality: DownloadQuality;
     allowFallback: boolean;
     allowAtmosFallback: boolean;
     atmosFallbackQuality: "16" | "24";
@@ -259,7 +261,7 @@ export const DEFAULT_SETTINGS: Settings = {
     tidalQuality: "LOSSLESS",
     qobuzQuality: "6",
     amazonQuality: "16",
-    autoOrder: "tidal-qobuz-amazon",
+    autoOrder: DEFAULT_AUTO_ORDER,
     autoQuality: "16",
     allowFallback: true,
     allowAtmosFallback: true,
@@ -605,31 +607,17 @@ export function hasConfiguredCustomQobuzApi(value: unknown): boolean {
     return normalizeCustomQobuzApi(value).startsWith("https://");
 }
 export function sanitizeAutoOrder(order: unknown): string {
-    const allowedServices = new Set(["tidal", "qobuz", "amazon", "deezer", "apple", "jiosaavn"]);
-    const fallbackOrder = "tidal-qobuz-amazon";
-    if (typeof order !== "string") {
-        return fallbackOrder;
-    }
-    const normalized = order
-        .split("-")
-        .map((part) => part.trim().toLowerCase())
-        .filter((part, index, parts) => part !== "" && allowedServices.has(part) && parts.indexOf(part) === index);
-    return normalized.length >= 2 ? normalized.join("-") : fallbackOrder;
+    const parts = sanitizeAutoServices(order);
+    return parts.length >= 2 ? parts.join("-") : DEFAULT_AUTO_ORDER;
 }
-const EXTRA_AUTO_SERVICES = ["deezer", "apple", "jiosaavn"] as const;
 export function extendAutoOrder(order: unknown): string[] {
-    const parts = sanitizeAutoOrder(order).split("-");
-    for (const extra of EXTRA_AUTO_SERVICES) {
-        if (!parts.includes(extra)) {
-            parts.push(extra);
-        }
-    }
-    return parts;
+    return extendAutoServices(order);
 }
 function normalizeDownloader(value: unknown): Settings["downloader"] {
     const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
-    if (normalized === "tidal" || normalized === "qobuz" || normalized === "amazon" || normalized === "deezer" || normalized === "apple" || normalized === "jiosaavn" || normalized === "auto") {
-        return normalized;
+    // A saved store that no longer passes full-audio checks (TIDAL, Amazon) falls back to automatic selection.
+    if (normalized === "auto" || isSupportedAutoService(normalized)) {
+        return normalized as Settings["downloader"];
     }
     return DEFAULT_SETTINGS.downloader;
 }
@@ -717,7 +705,7 @@ function normalizeSettingsPayload(settings: SettingsPayload): SettingsPayload {
     if (!("autoQuality" in normalized)) {
         normalized.autoQuality = "16";
     }
-    if (normalized.autoQuality !== "16" && normalized.autoQuality !== "24" && normalized.autoQuality !== "atmos") {
+    if (!isDownloadQuality(normalized.autoQuality)) {
         normalized.autoQuality = "16";
     }
     normalized.customTidalApi = normalizeCustomTidalApi(normalized.customTidalApi);

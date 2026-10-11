@@ -1,5 +1,11 @@
 # Wails Build
-build/
+# Wails regenerates build/ on every build; only the installer script is source.
+build/*
+!build/windows/
+build/windows/*
+!build/windows/installer/
+build/windows/installer/*
+!build/windows/installer/project.nsi
 *.exe
 *.dll
 *.dylib

@@ -1,0 +1,53 @@
+[
+    {
+        "service":  "qobuz",
+        "streams":  [
+                        {
+                            "codec_name":  "flac",
+                            "sample_rate":  "44100",
+                            "bits_per_raw_sample":  "16"
+                        }
+                    ],
+        "format":  {
+                       "duration":  "259.946667"
+                   }
+    },
+    {
+        "service":  "deezer",
+        "streams":  [
+                        {
+                            "codec_name":  "flac",
+                            "sample_rate":  "44100",
+                            "bits_per_raw_sample":  "16"
+                        }
+                    ],
+        "format":  {
+                       "duration":  "259.666667"
+                   }
+    },
+    {
+        "service":  "apple",
+        "streams":  [
+                        {
+                            "codec_name":  "alac",
+                            "sample_rate":  "44100",
+                            "bits_per_raw_sample":  "24"
+                        }
+                    ],
+        "format":  {
+                       "duration":  "259.666667"
+                   }
+    },
+    {
+        "service":  "jiosaavn",
+        "streams":  [
+                        {
+                            "codec_name":  "aac",
+                            "sample_rate":  "44100"
+                        }
+                    ],
+        "format":  {
+                       "duration":  "259.946009"
+                   }
+    }
+]

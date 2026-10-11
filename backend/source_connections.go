@@ -10,7 +10,8 @@ import (
 	"time"
 )
 
-// Connection checks prove API access, never audio quality or full-track delivery.
+// API checks validate a fixture response. They prove API access, never audio
+// quality or full-track delivery.
 type SourceConnection struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
@@ -27,13 +28,15 @@ var sourceConnectionChecks = struct {
 	rows map[string]SourceConnection
 }{rows: make(map[string]SourceConnection)}
 
+// SourceConnections lists the built-in download and resource rows. Identity
+// is by exact built-in ID: a user-configured source never appears here,
+// whatever custom ID it uses, and never inherits a built-in check. No row is
+// verifiable: the community/Zarz session flow is retired, so CanVerify is
+// always false and verification stops with an explanatory error.
 func SourceConnections() []SourceConnection {
 	var rows []SourceConnection
-	for _, source := range DownloadSources() {
-		if !strings.HasPrefix(source.ID, "antra-") && !strings.HasPrefix(source.ID, "community-") && !strings.HasPrefix(source.ID, "zarz-") && !strings.HasPrefix(source.ID, "jiosaavn-") {
-			continue
-		}
-		rows = append(rows, SourceConnection{ID: source.ID, Name: source.Name, Service: source.Service, Role: source.Role, State: "unchecked", CanVerify: strings.HasPrefix(source.ID, "community-") || strings.HasPrefix(source.ID, "zarz-")})
+	for _, source := range builtInDownloadSources() {
+		rows = append(rows, SourceConnection{ID: source.ID, Name: source.Name, Service: source.Service, Role: source.Role, State: "unchecked"})
 	}
 	for _, source := range ResourceSources() {
 		rows = append(rows, SourceConnection{ID: source.ID, Name: source.Name, Service: source.Service, Role: source.Role, State: "unchecked"})
@@ -65,8 +68,9 @@ func saveSourceConnection(row SourceConnection) SourceConnection {
 	return row
 }
 
-// Checking a legacy connection never initiates a challenge. Verification is an
-// explicit action, or is requested by its existing download/session flow.
+// CheckSourceConnection runs the built-in API check for an exact built-in
+// ID. A user-configured source never reaches a built-in check: unknown IDs
+// fail the lookup above before any session or network work.
 func CheckSourceConnection(id string) (SourceConnection, error) {
 	row, err := sourceConnection(id)
 	if err != nil {
@@ -75,47 +79,19 @@ func CheckSourceConnection(id string) (SourceConnection, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	ok := false
-	switch {
-	case strings.HasPrefix(id, "community-"):
-		var session *communitySessionRecord
-		if !communitySessionMu.TryLock() {
-			row.State, row.Message = "pending", "Source verification is already in progress."
-			return saveSourceConnection(row), nil
-		}
-		session, err = loadCommunitySession()
-		ok = err == nil && communitySessionValid(session)
-		communitySessionMu.Unlock()
-	case strings.HasPrefix(id, "zarz-"):
-		var store *zarzSessionStore
-		if !zarzSessionMu.TryLock() {
-			row.State, row.Message = "pending", "Source verification is already in progress."
-			return saveSourceConnection(row), nil
-		}
-		store, err = loadZarzStore()
-		if err == nil && store != nil {
-			session := store.Sessions[sourceConnectionAppVersion(row.Service)]
-			ok = zarzSessionValid(&session)
-		}
-		zarzSessionMu.Unlock()
-	case strings.HasPrefix(id, "antra-"):
+	switch id {
+	case "antra-qobuz", "antra-deezer", "antra-apple":
 		var hit antraSearchHit
 		hit, err = antraSearchByISRC(row.Service, "GBAYE0601690")
-		ok = err == nil && hit.TrackID != ""
-	case id == "jiosaavn-official":
+		ok = err == nil && hit.TrackID != "" && sourceCheckRecordingMatches(hit.ISRC, hit.Title, hit.Artist)
+	case "jiosaavn-official":
 		var track string
 		track, _, err = jioSaavnOfficialSearch("Come Together The Beatles", jioSaavnWant{Title: "Come Together", Artist: "The Beatles"})
-		ok = err == nil && track != ""
-	case id == "jiosaavn-community":
-		var track string
-		track, _, err = jioSaavnCommunitySearch("Come Together The Beatles", jioSaavnWant{Title: "Come Together", Artist: "The Beatles"})
 		ok = err == nil && track != ""
 	default:
 		ok, err = checkResourceConnection(ctx, id)
 	}
 	row.State, row.Message = "failed", "The source did not pass its API check. Try again later."
-	if row.CanVerify && !ok {
-		row.State, row.Message = "authentication_required", "Complete verification in Auralis to connect this source."
-	}
 	if ok {
 		row.State, row.Message = "available", "API access is available; full-track audio has not been verified by this check."
 	}
@@ -125,39 +101,15 @@ func CheckSourceConnection(id string) (SourceConnection, error) {
 	return saveSourceConnection(row), nil
 }
 
-func sourceConnectionAppVersion(service string) string {
-	provider := map[string]string{"tidal": "tidal", "qobuz": "qbz", "amazon": "amazeamazeamaze"}[service]
-	return zarzAppVersionForProvider(provider)
-}
-
+// No connection row is verifiable: the community/Zarz session flow is
+// retired, so every row reports CanVerify == false and verification stops
+// here before any browser or network work.
 func VerifySourceConnection(id string) (SourceConnection, error) {
 	row, err := sourceConnection(id)
 	if err != nil {
 		return row, err
 	}
-	if !row.CanVerify {
-		return row, fmt.Errorf("this source uses an API check or configured credentials")
-	}
-	if err = TryBeginTrackedDownload(); err != nil {
-		return row, err
-	}
-	defer EndTrackedDownload()
-	_, finish := BeginDownloadCancellationScope()
-	defer finish()
-	if strings.HasPrefix(id, "community-") {
-		_, err = ensureCommunitySession()
-	} else {
-		_, err = ensureZarzSession(sourceConnectionAppVersion(row.Service))
-	}
-	if err != nil {
-		row.State, row.Message = "authentication_required", "Verification did not finish. Complete the source's check and try again."
-		if IsDownloadCancelledError(err) {
-			row.State, row.Message = "cancelled", "Verification was cancelled."
-		}
-		return saveSourceConnection(row), nil
-	}
-	row.State, row.Message = "available", "The source session is connected; full-track audio has not been checked."
-	return saveSourceConnection(row), nil
+	return row, fmt.Errorf("this source uses an API check or configured credentials")
 }
 
 func isConnectionAccessError(err error) bool {
@@ -189,12 +141,8 @@ func checkResourceConnection(ctx context.Context, id string) (bool, error) {
 		raw = musicBrainzAPIBase + "/recording/?query=isrc:GBAYE0601690&fmt=json&limit=1"
 	case "resource-deezer":
 		raw = "https://api.deezer.com/track/116348128"
-	case "resource-qobuz":
-		raw = qobuzAPIBaseURL + "/track/get?track_id=30369895&app_id=" + qobuzZarzCatalogAppID
 	case "resource-tidal":
 		raw = tidalPublicSearchPath("GBAYE0601690", 1)
-	case "samidy-catalog":
-		raw = "https://monochrome-api.samidy.com/info/?id=55130631"
 	default:
 		return false, fmt.Errorf("unknown resource")
 	}
@@ -228,9 +176,18 @@ func checkResourceConnection(ctx context.Context, id string) (bool, error) {
 func validateResourceResponse(id string, body []byte) bool {
 	if id == "resource-lrclib" {
 		var rows []struct {
-			TrackName string `json:"trackName"`
+			TrackName  string `json:"trackName"`
+			ArtistName string `json:"artistName"`
 		}
-		return json.Unmarshal(body, &rows) == nil && len(rows) > 0 && rows[0].TrackName != ""
+		if json.Unmarshal(body, &rows) != nil {
+			return false
+		}
+		for _, row := range rows {
+			if sourceCheckRecordingMatches("", row.TrackName, row.ArtistName) {
+				return true
+			}
+		}
+		return false
 	}
 	var object map[string]json.RawMessage
 	if json.Unmarshal(body, &object) != nil {
@@ -241,18 +198,51 @@ func validateResourceResponse(id string, body []byte) bool {
 		if id == "resource-musicbrainz" {
 			key = "recordings"
 		}
-		var rows []json.RawMessage
-		return json.Unmarshal(object[key], &rows) == nil && len(rows) > 0
-	}
-	if id == "samidy-catalog" {
-		var data struct {
-			ID int64 `json:"id"`
+		var rows []struct {
+			ISRC   string   `json:"isrc"`
+			ISRCs  []string `json:"isrcs"`
+			Title  string   `json:"title"`
+			Artist struct {
+				Name string `json:"name"`
+			} `json:"artist"`
+			ArtistCredit []struct {
+				Name string `json:"name"`
+			} `json:"artist-credit"`
 		}
-		return json.Unmarshal(object["data"], &data) == nil && data.ID == 55130631
+		if json.Unmarshal(object[key], &rows) != nil {
+			return false
+		}
+		for _, row := range rows {
+			if len(row.ISRCs) > 0 {
+				for _, isrc := range row.ISRCs {
+					if sourceCheckRecordingMatches(isrc, "", "") {
+						return true
+					}
+				}
+				continue
+			}
+			artist := row.Artist.Name
+			if len(row.ArtistCredit) == 1 {
+				artist = row.ArtistCredit[0].Name
+			}
+			if sourceCheckRecordingMatches(row.ISRC, row.Title, artist) {
+				return true
+			}
+		}
+		return false
 	}
 	var trackID int64
 	if json.Unmarshal(object["id"], &trackID) != nil {
 		return false
 	}
-	return id == "resource-deezer" && trackID == 116348128 || id == "resource-qobuz" && trackID == 30369895
+	return id == "resource-deezer" && trackID == 116348128
+}
+
+// An explicit recording identifier must match; metadata is the fallback only
+// when the API omits ISRC. A nonempty search result alone proves no identity.
+func sourceCheckRecordingMatches(isrc, title, artist string) bool {
+	if strings.TrimSpace(isrc) != "" {
+		return strings.EqualFold(strings.TrimSpace(isrc), "GBAYE0601690")
+	}
+	return normalizedSourceTitle(title) == "come together" && strings.EqualFold(strings.TrimSpace(artist), "The Beatles")
 }

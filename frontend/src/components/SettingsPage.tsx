@@ -1,6 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { CommunitySourcesSettings, type CommunitySourcesHandle } from "@/components/CommunitySourcesSettings";
-import { SourceConnectionsSettings } from "@/components/SourceConnectionsSettings";
 import { ListeningConnectionsSettings } from "@/components/ListeningConnectionsSettings";
 import { useTranslation } from "react-i18next";
 import { flushSync } from "react-dom";
@@ -9,18 +7,20 @@ import { Input } from "@/components/ui/input";
 import { InputWithContext } from "@/components/ui/input-with-context";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, } from "@/components/ui/select";
-import { FolderOpen, Save, RotateCcw, Trash2, ExternalLink, DatabaseBackup, Search, FolderLock } from "lucide-react";
+import { FolderOpen, Save, RotateCcw, DatabaseBackup, Search, FolderLock } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { getSettings, getSettingsWithDefaults, loadSettings, saveSettings, resetToDefaultSettings, applyThemeMode, TEMPLATE_VARIABLES, DEFAULT_SETTINGS, type Settings as SettingsType, type MetadataTagToggles, type ExistingFileCheckMode, } from "@/lib/settings";
 import { FormatEditor } from "@/components/FormatEditor";
+import { LOSSY_QUALITIES, isLossyQuality, lossyKbps, type DownloadQuality } from "@/lib/quality";
 import { BackupSettings, RestoreSettings, SelectFolder, OpenConfigFolder } from "../../wailsjs/go/main/App";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
-import { openExternal } from "@/lib/utils";
 import i18n, { APP_LANGUAGES, type AppLanguage } from "@/i18n";
 import chatGPTIcon from "@/assets/icons/chatgpt.svg";
 import geminiIcon from "@/assets/icons/gemini.png";
-function qualityChoice(settings: SettingsType): "16" | "24" | "atmos" {
+function qualityChoice(settings: SettingsType): DownloadQuality {
+    if (isLossyQuality(settings.autoQuality))
+        return settings.autoQuality;
     if (settings.downloader === "tidal") {
         if (settings.tidalQuality === "ATMOS")
             return "atmos";
@@ -39,14 +39,16 @@ function qualityChoice(settings: SettingsType): "16" | "24" | "atmos" {
     }
     return settings.autoQuality === "24" || settings.autoQuality === "atmos" ? settings.autoQuality : "16";
 }
-function withAutoQuality(settings: SettingsType, quality: "16" | "24" | "atmos"): SettingsType {
+function withAutoQuality(settings: SettingsType, quality: DownloadQuality): SettingsType {
+    // Smaller-file tiers are encoded from the CD-quality file, so each store is asked for 16-bit.
+    const lossless = isLossyQuality(quality) ? "16" : quality;
     return {
         ...settings,
         downloader: "auto",
         autoQuality: quality,
-        tidalQuality: quality === "atmos" ? "ATMOS" : quality === "24" ? "HI_RES_LOSSLESS" : "LOSSLESS",
-        qobuzQuality: quality === "24" ? "27" : "6",
-        amazonQuality: quality,
+        tidalQuality: lossless === "atmos" ? "ATMOS" : lossless === "24" ? "HI_RES_LOSSLESS" : "LOSSLESS",
+        qobuzQuality: lossless === "24" ? "27" : "6",
+        amazonQuality: lossless,
     };
 }
 interface SettingsPageProps {
@@ -115,7 +117,6 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, onForYouT
     const { t } = useTranslation();
     const [savedSettings, setSavedSettings] = useState<SettingsType>(getSettings());
     const [tempSettings, setTempSettings] = useState<SettingsType>(savedSettings);
-    const communitySourcesRef = useRef<CommunitySourcesHandle>(null);
     const connectionsRef = useRef<HTMLDivElement>(null);
     const focusConnections = useCallback(() => {
         if (initialSection === "connections") {
@@ -123,16 +124,13 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, onForYouT
             connectionsRef.current?.focus({ preventScroll: true });
         }
     }, [initialSection]);
-    const [communitySourcesDirty, setCommunitySourcesDirty] = useState(false);
     const [showResetConfirm, setShowResetConfirm] = useState(false);
     const [showMetadataAdvanced, setShowMetadataAdvanced] = useState(false);
     const [showLyricsAdvanced, setShowLyricsAdvanced] = useState(false);
     const [lyricsLanguageSearch, setLyricsLanguageSearch] = useState("");
     const [showBackupDialog, setShowBackupDialog] = useState(false);
     const [backupAction, setBackupAction] = useState<"backup" | "restore" | "open" | null>(null);
-    const [showCustomTidalApiDialog, setShowCustomTidalApiDialog] = useState(false);
-    const [showCustomQobuzApiDialog, setShowCustomQobuzApiDialog] = useState(false);
-    const hasUnsavedChanges = communitySourcesDirty || JSON.stringify(savedSettings) !== JSON.stringify(tempSettings);
+    const hasUnsavedChanges = JSON.stringify(savedSettings) !== JSON.stringify(tempSettings);
     const normalizedLyricsLanguageSearch = lyricsLanguageSearch.trim().toLocaleLowerCase();
     const filteredLyricsTranslationLanguages = normalizedLyricsLanguageSearch
         ? LYRICS_TRANSLATION_LANGUAGES.filter((language) => language.code.includes(normalizedLyricsLanguageSearch)
@@ -140,12 +138,12 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, onForYouT
         : LYRICS_TRANSLATION_LANGUAGES;
     const selectedQuality = qualityChoice(tempSettings);
     const isAtmosSelected = selectedQuality === "atmos";
+    const isLossySelected = isLossyQuality(selectedQuality);
     const showCdFallback = selectedQuality === "24" || (isAtmosSelected && tempSettings.allowAtmosFallback && tempSettings.atmosFallbackQuality === "24");
     const resetToSaved = useCallback(() => {
         const freshSavedSettings = getSettings();
         flushSync(() => {
             setTempSettings(freshSavedSettings);
-            communitySourcesRef.current?.reset();
         });
     }, []);
     useEffect(() => {
@@ -186,7 +184,6 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, onForYouT
         loadDefaults();
     }, []);
     const handleSave = async () => {
-        if (await communitySourcesRef.current?.save() === false) return;
         // The page no longer offers a store. Saving applies the visible quality and lets the app pick the file.
         await saveSettings(withAutoQuality(tempSettings, qualityChoice(tempSettings)));
         await i18n.changeLanguage(tempSettings.language);
@@ -198,7 +195,6 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, onForYouT
     };
     const handleReset = async () => {
         const defaultSettings = await resetToDefaultSettings();
-        await communitySourcesRef.current?.resetToDefaults();
         setTempSettings(defaultSettings);
         setSavedSettings(defaultSettings);
         applyThemeMode(defaultSettings.themeMode);
@@ -267,39 +263,9 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, onForYouT
             setBackupAction(null);
         }
     };
-    const handleQualityChange = (value: "16" | "24" | "atmos") => {
+    const handleQualityChange = (value: DownloadQuality) => {
         setTempSettings((prev) => withAutoQuality(prev, value));
     };
-    const persistCustomTidalApi = useCallback(async (nextValue: string) => {
-        const normalizedValue = nextValue.trim().replace(/\/+$/g, "");
-        const persistedSettings = getSettings();
-        const nextSavedSettings: SettingsType = {
-            ...persistedSettings,
-            customTidalApi: normalizedValue,
-        };
-        await saveSettings(nextSavedSettings);
-        const nextSavedState = getSettings();
-        setSavedSettings(nextSavedState);
-        setTempSettings((prev) => ({
-            ...prev,
-            customTidalApi: nextSavedState.customTidalApi,
-        }));
-    }, []);
-    const persistCustomQobuzApi = useCallback(async (nextValue: string) => {
-        const normalizedValue = nextValue.trim().replace(/\/+$/g, "");
-        const persistedSettings = getSettings();
-        const nextSavedSettings: SettingsType = {
-            ...persistedSettings,
-            customQobuzApi: normalizedValue,
-        };
-        await saveSettings(nextSavedSettings);
-        const nextSavedState = getSettings();
-        setSavedSettings(nextSavedState);
-        setTempSettings((prev) => ({
-            ...prev,
-            customQobuzApi: nextSavedState.customQobuzApi,
-        }));
-    }, []);
     return (<div className="mx-auto w-full max-w-5xl space-y-10 pb-10">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold tracking-tight">{t("translation.common.settings")}</h1>
@@ -433,16 +399,18 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, onForYouT
         <section className="max-w-2xl space-y-4">
           <h2 className="border-b border-border pb-1.5 text-sm font-semibold tracking-tight">{t("translation.downloads.quality")}</h2>
           <p className="text-sm text-muted-foreground">{t("translation.downloads.qualityHint")}</p>
-          <Select value={selectedQuality} onValueChange={(value: "16" | "24" | "atmos") => handleQualityChange(value)}>
+          <Select value={selectedQuality} onValueChange={(value: DownloadQuality) => handleQualityChange(value)}>
             <SelectTrigger className="h-9 w-fit" aria-label={t("translation.downloads.quality")}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              {[...LOSSY_QUALITIES].reverse().map((quality) => (<SelectItem key={quality} value={quality}>{t("translation.downloads.qualitySmallerFile", { kbps: lossyKbps(quality) })}</SelectItem>))}
               <SelectItem value="16">{t("literal.backend.value16BitValue441khz")}</SelectItem>
               <SelectItem value="24">{t("translation.migrated.SettingsPage.24Bit48kHz192kHz")}</SelectItem>
               <SelectItem value="atmos">{t("literal.backend.dolbyAtmos")}</SelectItem>
             </SelectContent>
           </Select>
+          {isLossySelected && (<p className="text-sm text-muted-foreground">{t("translation.downloads.qualitySmallerFileHint")}</p>)}
           {isAtmosSelected && (<div className="flex flex-wrap items-center gap-3">
             <Switch id="allow-atmos-fallback" checked={tempSettings.allowAtmosFallback} onCheckedChange={(checked) => setTempSettings((prev) => ({ ...prev, allowAtmosFallback: checked }))}/>
             <Label htmlFor="allow-atmos-fallback" className="cursor-pointer text-sm font-normal">{t("translation.sources.fallbackFlac")}</Label>
@@ -460,8 +428,6 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, onForYouT
           </div>)}
         </section>
 
-        <CommunitySourcesSettings ref={communitySourcesRef} onDirtyChange={setCommunitySourcesDirty} />
-        <SourceConnectionsSettings />
 
         <section className="max-w-3xl space-y-4">
           <h2 className="border-b border-border pb-1.5 text-sm font-semibold tracking-tight">{t("translation.settings.naming")}</h2>
@@ -565,11 +531,11 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, onForYouT
             <div className="space-y-6 lg:pl-0">
               <div className="space-y-4">
                 <h3 className="text-[11px] font-semibold tracking-widest uppercase text-muted-foreground">{t("translation.settings.audioProcessing")}</h3>
-                <div className="flex items-center gap-3">
+                {!isLossySelected && (<div className="flex items-center gap-3">
                   <Switch id="auto-convert-audio" checked={tempSettings.autoConvertAudio} onCheckedChange={(checked) => setTempSettings((prev) => ({ ...prev, autoConvertAudio: checked }))}/>
                   <Label htmlFor="auto-convert-audio" className="text-sm font-normal cursor-pointer">{t("translation.settings.autoConvertAudio")}</Label>
-                </div>
-                {tempSettings.autoConvertAudio && (<div className="space-y-4 pl-7">
+                </div>)}
+                {!isLossySelected && tempSettings.autoConvertAudio && (<div className="space-y-4 pl-7">
                   <div className="flex gap-3 flex-wrap">
                     <div className="space-y-2"><Label htmlFor="auto-convert-format">{t("translation.common.format")}</Label><Select value={tempSettings.autoConvertFormat} onValueChange={(value: SettingsType["autoConvertFormat"]) => setTempSettings((prev) => ({ ...prev, autoConvertFormat: value }))}>
                       <SelectTrigger id="auto-convert-format" className="w-32"><SelectValue /></SelectTrigger>
@@ -660,78 +626,6 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, onForYouT
           <ListeningConnectionsSettings onForYouToggle={onForYouToggle} onReady={focusConnections} />
         </div>
       </div>
-
-      <Dialog open={showCustomTidalApiDialog} onOpenChange={setShowCustomTidalApiDialog}>
-        <DialogContent className="sm:max-w-md [&>button]:hidden">
-          <DialogHeader>
-            <div className="flex items-center justify-between gap-3">
-              <DialogTitle>{t("translation.migrated.SettingsPage.tidalSource")}</DialogTitle>
-              <button type="button" onClick={() => openExternal("https://github.com/binimum/hifi-api")} className="inline-flex cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline">
-                {t("translation.migrated.SettingsPage.howDoICreateOne")}
-                <ExternalLink className="h-3 w-3"/>
-              </button>
-            </div>
-            <DialogDescription />
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="custom-tidal-api">{t("translation.migrated.SettingsPage.instanceURL")}</Label>
-              <div className="flex gap-2">
-                <Input id="custom-tidal-api" type="url" value={tempSettings.customTidalApi || ""} onChange={(e) => {
-            const nextValue = e.target.value.replace(/\/+$/g, "");
-            void persistCustomTidalApi(nextValue);
-        }} placeholder="https://your-hifi-api.example"/>
-                {tempSettings.customTidalApi && (<Button type="button" variant="destructive" size="icon" onClick={() => {
-                void persistCustomTidalApi("");
-            }}>
-                    <Trash2 className="h-4 w-4"/>
-                  </Button>)}
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCustomTidalApiDialog(false)}>
-              {t("translation.common.close")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={showCustomQobuzApiDialog} onOpenChange={setShowCustomQobuzApiDialog}>
-        <DialogContent className="sm:max-w-md [&>button]:hidden">
-          <DialogHeader>
-            <div className="flex items-center justify-between gap-3">
-              <DialogTitle>{t("translation.migrated.SettingsPage.qobuzSource")}</DialogTitle>
-              <button type="button" onClick={() => openExternal("https://github.com/QobuzDL/Qobuz-DL")} className="inline-flex cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline">
-                {t("translation.migrated.SettingsPage.howDoICreateOne")}
-                <ExternalLink className="h-3 w-3"/>
-              </button>
-            </div>
-            <DialogDescription />
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="custom-qobuz-api">{t("translation.migrated.SettingsPage.instanceURL")}</Label>
-              <div className="flex gap-2">
-                <Input id="custom-qobuz-api" type="url" value={tempSettings.customQobuzApi || ""} onChange={(e) => {
-            const nextValue = e.target.value.replace(/\/+$/g, "");
-            void persistCustomQobuzApi(nextValue);
-        }} placeholder="https://your-qobuz-dl.example"/>
-                {tempSettings.customQobuzApi && (<Button type="button" variant="destructive" size="icon" onClick={() => {
-                void persistCustomQobuzApi("");
-            }}>
-                    <Trash2 className="h-4 w-4"/>
-                  </Button>)}
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCustomQobuzApiDialog(false)}>
-              {t("translation.common.close")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={showMetadataAdvanced} onOpenChange={setShowMetadataAdvanced}>
         <DialogContent className="sm:max-w-md [&>button]:hidden">

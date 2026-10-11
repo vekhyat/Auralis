@@ -174,6 +174,11 @@ output, not an approved comp.
 
 ## Do's and Don'ts
 
+Settings is an Operate surface for quality, fallback, destination, naming, and
+metadata preferences. Provider selection is internal. Community-source lists,
+connection checks, API status, credentials, and custom-server dialogs are removed
+at the user's request; they have no replacement entry point in Settings.
+
 - Do use prominent real artwork for browsing and compact rows for tracks.
 - Do keep download controls available while the operator explores.
 - Do name actions for their result: Download, Resume, Retry, Cancel current.

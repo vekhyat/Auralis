@@ -177,6 +177,8 @@ func communitySessionValid(record *communitySessionRecord) bool {
 	return sessionCredentialsValid(record.SessionID, record.SessionSecret, record.ExpiresAt, communitySessionSkew)
 }
 
+const communityVerificationKey = "community"
+
 func ensureCommunitySession() (*communitySessionRecord, error) {
 	communitySessionMu.Lock()
 	defer communitySessionMu.Unlock()
@@ -187,8 +189,12 @@ func ensureCommunitySession() (*communitySessionRecord, error) {
 	if communitySessionValid(record) {
 		return record, nil
 	}
+	if verificationSkipped(communityVerificationKey) {
+		return nil, errVerificationSkipped
+	}
 	fmt.Println("Community (SpotBye) API requires a one-time verification...")
 	grant, err := runCommunityVerification(record)
+	noteVerificationOutcome(communityVerificationKey, err)
 	if err != nil {
 		return nil, err
 	}

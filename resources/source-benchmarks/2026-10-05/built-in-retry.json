@@ -1,0 +1,28 @@
+{
+  "checked_at_utc": "2026-10-05T08:40:51Z",
+  "requested_artist": "The Beatles",
+  "requested_title": "Come Together",
+  "results": [
+    {
+      "service": "tidal",
+      "route": "antra",
+      "stage": "isrc_search",
+      "error": "Get \"\u003credacted-url\u003e\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)",
+      "elapsed_seconds": 15.6793065
+    },
+    {
+      "service": "apple",
+      "route": "antra",
+      "stage": "passed",
+      "track_id": "1441133290",
+      "title": "Come Together",
+      "artist": "The Beatles",
+      "bytes": 49164897,
+      "duration_seconds": 259.666667,
+      "codec": "alac",
+      "sample_rate": "44100",
+      "elapsed_seconds": 48.0657702,
+      "identity_evidence": "provider search title and artist"
+    }
+  ]
+}

@@ -104,19 +104,24 @@ func ClearCommunitySourceCheck(id string) {
 	}
 }
 
-// expectSourceJSON converts an HTML interstitial into an authentication result.
-// Several public hosts answer with a browser verification page instead of the
-// API, which is an access problem rather than a malformed payload.
+// expectSourceJSON converts an identifiable HTML interstitial into an
+// authentication result. Several public hosts answer with a browser
+// verification page instead of the API, which is an access problem rather
+// than a malformed payload. Empty or ordinary non-JSON payloads are generic
+// failures so broken endpoints are not presented as verification requests.
 func expectSourceJSON(data []byte) error {
 	trimmed := bytes.TrimLeft(data, " \t\r\n")
 	if len(trimmed) == 0 {
-		return &communityAccessError{Status: 403}
+		return fmt.Errorf("source returned an empty response")
 	}
 	switch trimmed[0] {
 	case '{', '[':
 		return nil
 	}
-	return &communityAccessError{Status: 403}
+	if communityChallengeHTML(data) {
+		return &communityAccessError{Status: 403}
+	}
+	return fmt.Errorf("source returned a non-JSON response")
 }
 
 // communityChallengeHTML reports an identifiable login or bot-check page.
@@ -247,10 +252,25 @@ func CheckCommunitySource(id string, download bool) (result CommunitySourceCheck
 	if err != nil {
 		result.Message = redactCommunityMessage(err.Error(), communitySecretValues(source, nil)...)
 		var access *communityAccessError
-		if errors.As(err, &access) {
-			result.State = "authentication_required"
-		} else if IsDownloadCancelledError(err) {
+		switch {
+		case IsDownloadCancelledError(err):
 			result.State = "cancelled"
+		case errors.As(err, &access):
+			action, instruction := communityVerificationCapability(source)
+			result.Action = action
+			if action == "configure" {
+				result.State = "configuration_required"
+				result.Message = redactCommunityMessage(instruction, communitySecretValues(source, nil)...)
+			} else {
+				result.State = "authentication_required"
+			}
+		case errors.Is(err, errInvalidCommunityCredential):
+			action, instruction := communityVerificationCapability(source)
+			if action == "configure" {
+				result.State = "configuration_required"
+				result.Action = action
+				result.Message = redactCommunityMessage(instruction, communitySecretValues(source, nil)...)
+			}
 		}
 		if !IsDownloadCancelledError(err) {
 			communityCircuit.Lock()
@@ -291,9 +311,17 @@ func probeCommunitySourceAPI(ctx context.Context, source CommunitySource) error 
 }
 
 func probeLucidaMetadata(ctx context.Context, source CommunitySource, track SourceTrack) error {
-	params := url.Values{"url": {"https://open.qobuz.com/track/" + track.ID}, "country": {"US"}}
-	if source.Service == "amazon" {
-		params = url.Values{"url": {"https://music.amazon.com/tracks/" + track.ID}}
+	canonical := strings.TrimSpace(track.ServiceURL)
+	if canonical == "" {
+		if source.Service == "amazon" {
+			canonical = "https://music.amazon.com/tracks/" + track.ID
+		} else {
+			canonical = "https://open.qobuz.com/track/" + track.ID
+		}
+	}
+	params := url.Values{"url": {canonical}}
+	if source.Service == "qobuz" {
+		params.Set("country", "US")
 	}
 	body, _, err := sourceResponse(source, http.MethodGet, "/", params, nil, ctx)
 	if err != nil {
@@ -307,10 +335,33 @@ func probeLucidaMetadata(ctx context.Context, source CommunitySource, track Sour
 		return err
 	}
 	info, ok := data["info"].(map[string]any)
-	if !ok || info["type"] != "track" {
-		return fmt.Errorf("Lucida did not return track metadata")
+	if !ok {
+		return fmt.Errorf("Lucida did not return track information")
+	}
+	kind, _ := info["type"].(string)
+	if kind != "track" && kind != "song" {
+		return fmt.Errorf("Lucida did not return a single track")
+	}
+	trackURL, _ := info["url"].(string)
+	if !lucidaProbeURLMatches(canonical, trackURL) {
+		return fmt.Errorf("Lucida returned a different track URL")
 	}
 	return nil
+}
+
+// lucidaProbeURLMatches mirrors resolveLucidaSource's canonical host/path
+// check so the probe rejects a wrong fixture identity. A missing identity
+// fails closed as a generic mismatch, never as authentication.
+func lucidaProbeURLMatches(requested, returned string) bool {
+	req, reqErr := url.Parse(strings.TrimSpace(requested))
+	ret, retErr := url.Parse(strings.TrimSpace(returned))
+	if reqErr != nil || retErr != nil {
+		return false
+	}
+	if req.Hostname() == "" || ret.Hostname() == "" {
+		return false
+	}
+	return req.Hostname() == ret.Hostname() && req.Path == ret.Path
 }
 
 // communityCodecMatches reports whether a community route delivered the codec

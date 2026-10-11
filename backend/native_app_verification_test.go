@@ -47,11 +47,7 @@ func TestNativeProductionAppVerificationPanel(t *testing.T) {
 		fmt.Fprint(w, testHiFiPayload(55130631, server.URL+"/audio", "FULL", "NONE"))
 	}))
 	defer server.Close()
-	rows := defaultCommunitySources()
-	for i := range rows {
-		rows[i].Enabled = false
-	}
-	rows = append(rows, CommunitySource{ID: "local-app-smoke", Name: "Local source fixture", Service: "tidal", Protocol: "hifi", BaseURL: server.URL, Enabled: true})
+	rows := []CommunitySource{{ID: "local-app-smoke", Name: "Local source fixture", Service: "tidal", Protocol: "hifi", BaseURL: server.URL, Enabled: true}}
 	if err := SaveCommunitySources(rows); err != nil {
 		t.Fatal(err)
 	}

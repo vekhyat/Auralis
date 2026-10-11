@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import { isSourceVerification, sourceVerificationBridge, type SourceVerification } from "@/lib/source-verification";
 
-// The native child browser occupies only this viewport. Provider pages are never
+// The native child view occupies only this viewport. Provider pages are never
 // navigated into the privileged Wails frontend or embedded in an iframe.
 export function SourceVerificationPane() {
     const { t } = useTranslation();
@@ -85,21 +86,29 @@ export function SourceVerificationPane() {
         finally { if (currentId.current === activeId) setConfirming(false); }
     };
 
-    return <section className="fixed bottom-[76px] left-[184px] right-0 top-16 z-50 flex flex-col bg-background px-8 py-6" aria-labelledby="source-verification-title">
-        <div className="flex items-start justify-between gap-6 border-b border-border pb-4">
-            <div>
-                <h2 id="source-verification-title" className="text-lg font-semibold">{t("translation.sourceVerification.title")}</h2>
-                <p className="mt-1 text-sm text-muted-foreground">{verification.host}</p>
-                <p className="mt-2 max-w-[70ch] text-sm">{t(verification.can_confirm ? "translation.sourceVerification.manualHelp" : "translation.sourceVerification.automaticHelp")}</p>
+    // A compact dialog over the app. The native view is clipped to the page, so
+    // no browser title, address, or window controls appear. Sign-in pages get a
+    // taller viewport than a single challenge widget.
+    const size = verification.can_confirm ? "h-[420px] w-[480px]" : "h-[300px] w-[380px]";
+    const message = error || verification.error || "";
+    return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+        onKeyDown={event => { if (event.key === "Escape" && !cancelling) { event.preventDefault(); void cancel(); } }}>
+        <section role="dialog" aria-modal="true" aria-labelledby="source-verification-title" aria-describedby="source-verification-help"
+            className="flex max-h-full max-w-full flex-col gap-3 rounded-lg border border-border bg-background p-4 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                    <h2 id="source-verification-title" className="text-sm font-semibold">{t("translation.sourceVerification.title")}</h2>
+                    <p id="source-verification-help" className="mt-1 max-w-[46ch] text-xs text-muted-foreground">{t(verification.can_confirm ? "translation.sourceVerification.manualHelp" : "translation.sourceVerification.automaticHelp")}</p>
+                </div>
+                <Button ref={cancelButton} type="button" variant="ghost" size="sm" onClick={() => void cancel()} disabled={cancelling}>{t("translation.sourceVerification.cancel")}</Button>
             </div>
-            <Button ref={cancelButton} type="button" variant="outline" onClick={() => void cancel()} disabled={cancelling}>{t("translation.sourceVerification.cancel")}</Button>
-        </div>
-        <div ref={viewport} className="relative my-4 min-h-0 flex-1 border border-border bg-muted/30" aria-label={t("translation.sourceVerification.browserLabel")}>
-            {!verification.ready && <p className="p-4 text-sm text-muted-foreground" role="status">{t("translation.sourceVerification.opening")}</p>}
-        </div>
-        <div className="flex min-h-9 items-center justify-between gap-4">
-            <p className="max-w-[70ch] text-sm text-destructive" role={error || verification.error ? "alert" : undefined}>{error || verification.error || ""}</p>
-            {verification.can_confirm && <Button type="button" disabled={confirming || cancelling || !verification.ready} onClick={() => void confirm()}>{t(confirming ? "translation.sourceVerification.checking" : "translation.sourceVerification.confirm")}</Button>}
-        </div>
-    </section>;
+            <div ref={viewport} className={`relative max-h-[calc(100vh-12rem)] max-w-[calc(100vw-4rem)] shrink overflow-hidden rounded-md bg-muted/30 ${size}`} aria-label={t("translation.sourceVerification.browserLabel")}>
+                {!verification.ready && <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground" role="status"><Spinner role="presentation" aria-hidden="true" />{t("translation.sourceVerification.opening")}</div>}
+            </div>
+            {(message || verification.can_confirm) && <div className="flex items-center justify-between gap-4">
+                <p className="max-w-[46ch] text-xs text-destructive" role={message ? "alert" : undefined}>{message}</p>
+                {verification.can_confirm && <Button type="button" size="sm" disabled={confirming || cancelling || !verification.ready} onClick={() => void confirm()}>{t(confirming ? "translation.sourceVerification.checking" : "translation.sourceVerification.confirm")}</Button>}
+            </div>}
+        </section>
+    </div>;
 }

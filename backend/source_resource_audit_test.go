@@ -91,7 +91,7 @@ func TestLiveSourceResourceAudit(t *testing.T) {
 		{id: "dab-xyz", role: "candidate-playback", raw: "https://dabmusic.xyz/api/stream?trackId=30369895&quality=27", validate: jsonObject},
 		{id: "dab-yeet", role: "candidate-playback", raw: "https://dab.yeet.su/api/stream?trackId=30369895&quality=27", validate: jsonObject},
 		{id: "lucida", role: "candidate", raw: "https://lucida.to/", validate: func(b []byte) bool { return bytes.Contains(b, []byte("Lucida")) }},
-		{id: "jiosaavn-community", role: "download-url", raw: jioSaavnCommunityAPI + "/songs/buPhYncP", validate: func(b []byte) bool {
+		{id: "jiosaavn-community", role: "download-url", raw: "https://saavn.dev/api/songs/buPhYncP", validate: func(b []byte) bool {
 			var p struct {
 				Data []struct {
 					Download []any `json:"downloadUrl"`

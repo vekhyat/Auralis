@@ -24,6 +24,7 @@ const verificationPopupBlockSource = `(function(){
     while (node && node.tagName !== "A") node = node.parentElement;
     if (node && String(node.target || "").toLowerCase() === "_blank") ev.preventDefault();
   }, true);
+  document.addEventListener("contextmenu", function(ev){ ev.preventDefault(); }, true);
 })();`
 
 var verificationHostAttached atomic.Bool

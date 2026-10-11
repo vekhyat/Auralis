@@ -18,37 +18,21 @@ func normalizeCustomTidalAPIValue(value interface{}) string {
 	return ""
 }
 
+// A saved single-store choice survives only for services that still pass
+// full-audio checks; anything else (including retired TIDAL/Amazon) becomes
+// "auto" so an old setting cannot pin downloads to a failing route.
 func sanitizeDownloaderValue(value interface{}) string {
 	downloader, _ := value.(string)
-	switch strings.TrimSpace(strings.ToLower(downloader)) {
-	case "tidal":
-		return "tidal"
-	case "qobuz":
-		return "qobuz"
-	case "amazon":
-		return "amazon"
-	case "deezer":
-		return "deezer"
-	case "apple":
-		return "apple"
-	case "jiosaavn":
-		return "jiosaavn"
-	default:
-		return "auto"
+	downloader = strings.TrimSpace(strings.ToLower(downloader))
+	if isSupportedAutoService(downloader) {
+		return downloader
 	}
+	return "auto"
 }
 
 func sanitizeAutoOrderValue(value interface{}) string {
 	autoOrder, _ := value.(string)
-	allowed := map[string]struct{}{
-		"tidal":    {},
-		"qobuz":    {},
-		"amazon":   {},
-		"deezer":   {},
-		"apple":    {},
-		"jiosaavn": {},
-	}
-	fallback := "tidal-qobuz-amazon"
+	fallback := strings.Join(defaultAutoServices, "-")
 
 	seen := make(map[string]struct{})
 	parts := make([]string, 0, 3)
@@ -57,7 +41,7 @@ func sanitizeAutoOrderValue(value interface{}) string {
 		if part == "" {
 			continue
 		}
-		if _, ok := allowed[part]; !ok {
+		if !isSupportedAutoService(part) {
 			continue
 		}
 		if _, ok := seen[part]; ok {

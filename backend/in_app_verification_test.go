@@ -44,6 +44,61 @@ func writeCommunitySourceFixture(t *testing.T, dir string, raw string) {
 	}
 }
 
+// Synthetic, explicitly configured sources used as verification targets. None
+// of these hosts is a retired public preset.
+const (
+	verifyFixtureQobuzOrigin = "https://dab.example.test"
+	verifyFixtureTidalOrigin = "https://hifi.example.test"
+	verifyFixtureLocalOrigin = "http://127.0.0.1:4533"
+)
+
+// seedVerificationSources isolates the app dir, saves the synthetic sources
+// through SaveCommunitySources, then appends persisted copies of two retired
+// public presets (as an old install would still have on disk). The retired
+// rows must not make their hosts verification targets.
+func seedVerificationSources(t *testing.T) {
+	t.Helper()
+	dir := isolateVerificationAppDir(t)
+	t.Setenv("USERPROFILE", t.TempDir())
+	configured := []CommunitySource{
+		{ID: "verify-dab-fixture", Name: "DAB Fixture", Service: "qobuz", Protocol: "dab", BaseURL: verifyFixtureQobuzOrigin, Enabled: true, CredentialType: "cookie"},
+		{ID: "verify-hifi-fixture", Name: "Hi-Fi Fixture", Service: "tidal", Protocol: "hifi", BaseURL: verifyFixtureTidalOrigin, Enabled: true},
+		{ID: "local-subsonic", Name: "Local Subsonic", Service: "qobuz", Protocol: "subsonic", BaseURL: verifyFixtureLocalOrigin, Enabled: true},
+	}
+	if err := SaveCommunitySources(configured); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "community-sources.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored []CommunitySource
+	if err := json.Unmarshal(body, &stored); err != nil {
+		t.Fatal(err)
+	}
+	stored = append(stored,
+		CommunitySource{ID: "dab-xyz", Name: "DAB", Service: "qobuz", Protocol: "dab", BaseURL: "https://dabmusic.xyz", Enabled: true},
+		CommunitySource{ID: "hifi-monochrome-api.samidy.com", Name: "Monochrome", Service: "tidal", Protocol: "hifi", BaseURL: "https://monochrome-api.samidy.com", Enabled: true},
+	)
+	raw, err := json.Marshal(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCommunitySourceFixture(t, dir, string(raw))
+
+	sources, err := ListCommunitySources()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]bool{}
+	for _, source := range sources {
+		ids[source.ID] = true
+	}
+	if len(sources) != len(configured) || !ids["verify-dab-fixture"] || !ids["verify-hifi-fixture"] || !ids["local-subsonic"] {
+		t.Fatalf("fixture registry = %+v (want only the synthetic configured sources)", sources)
+	}
+}
+
 func TestVerificationDoesNotUseTopLevelWindow(t *testing.T) {
 	if verificationMayShowTopLevel() {
 		t.Fatal("verification must not show a standalone top-level window")
@@ -73,66 +128,97 @@ func TestVerificationChildStyleStripsPopupChrome(t *testing.T) {
 	}
 }
 
-func TestValidateVerificationTargetURL(t *testing.T) {
-	dir := isolateVerificationAppDir(t)
-	writeCommunitySourceFixture(t, dir, `[
-		{"id":"local-subsonic","name":"Local Subsonic","service":"qobuz","protocol":"subsonic","base_url":"http://127.0.0.1:4533","enabled":true}
-	]`)
+func TestVerificationFrameInsetsFrom(t *testing.T) {
+	window := verificationRect{left: 100, top: 200, right: 594, bottom: 537}
+	cases := []struct {
+		name string
+		page verificationRect
+		want verificationFrameInsets
+		ok   bool
+	}{
+		{"edge chrome", verificationRect{107, 230, 587, 530}, verificationFrameInsets{7, 30, 7, 7}, true},
+		{"no chrome", window, verificationFrameInsets{}, true},
+		{"empty page", verificationRect{107, 230, 107, 530}, verificationFrameInsets{}, false},
+		{"page outside window", verificationRect{90, 230, 587, 530}, verificationFrameInsets{}, false},
+		{"mostly chrome", verificationRect{107, 430, 587, 530}, verificationFrameInsets{}, false},
+	}
+	for _, tc := range cases {
+		got, ok := verificationFrameInsetsFrom(window, tc.page)
+		if got != tc.want || ok != tc.ok {
+			t.Fatalf("%s: got %+v ok=%v, want %+v ok=%v", tc.name, got, ok, tc.want, tc.ok)
+		}
+	}
+}
 
-	if err := validateVerificationChallengeURL("https://dabmusic.xyz/login"); err == nil {
-		t.Fatal("legacy challenge validation must still reject a community source host")
+func TestValidateVerificationTargetURL(t *testing.T) {
+	seedVerificationSources(t)
+
+	for _, raw := range []string{verifyFixtureQobuzOrigin + "/login", "https://dabmusic.xyz/login"} {
+		if err := validateVerificationChallengeURL(raw); err == nil {
+			t.Fatalf("legacy challenge validation must still reject a community source host: %s", raw)
+		}
 	}
-	if err := validateVerificationTargetURL("https://api.zarz.moe/challenge?id=1"); err != nil {
-		t.Fatal(err)
-	}
-	if err := validateVerificationTargetURL("https://dabmusic.xyz/login"); err != nil {
-		t.Fatal(err)
-	}
-	if err := validateVerificationTargetURL("http://127.0.0.1:4533/app"); err != nil {
-		t.Fatal(err)
+	for _, raw := range []string{
+		"https://api.zarz.moe/challenge?id=1",
+		verifyFixtureQobuzOrigin + "/login",
+		verifyFixtureTidalOrigin + "/session",
+		verifyFixtureLocalOrigin + "/app",
+	} {
+		if err := validateVerificationTargetURL(raw); err != nil {
+			t.Fatalf("configured or known target %s rejected: %v", raw, err)
+		}
 	}
 	for _, raw := range []string{
 		"http://api.zarz.moe/challenge",
-		"http://dabmusic.xyz/login",
+		"http://dab.example.test/login",
+		"https://dab.example.test:8443/login",
+		"https://login.dab.example.test/login",
 		"http://127.0.0.1:4534/app",
 		"http://example.com",
 		"https://evil.example/turnstile",
-		"https://dabmusic.xyz.evil.com/login",
-		"https://user:secret@dabmusic.xyz/login?token=abc",
+		"https://dab.example.test.evil.com/login",
+		"https://user:secret@dab.example.test/login?token=abc",
 		"javascript:alert(1)",
+		// Retired public presets are rejected even though a persisted copy
+		// is still on disk.
+		"https://dabmusic.xyz/login",
+		"https://DABMUSIC.XYZ/login",
+		"https://monochrome-api.samidy.com/session",
 	} {
 		if err := validateVerificationTargetURL(raw); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}
 	}
-	err := validateVerificationTargetURL("https://user:secret@dabmusic.xyz/login?token=abc")
+	err := validateVerificationTargetURL("https://user:secret@dab.example.test/login?token=abc")
 	if err == nil || strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "token") {
 		t.Fatalf("credential rejection leaked the URL: %v", err)
 	}
 }
 
 func TestPresentVerificationAllowsConfiguredOrigin(t *testing.T) {
-	isolateVerificationAppDir(t)
+	seedVerificationSources(t)
 	_, release := BeginDownloadCancellationScope()
 	t.Cleanup(release)
 	ForceStopActiveDownloads()
 	if embeddedVerificationSupported() {
-		err := presentVerificationChallenge("https://dabmusic.xyz/login")
+		err := presentVerificationChallenge(verifyFixtureQobuzOrigin + "/login")
 		if !IsDownloadCancelledError(err) {
 			t.Fatalf("configured origin should pass validation, got %v", err)
 		}
 	}
-	err := presentVerificationChallenge("https://evil.example/login")
-	if err == nil || IsDownloadCancelledError(err) {
-		t.Fatalf("unknown origin must be rejected before a browser opens, got %v", err)
+	for _, raw := range []string{"https://evil.example/login", "https://dabmusic.xyz/login"} {
+		err := presentVerificationChallenge(raw)
+		if err == nil || IsDownloadCancelledError(err) {
+			t.Fatalf("unconfigured or retired origin %s must be rejected before a browser opens, got %v", raw, err)
+		}
 	}
 }
 
 func TestValidateVerificationNavigation(t *testing.T) {
-	isolateVerificationAppDir(t)
-	origin := "https://dabmusic.xyz/start"
-	tidal := "https://monochrome-api.samidy.com/session"
-	if err := validateVerificationNavigation(origin, "https://dabmusic.xyz/login?next=1"); err != nil {
+	seedVerificationSources(t)
+	origin := verifyFixtureQobuzOrigin + "/start"
+	tidal := verifyFixtureTidalOrigin + "/session"
+	if err := validateVerificationNavigation(origin, verifyFixtureQobuzOrigin+"/login?next=1"); err != nil {
 		t.Fatal(err)
 	}
 	if err := validateVerificationNavigation(origin, "https://www.qobuz.com/login"); err != nil {
@@ -145,20 +231,36 @@ func TestValidateVerificationNavigation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, next := range []string{
-		"https://login.dabmusic.xyz/auth",
+		"https://login.dab.example.test/auth",
 		"https://login.tidal.com/authorize",
-		"http://dabmusic.xyz/login",
+		"http://dab.example.test/login",
 		"http://www.qobuz.com/login",
 		"https://evil.example/phish",
 		"https://qobuz.com.evil.example/login",
-		"https://user:secret@dabmusic.xyz/login",
+		"https://user:secret@dab.example.test/login",
+		"https://dabmusic.xyz/login",
 	} {
 		if err := validateVerificationNavigation(origin, next); err == nil {
 			t.Fatalf("transition to %s was allowed", next)
 		}
 	}
+	if err := validateVerificationNavigation(tidal, "https://www.qobuz.com/login"); err == nil {
+		t.Fatal("a tidal source must not allow navigation to another provider's domain")
+	}
 	if err := validateVerificationNavigation("https://evil.example/start", "https://evil.example/next"); err == nil {
 		t.Fatal("an unapproved origin must not allow same-host navigation")
+	}
+	// Retired public presets are no longer approved origins, so they grant
+	// neither same-host nor provider-domain navigation.
+	for _, tc := range []struct{ origin, next string }{
+		{"https://dabmusic.xyz/start", "https://dabmusic.xyz/login"},
+		{"https://dabmusic.xyz/start", "https://www.qobuz.com/login"},
+		{"https://monochrome-api.samidy.com/session", "https://monochrome-api.samidy.com/next"},
+		{"https://monochrome-api.samidy.com/session", "https://login.tidal.com/authorize"},
+	} {
+		if err := validateVerificationNavigation(tc.origin, tc.next); err == nil {
+			t.Fatalf("retired origin %s allowed transition to %s", tc.origin, tc.next)
+		}
 	}
 }
 
@@ -169,7 +271,7 @@ func TestVerificationPresentationOmitsSecrets(t *testing.T) {
 	})
 	t.Cleanup(func() { SetVerificationPresentationHandler(nil) })
 
-	raw := "https://dabmusic.xyz/login?token=super-secret#grant"
+	raw := "https://lucida.to/login?token=super-secret#grant"
 	publishVerificationPresentation(VerificationPresentation{
 		ID: atomic.LoadUint64(&verificationRunSeq) + 1, Active: true, Title: verificationGenericTitle, Host: verificationPresentationHost(raw), Ready: false,
 	})
@@ -177,14 +279,14 @@ func TestVerificationPresentationOmitsSecrets(t *testing.T) {
 	select {
 	case snap := <-events:
 		assertPresentationSafe(t, snap, raw)
-		if snap.Host != "dabmusic.xyz" || snap.Title != verificationGenericTitle || !snap.Active || snap.Ready {
+		if snap.Host != "lucida.to" || snap.Title != verificationGenericTitle || !snap.Active || snap.Ready {
 			t.Fatalf("snapshot = %+v", snap)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("presentation handler was not called")
 	}
 
-	if err := OpenVerificationWindow("https://user:secret@dabmusic.xyz/login?token=abc"); err == nil {
+	if err := OpenVerificationWindow("https://user:secret@lucida.to/login?token=abc"); err == nil {
 		t.Fatal("credential URL must be rejected before a browser starts")
 	}
 	failed := GetVerificationPresentation()

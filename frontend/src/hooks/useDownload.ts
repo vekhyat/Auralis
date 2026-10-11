@@ -1,4 +1,5 @@
 import { rankDownloadServices } from "@/lib/source-priority";
+import { lossyConversionTarget, type DownloadQuality } from "@/lib/quality";
 import { useState } from "react";
 import { t, translateMessage } from "@/i18n";
 import { downloadExecution, type DownloadExecutionKind } from "@/lib/download-execution";
@@ -198,12 +199,11 @@ function readStreamingLinks(payload: string): StreamingLinks {
         amazon_url: typeof record.amazon_url === "string" ? record.amazon_url : undefined,
     };
 }
-const desktopApp = desktopAppBindings();
-const CheckFilesExistence = (outputDir: string, rootDir: string, tracks: CheckFileExistenceRequest[]): Promise<FileExistenceResult[]> => desktopApp.CheckFilesExistence(outputDir, rootDir, tracks);
-const SkipDownloadItem = (itemID: string, filePath: string): Promise<void> => desktopApp.SkipDownloadItem(itemID, filePath);
-const CreateM3U8File = (playlistName: string, outputDir: string, filePaths: string[]): Promise<void> => desktopApp.CreateM3U8File(playlistName, outputDir, filePaths);
-const CreateLogFile = (fileName: string, outputDir: string, logs: string[]): Promise<void> => desktopApp.CreateLogFile(fileName, outputDir, logs);
-const GetTrackISRC = (spotifyId: string): Promise<string> => desktopApp.GetTrackISRC(spotifyId);
+const CheckFilesExistence = (outputDir: string, rootDir: string, tracks: CheckFileExistenceRequest[]): Promise<FileExistenceResult[]> => desktopAppBindings().CheckFilesExistence(outputDir, rootDir, tracks);
+const SkipDownloadItem = (itemID: string, filePath: string): Promise<void> => desktopAppBindings().SkipDownloadItem(itemID, filePath);
+const CreateM3U8File = (playlistName: string, outputDir: string, filePaths: string[]): Promise<void> => desktopAppBindings().CreateM3U8File(playlistName, outputDir, filePaths);
+const CreateLogFile = (fileName: string, outputDir: string, logs: string[]): Promise<void> => desktopAppBindings().CreateLogFile(fileName, outputDir, logs);
+const GetTrackISRC = (spotifyId: string): Promise<string> => desktopAppBindings().GetTrackISRC(spotifyId);
 async function resolveTemplateISRC(settings: {
     folderTemplate?: string;
     filenameTemplate?: string;
@@ -237,9 +237,13 @@ function getTidalAudioFormat(settings: Settings, mode: "single" | "auto"): "LOSS
     return settings.tidalQuality || "LOSSLESS";
 }
 function getExpectedAudioFormat(settings: {
+    autoQuality?: DownloadQuality;
     autoConvertAudio?: boolean;
     autoConvertFormat?: string;
 }): string {
+    const lossyTarget = settings.autoQuality ? lossyConversionTarget(settings.autoQuality) : null;
+    if (lossyTarget)
+        return lossyTarget.format;
     return settings.autoConvertAudio ? settings.autoConvertFormat || "mp3" : "flac";
 }
 function deduplicateTracksBySpotifyID(tracks: TrackMetadata[]): TrackMetadata[] {

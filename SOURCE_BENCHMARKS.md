@@ -1,5 +1,87 @@
 # Source checks and download priority
 
+## October 5, 2026: non-working routes removed
+
+Each removal was confirmed from outside this network (Cloudflare DNS-over-HTTPS
+plus check-host.net nodes in four countries), because the local DNS filter can
+make reachable hosts look dead.
+
+| Removed | Evidence | Change |
+| --- | --- | --- |
+| Saavn.dev JioSaavn fallback | `saavn.dev` is NXDOMAIN; every external node failed to resolve it | Search and stream-URL fallbacks deleted; JioSaavn uses only the official API |
+| Samidy catalog check | `/info/` returns HTTP 401 from every external node | Removed from the resource registry and connection checks |
+| Qobuz direct catalog check | `track/get` with the bundled app ID returns Qobuz's own HTTP 401 "User authentication is required" | Removed from the resource registry and connection checks |
+| Saved TIDAL / Amazon downloader | Antra TIDAL lookup timed out; Antra Amazon returned 404 (table below) | Old settings naming either now load as automatic selection |
+
+The gated live audit in `source_resource_audit_test.go` still probes these hosts,
+so a recovery would show up in future audits.
+
+## October 5, 2026 follow-up
+
+The community defaults and website checks were audited again from this Windows
+machine. Following the user's request, the 18 hosted community profiles and four
+empty server templates are **removed from the shipped defaults**. Stored copies
+of retired public hosts are also excluded, so an old enabled flag cannot restore
+them. Unrelated custom configuration is preserved internally.
+
+Settings no longer contains community sources, source connections, API checks,
+or custom-server dialogs. Automatic downloads retain Qobuz, Deezer, Apple Music,
+and official JioSaavn. TIDAL, Amazon, unverified community/grant routes, and the
+failed Saavn.dev fallback are excluded from automatic selection. Protocol code
+remains for compatibility; users choose file quality without managing sources.
+
+The final community audit recorded **0 validated, 0 API-available, 15 failed,
+3 authentication-required, and 4 not configured**. Samidy returned HTTP 401;
+both Lucida profiles returned HTTP 403. DAB Yeet returned ordinary non-JSON,
+which is now correctly reported as a failure instead of a browser verification
+requirement. No community candidate passed the API prerequisite for a sample
+download. These results do not establish availability after user authentication.
+
+Separate built-in-route checks used Come Together by The Beatles, ISRC
+GBAYE0601690. Successful rows passed title/artist matching, complete transfer,
+duration checks, FFprobe, and a full FFmpeg decode. Bit depth was also inspected
+on the retained sample files. Times include lookup, transfer and validation;
+they are single checks and are not comparable to the historical medians below.
+
+| Built-in route | Current result | Elapsed |
+| --- | --- | --- |
+| Antra / Qobuz | Passed: 16-bit FLAC, 44.1 kHz, 259.95 s | 12.15 s |
+| Antra / Deezer | Passed: 16-bit FLAC, 44.1 kHz, 259.67 s | 14.44 s |
+| Antra / Apple | HTTP 503 initially; retry passed: 24-bit ALAC, 44.1 kHz, 259.67 s | 48.07 s on retry |
+| JioSaavn | Passed: AAC, 44.1 kHz, 259.95 s | 9.02 s |
+| Antra / TIDAL | ISRC lookup timed out on both attempts; audio not reached | 15.47 / 15.68 s |
+| Antra / Amazon | ISRC lookup returned HTTP 404; audio not reached | 1.07 s |
+
+These are fixture-specific results, not catalog-wide guarantees. No new hosted
+source was promoted. The historical benchmark seed remains dated as originally
+measured; this follow-up does not turn one sample into a new latency ranking.
+Sanitized evidence is under `resources/source-benchmarks/2026-10-05/`.
+
+The integrated changes also tighten what verification means:
+
+- Qobuz/DAB ordinary HTML and empty responses fail normally; only recognizable
+  login/challenge pages or access-denied responses prompt authentication.
+- Lucida and catalog checks reject mismatched recording identities.
+- Internal Community/SpotBye and Zarz checks classify local grants as saved
+  sessions, because reuse of an existing grant establishes neither current API
+  access nor downloadable audio. These checks are no longer shown in Settings.
+- Browser-cookie verification checks the selected source API before accepting
+  the session, and continues to leave audio unverified. API-key, bearer and
+  Subsonic failures instead request credential configuration.
+- Ranked downloads reject missing files, previews with unknown catalog duration,
+  and incompatible codecs before accepting a route or improving its rank.
+  Known short recordings can still pass when their expected duration is supplied.
+- The live community report now persists the final sample-download outcome,
+  including failures, instead of leaving the earlier API-only success in place.
+
+Validation: `go test ./...`, `go vet ./...`, `go build ./...`, Windows
+`go test -race ./backend`, all 39 frontend tests (including locale parity),
+TypeScript, lint, and the frontend production build passed. Wails bindings were
+regenerated. Browser/session regression tests use local fixtures; native Edge
+challenge completion and authenticated hosted downloads were not exercised.
+
+## Historical October 3 measurements
+
 Checked from this Windows machine on October 3, 2026 (IST). These are network
 measurements for the tested fixtures, not a catalog-wide availability guarantee.
 The isolated diagnostics do not load saved user settings or verification sessions.
@@ -60,15 +142,15 @@ working hosted endpoints.
 
 Community/SpotBye and Zarz returned verification requirements. Bootstrap HTTP
 200 means a challenge is available, not that an audio download passed. Those
-routes remain fallbacks and can move up after successful authenticated use.
+routes were retained as fallbacks in that historical build, but are excluded
+from the current automatic route list.
 Their session credentials were neither imported nor exposed by this audit.
 
-## Community source adapters
+## Historical community source adapters
 
-Auralis includes native download adapters for these community APIs and servers.
-They run as additional routes inside the existing ranked attempts for their
-service. They are configured in **Settings → Community sources**, stored in
-`community-sources.json`, and checked from the same section.
+Auralis retains native protocol implementations for compatibility and internal
+diagnostics. The following table records the removed presets, not the current
+default registry. The former Settings controls have been deleted.
 
 | Adapter | Protocol | Services | Default profiles |
 | --- | --- | --- | --- |
@@ -91,12 +173,11 @@ stored separately in `community-source-sessions.bin`, protected by Windows
 DPAPI, and scoped to the configured source. An environment credential overrides
 the browser session for that origin.
 
-### Verification inside Auralis
+### Internal verification implementation
 
-**Settings → Community download sources** provides API checks, sample downloads,
-and **Verify in app** for browser-based sources. **Settings → Source connections**
-also exposes the original Antra, Community/SpotBye, Zarz, and JioSaavn routes and
-the catalog, metadata, lyrics, and link resources.
+The API, sample-download and browser-verification bindings remain available for
+compatibility and developer diagnostics. Source connections, catalogs, and
+API status are not exposed in Settings.
 
 On Windows, verification uses an isolated Edge process embedded as a child of
 the main Auralis window. It stays hidden until attached to the app viewport;
@@ -147,7 +228,8 @@ download or a real download.
 - Auto downloads use recent, quality-specific performance to order services.
 - TIDAL, Qobuz, and Amazon independently rank their download routes.
 - Reliable validated results come first; median latency breaks equal reliability.
-- Failed, blocked, and untested sources remain available as later fallbacks.
+- Automatic routes are restricted to currently retained working services;
+  retired public candidate profiles are excluded even if previously saved.
 - JioSaavn stays last for lossless and Atmos requests because it supplies AAC.
 - Configured custom servers are still tried first within their selected service.
 - Resource resolver ranking applies when resolver fallback is enabled.

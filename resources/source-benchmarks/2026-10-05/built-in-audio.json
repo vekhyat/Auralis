@@ -1,0 +1,74 @@
+{
+  "checked_at_utc": "2026-10-05T08:38:28Z",
+  "requested_artist": "The Beatles",
+  "requested_title": "Come Together",
+  "results": [
+    {
+      "service": "tidal",
+      "route": "antra",
+      "stage": "isrc_search",
+      "error": "Get \"\u003credacted-url\u003e\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)",
+      "elapsed_seconds": 15.4714838
+    },
+    {
+      "service": "qobuz",
+      "route": "antra",
+      "stage": "passed",
+      "track_id": "30369895",
+      "title": "Come Together",
+      "artist": "The Beatles",
+      "bytes": 26294630,
+      "duration_seconds": 259.946667,
+      "codec": "flac",
+      "sample_rate": "44100",
+      "elapsed_seconds": 12.1486232,
+      "identity_evidence": "provider search title and artist"
+    },
+    {
+      "service": "amazon",
+      "route": "antra",
+      "stage": "isrc_search",
+      "error": "amazon ISRC search HTTP 404",
+      "elapsed_seconds": 1.0710439
+    },
+    {
+      "service": "deezer",
+      "route": "antra",
+      "stage": "passed",
+      "track_id": "116348128",
+      "title": "Come Together (Remastered 2009)",
+      "artist": "The Beatles",
+      "bytes": 26215927,
+      "duration_seconds": 259.666667,
+      "codec": "flac",
+      "sample_rate": "44100",
+      "elapsed_seconds": 14.4357946,
+      "identity_evidence": "provider search title and artist"
+    },
+    {
+      "service": "apple",
+      "route": "antra",
+      "stage": "download",
+      "track_id": "1441133290",
+      "title": "Come Together",
+      "artist": "The Beatles",
+      "error": "antra-apple: apple stream HTTP 503",
+      "elapsed_seconds": 16.5204704,
+      "identity_evidence": "provider search title and artist"
+    },
+    {
+      "service": "jiosaavn",
+      "route": "official/community",
+      "stage": "passed",
+      "track_id": "buPhYncP",
+      "title": "Come Together (Remastered 2009)",
+      "artist": "The Beatles",
+      "bytes": 10584254,
+      "duration_seconds": 259.946009,
+      "codec": "aac",
+      "sample_rate": "44100",
+      "elapsed_seconds": 9.0202436,
+      "identity_evidence": "official selected-track details"
+    }
+  ]
+}
