@@ -1,6 +1,8 @@
 //! Layout and categorization for configuration settings.
 
 use auralis_core::constants::CONFIG_LAYOUT_VERSION;
+use serde::ser::{SerializeMap, Serializer};
+use serde::Serialize;
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 
@@ -122,6 +124,17 @@ pub fn get_known_config_keys() -> HashSet<&'static str> {
     set
 }
 
+pub fn has_known_config_settings(config: &Map<String, Value>) -> bool {
+    let flat = flatten_config_settings(config);
+    let known = get_known_config_keys();
+    for key in flat.keys() {
+        if known.contains(key.as_str()) {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn default_settings() -> Map<String, Value> {
     let mut map = Map::new();
     map.insert("downloadPath".into(), json!(""));
@@ -231,16 +244,15 @@ pub fn flatten_config_settings(config: &Map<String, Value>) -> Map<String, Value
             if key == "configVersion" {
                 continue;
             }
-            let value = &values[key];
             if known.contains(key.as_str()) {
-                flat.insert(key.clone(), value.clone());
+                flat.insert(key.clone(), values[key].clone());
                 continue;
             }
-            if let Some(nested) = value.as_object() {
+            if let Some(nested) = values[key].as_object() {
                 visit(nested, flat, known);
                 continue;
             }
-            flat.insert(key.clone(), value.clone());
+            flat.insert(key.clone(), values[key].clone());
         }
     }
 
@@ -298,7 +310,47 @@ pub fn categorize_config_settings(config: &Map<String, Value>) -> Map<String, Va
     grouped
 }
 
-fn config_path_orders() -> HashMap<String, Vec<&'static str>> {
+#[derive(Debug, Clone, PartialEq)]
+pub struct OrderedConfigEntry {
+    pub key: String,
+    pub value: OrderedConfigValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct OrderedConfigObject(pub Vec<OrderedConfigEntry>);
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum OrderedConfigValue {
+    Object(OrderedConfigObject),
+    Value(Value),
+}
+
+impl Serialize for OrderedConfigObject {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for entry in &self.0 {
+            map.serialize_entry(&entry.key, &entry.value)?;
+        }
+        map.end()
+    }
+}
+
+impl Serialize for OrderedConfigValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            OrderedConfigValue::Object(obj) => obj.serialize(serializer),
+            OrderedConfigValue::Value(val) => val.serialize(serializer),
+        }
+    }
+}
+
+pub fn config_path_orders() -> HashMap<String, Vec<&'static str>> {
     let mut orders = HashMap::new();
     orders.insert(
         "".to_string(),
@@ -322,13 +374,13 @@ fn config_path_orders() -> HashMap<String, Vec<&'static str>> {
     orders
 }
 
-fn make_ordered_value(
+pub fn make_ordered_config_value(
     value: &Value,
     path: &str,
     orders: &HashMap<String, Vec<&'static str>>,
-) -> Value {
+) -> OrderedConfigValue {
     let Some(obj) = value.as_object() else {
-        return value.clone();
+        return OrderedConfigValue::Value(value.clone());
     };
 
     let mut keys: Vec<String> = obj.keys().cloned().collect();
@@ -349,7 +401,7 @@ fn make_ordered_value(
         }
     });
 
-    let mut map = Map::new();
+    let mut entries = Vec::with_capacity(keys.len());
     for key in keys {
         let child_path = if path.is_empty() {
             key.clone()
@@ -357,16 +409,139 @@ fn make_ordered_value(
             format!("{}.{}", path, key)
         };
         let child_val = &obj[&key];
-        map.insert(key, make_ordered_value(child_val, &child_path, orders));
+        entries.push(OrderedConfigEntry {
+            key,
+            value: make_ordered_config_value(child_val, &child_path, orders),
+        });
     }
 
-    Value::Object(map)
+    OrderedConfigValue::Object(OrderedConfigObject(entries))
 }
 
-/// Serializes settings into canonical indented JSON adhering to Layout Version 7.
+/// Serializes settings into canonical indented JSON adhering to Layout Version 7,
+/// byte-identical to Go's `MarshalConfigSettings`.
 pub fn marshal_config_settings(config: &Map<String, Value>) -> Result<Vec<u8>, serde_json::Error> {
     let categorized = categorize_config_settings(config);
     let orders = config_path_orders();
-    let ordered = make_ordered_value(&Value::Object(categorized), "", &orders);
-    serde_json::to_vec_pretty(&ordered)
+    let ordered = make_ordered_config_value(&Value::Object(categorized), "", &orders);
+    auralis_core::gojson::to_vec_pretty(&ordered)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_marshal_config_settings_byte_identical_empty() {
+        let empty = Map::new();
+        let bytes = marshal_config_settings(&empty).expect("marshal empty config");
+        let expected = concat!(
+            "{\n",
+            "  \"configVersion\": 7,\n",
+            "  \"settingsPage\": {\n",
+            "    \"general\": {},\n",
+            "    \"naming\": {},\n",
+            "    \"fileManagement\": {},\n",
+            "    \"metadata\": {}\n",
+            "  },\n",
+            "  \"workflowPage\": {\n",
+            "    \"mode\": {},\n",
+            "    \"ordering\": {},\n",
+            "    \"linkResolvers\": {}\n",
+            "  },\n",
+            "  \"sourcePage\": {\n",
+            "    \"sources\": {},\n",
+            "    \"quality\": {}\n",
+            "  }\n",
+            "}"
+        );
+        assert_eq!(std::str::from_utf8(&bytes).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_marshal_config_settings_byte_identical_sample_partial() {
+        let mut map = Map::new();
+        map.insert("downloader".into(), json!("qobuz"));
+        map.insert("customThing".into(), json!(true));
+        map.insert("zeta".into(), json!("last"));
+        map.insert("alpha".into(), json!("first"));
+        map.insert("downloadPath".into(), json!("D:\\Music"));
+        map.insert("autoOrder".into(), json!("deezer-qobuz"));
+
+        let bytes = marshal_config_settings(&map).expect("marshal sample config");
+        let expected = concat!(
+            "{\n",
+            "  \"configVersion\": 7,\n",
+            "  \"settingsPage\": {\n",
+            "    \"general\": {\n",
+            "      \"downloadPath\": \"D:\\\\Music\"\n",
+            "    },\n",
+            "    \"naming\": {},\n",
+            "    \"fileManagement\": {},\n",
+            "    \"metadata\": {}\n",
+            "  },\n",
+            "  \"workflowPage\": {\n",
+            "    \"mode\": {\n",
+            "      \"downloader\": \"qobuz\"\n",
+            "    },\n",
+            "    \"ordering\": {\n",
+            "      \"autoOrder\": \"deezer-qobuz\"\n",
+            "    },\n",
+            "    \"linkResolvers\": {}\n",
+            "  },\n",
+            "  \"sourcePage\": {\n",
+            "    \"sources\": {},\n",
+            "    \"quality\": {}\n",
+            "  },\n",
+            "  \"application\": {\n",
+            "    \"alpha\": \"first\",\n",
+            "    \"customThing\": true,\n",
+            "    \"zeta\": \"last\"\n",
+            "  }\n",
+            "}"
+        );
+        assert_eq!(std::str::from_utf8(&bytes).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_marshal_config_settings_byte_identical_metadata_tags() {
+        let mut map = Map::new();
+        map.insert("downloadPath".into(), json!("D:\\Music"));
+        let mut tags = Map::new();
+        tags.insert("title".into(), json!(true));
+        tags.insert("album".into(), json!(false));
+        tags.insert("isrc".into(), json!(true));
+        map.insert("metadataTags".into(), Value::Object(tags));
+
+        let bytes = marshal_config_settings(&map).expect("marshal metadata_tags config");
+        let expected = concat!(
+            "{\n",
+            "  \"configVersion\": 7,\n",
+            "  \"settingsPage\": {\n",
+            "    \"general\": {\n",
+            "      \"downloadPath\": \"D:\\\\Music\"\n",
+            "    },\n",
+            "    \"naming\": {},\n",
+            "    \"fileManagement\": {\n",
+            "      \"metadataTags\": {\n",
+            "        \"album\": false,\n",
+            "        \"isrc\": true,\n",
+            "        \"title\": true\n",
+            "      }\n",
+            "    },\n",
+            "    \"metadata\": {}\n",
+            "  },\n",
+            "  \"workflowPage\": {\n",
+            "    \"mode\": {},\n",
+            "    \"ordering\": {},\n",
+            "    \"linkResolvers\": {}\n",
+            "  },\n",
+            "  \"sourcePage\": {\n",
+            "    \"sources\": {},\n",
+            "    \"quality\": {}\n",
+            "  }\n",
+            "}"
+        );
+        assert_eq!(std::str::from_utf8(&bytes).unwrap(), expected);
+    }
 }

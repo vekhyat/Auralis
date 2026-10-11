@@ -77,13 +77,10 @@ impl SettingsStore {
         let _guard = self.lock.lock().unwrap();
         let path = self.path();
 
-        let mut merged = default_settings();
-        for (k, v) in settings {
-            merged.insert(k.clone(), v.clone());
-        }
-        sanitize_settings_map(&mut merged);
+        let mut sanitized = settings.clone();
+        sanitize_settings_map(&mut sanitized);
 
-        let payload = marshal_config_settings(&merged)?;
+        let payload = marshal_config_settings(&sanitized)?;
         write_file_atomic(&path, &payload)?;
         let _ = restrict_private_file(&path);
 
@@ -109,14 +106,11 @@ impl SettingsStore {
             return Ok(false);
         };
 
-        let mut merged = default_settings();
         let flat = flatten_config_settings(obj);
-        for (k, v) in flat {
-            merged.insert(k, v);
-        }
-        sanitize_settings_map(&mut merged);
+        let mut sanitized = flat;
+        sanitize_settings_map(&mut sanitized);
 
-        let canonical = marshal_config_settings(&merged)?;
+        let canonical = marshal_config_settings(&sanitized)?;
 
         let original_trimmed = data.trim_ascii();
         let canonical_trimmed = canonical.trim_ascii();
@@ -129,11 +123,78 @@ impl SettingsStore {
         let _ = restrict_private_file(&path);
         Ok(true)
     }
+
+    /// Convenience getter for `redownloadWithSuffix`. Default false.
+    pub fn get_redownload_with_suffix(&self) -> bool {
+        crate::settings::get_redownload_with_suffix_setting(self)
+    }
+
+    /// Convenience getter for `existingFileCheckMode`. Default "filename".
+    pub fn get_existing_file_check_mode(&self) -> &'static str {
+        crate::settings::get_existing_file_check_mode_setting(self)
+    }
+
+    /// Convenience getter for `linkResolver`. Default "deezer-songlink".
+    pub fn get_link_resolver(&self) -> &'static str {
+        crate::settings::get_link_resolver_setting(self)
+    }
+
+    /// Convenience getter for `allowResolverFallback`. Default true.
+    pub fn get_link_resolver_allow_fallback(&self) -> bool {
+        crate::settings::get_link_resolver_allow_fallback_setting(self)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_load_settings_does_not_rewrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.json");
+        let original = b"{\n  \"downloader\": \"not-a-service\",\n  \"customTidalApi\": \"http://evil.example/api\",\n  \"kept\": \"value\"\n}\n";
+        std::fs::write(&config_path, original).unwrap();
+
+        let store = SettingsStore::new(Some(config_path.clone()));
+        let loaded = store.load().unwrap();
+
+        assert_eq!(loaded["downloader"], "auto");
+        assert_eq!(loaded["customTidalApi"], "");
+        assert_eq!(loaded["kept"], "value");
+
+        let after = std::fs::read(&config_path).unwrap();
+        assert_eq!(original.as_slice(), after.as_slice());
+    }
+
+    #[test]
+    fn test_migrate_settings_is_atomic_and_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.json");
+        let original = br#"{"downloader":"QOBUZ","autoOrder":"qobuz-deezer","downloadPath":"D:\\Music","customTidalApi":"https://tidal.example/api","customThing":true}"#;
+        std::fs::write(&config_path, original).unwrap();
+
+        let store = SettingsStore::new(Some(config_path.clone()));
+
+        assert!(store.migrate().unwrap());
+        let migrated = std::fs::read(&config_path).unwrap();
+        assert_ne!(original.trim_ascii(), migrated.trim_ascii());
+
+        let raw: Value = serde_json::from_slice(&migrated).unwrap();
+        assert!(raw.is_object());
+
+        // Second migration is a no-op
+        assert!(!store.migrate().unwrap());
+        let again = std::fs::read(&config_path).unwrap();
+        assert_eq!(migrated, again);
+
+        let loaded = store.load().unwrap();
+        assert_eq!(loaded["downloader"], "qobuz");
+        assert_eq!(loaded["autoOrder"], "qobuz-deezer");
+        assert_eq!(loaded["customTidalApi"], "https://tidal.example/api");
+        assert_eq!(loaded["customThing"], true);
+    }
 
     #[test]
     fn test_settings_store_lifecycle() {
@@ -187,5 +248,36 @@ mod tests {
         let parsed_after_migrate = store.load().unwrap();
         assert_eq!(parsed_after_migrate["downloader"], "qobuz");
         assert_eq!(parsed_after_migrate["language"], "es");
+    }
+
+    #[test]
+    fn test_save_round_trip_under_contention() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.json");
+        let store = Arc::new(SettingsStore::new(Some(config_path.clone())));
+
+        let mut handles = Vec::new();
+        for i in 0..16 {
+            let store_clone = Arc::clone(&store);
+            handles.push(std::thread::spawn(move || {
+                let mut map = Map::new();
+                map.insert("downloader".into(), "deezer".into());
+                map.insert("downloadPath".into(), "D:\\Music".into());
+                map.insert("autoOrder".into(), "deezer-qobuz-apple".into());
+                map.insert("generation".into(), i.into());
+                store_clone.save(&map).unwrap();
+            }));
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let disk = std::fs::read_to_string(&config_path).unwrap();
+        let parsed: Value = serde_json::from_str(&disk).expect("valid JSON on disk");
+        assert!(parsed.is_object());
+
+        let loaded = store.load().unwrap();
+        assert_eq!(loaded["downloader"], "deezer");
     }
 }

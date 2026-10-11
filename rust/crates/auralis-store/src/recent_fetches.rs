@@ -41,7 +41,7 @@ impl RecentFetchesStore {
     /// Mirrors `SaveRecentFetches`: writes the list as 2-space indented JSON, atomically.
     pub fn save(&self, items: &[RecentFetchItem]) -> Result<()> {
         let _guard = self.lock.lock().unwrap_or_else(|e| e.into_inner());
-        let payload = serde_json::to_vec_pretty(items)?;
+        let payload = auralis_core::gojson::to_vec_pretty(items)?;
         write_file_atomic(&self.path, &payload)?;
         Ok(())
     }

@@ -3,6 +3,7 @@
 pub mod close_gate;
 pub mod constants;
 pub mod error;
+pub mod gojson;
 pub mod models;
 
 pub use close_gate::{CloseAction, CloseGate, CloseState};

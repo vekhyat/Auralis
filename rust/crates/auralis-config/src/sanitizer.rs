@@ -59,24 +59,16 @@ pub fn sanitize_auto_order(val: Option<&Value>) -> String {
 
 pub fn normalize_existing_file_check_mode(val: Option<&Value>) -> &'static str {
     let Some(raw) = val.and_then(|v| v.as_str()) else {
-        return "filename";
+        return crate::settings::DEFAULT_EXISTING_FILE_CHECK_MODE;
     };
-    match raw.trim().to_lowercase().as_str() {
-        "isrc" | "upc" => "isrc",
-        "hybrid" => "hybrid",
-        _ => "filename",
-    }
+    crate::settings::normalize_existing_file_check_mode(raw)
 }
 
 pub fn normalize_link_resolver(val: Option<&Value>) -> &'static str {
     let Some(raw) = val.and_then(|v| v.as_str()) else {
-        return "deezer-songlink";
+        return crate::settings::LINK_RESOLVER_PROVIDER_DEEZER_SONGLINK;
     };
-    match raw.trim().to_lowercase().as_str() {
-        "songlink" | "deezer-songlink" => "deezer-songlink",
-        "songstats" => "songstats",
-        _ => "deezer-songlink",
-    }
+    crate::settings::normalize_link_resolver(raw)
 }
 
 pub fn sanitize_settings_map(settings: &mut Map<String, Value>) {
