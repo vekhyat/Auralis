@@ -1177,7 +1177,7 @@ pub async fn jiosaavn_official_search_with_base_url(
         .append_pair("query", query);
 
     let req = crate::http_headers::with_default_headers(client.get(url))?;
-    let resp = client.execute(req).await?;
+    let resp = auralis_core::download_cancel::with_download_context(client.execute(req)).await??;
     let status = resp.status();
     if status.as_u16() != 200 {
         return Err(ProviderError::Other(format!(
@@ -1235,7 +1235,7 @@ pub async fn jiosaavn_official_stream_url_with_base_url(
         .append_pair("pids", song_id);
 
     let req = crate::http_headers::with_default_headers(client.get(url))?;
-    let resp = client.execute(req).await?;
+    let resp = auralis_core::download_cancel::with_download_context(client.execute(req)).await??;
     let body = crate::bounded_body::read_bounded_response(
         resp,
         crate::bounded_body::MAX_PROVIDER_JSON_BYTES,

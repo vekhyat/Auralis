@@ -41,7 +41,7 @@ pub enum AuralisError {
     #[error("Migration error: {0}")]
     Migration(String),
 
-    #[error("Other error: {0}")]
+    #[error("{0}")]
     Other(String),
 }
 

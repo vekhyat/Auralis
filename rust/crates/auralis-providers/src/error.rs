@@ -28,8 +28,13 @@ pub enum ProviderError {
     #[error("Parse error: {0}")]
     Parse(String),
 
-    #[error("Other error: {0}")]
+    /// Plain message, shown verbatim like Go's `fmt.Errorf` text.
+    #[error("{0}")]
     Other(String),
+
+    /// Go's `ErrDownloadCancelled`.
+    #[error(transparent)]
+    Cancelled(#[from] auralis_core::download_cancel::DownloadCancelled),
 }
 
 pub type Result<T> = std::result::Result<T, ProviderError>;

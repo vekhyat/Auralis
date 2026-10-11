@@ -75,7 +75,7 @@ mod tests {
             .expect_err("over-limit body must be rejected");
         assert_eq!(
             err.to_string(),
-            "Other error: response exceeds 4-byte limit"
+            "response exceeds 4-byte limit"
         );
     }
 
