@@ -19,7 +19,10 @@ regex = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
 
+auralis-ffmpeg = { path = "../auralis-ffmpeg" }
+
 blowfish = "0.9"
+aes = "0.8"
 cbc = { version = "0.1", features = ["block-padding"] }
 cipher = { version = "0.4", features = ["block-padding"] }
 des = "0.8"
