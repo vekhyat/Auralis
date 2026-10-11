@@ -1,0 +1,19 @@
+[package]
+name = "auralis-sources"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+auralis-core = { path = "../auralis-core" }
+auralis-config = { path = "../auralis-config" }
+auralis-providers = { path = "../auralis-providers" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

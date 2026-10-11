@@ -164,6 +164,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "auralis-sources"
+version = "0.1.0"
+dependencies = [
+ "auralis-config",
+ "auralis-core",
+ "auralis-providers",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "auralis-store"
 version = "0.1.0"
 dependencies = [
