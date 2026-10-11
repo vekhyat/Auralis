@@ -100,3 +100,35 @@ pub struct QueueApplyRequest {
     #[serde(default)]
     pub order: Vec<String>,
 }
+
+/// Port of Go's `backend.Metadata` (metadata.go): the tag set written to a
+/// downloaded track. Go has no json tags on it, so if it is ever marshaled the
+/// keys are the Go field names.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase", default)]
+pub struct Metadata {
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub album_artist: String,
+    pub separator: String,
+    pub date: String,
+    pub release_date: String,
+    pub track_number: i64,
+    pub total_tracks: i64,
+    pub disc_number: i64,
+    pub total_discs: i64,
+    #[serde(rename = "URL")]
+    pub url: String,
+    pub comment: String,
+    pub copyright: String,
+    pub publisher: String,
+    pub composer: String,
+    pub lyrics: String,
+    pub description: String,
+    #[serde(rename = "ISRC")]
+    pub isrc: String,
+    #[serde(rename = "UPC")]
+    pub upc: String,
+    pub genre: String,
+}
