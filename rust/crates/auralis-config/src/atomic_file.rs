@@ -12,7 +12,7 @@ static COUNTER: AtomicU64 = AtomicU64::new(1);
 /// and renames/replaces atomically.
 pub fn write_file_atomic(target_path: &Path, data: &[u8]) -> io::Result<()> {
     let parent = target_path.parent().unwrap_or_else(|| Path::new("."));
-    std::fs::create_dir_all(parent)? ;
+    std::fs::create_dir_all(parent)?;
 
     let temp_path = {
         let file_stem = target_path
@@ -107,17 +107,26 @@ mod tests {
 
         // Write initial valid file
         write_file_atomic(&target, b"intact original content").unwrap();
-        assert_eq!(std::fs::read_to_string(&target).unwrap(), "intact original content");
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "intact original content"
+        );
 
         // Simulate an interrupted write leaving a temp file behind
         let temp_leftover = dir.path().join("config.json.tmp.1234.5678.9");
         std::fs::write(&temp_leftover, b"incomplete partial write").unwrap();
 
         // The original file is still completely intact and readable
-        assert_eq!(std::fs::read_to_string(&target).unwrap(), "intact original content");
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "intact original content"
+        );
 
         // Subsequent write succeeds
         write_file_atomic(&target, b"new complete content").unwrap();
-        assert_eq!(std::fs::read_to_string(&target).unwrap(), "new complete content");
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "new complete content"
+        );
     }
 }

@@ -173,6 +173,9 @@ mod tests {
         let parsed: ProbeOutput = serde_json::from_str(json_str).unwrap();
         assert_eq!(parsed.streams.len(), 1);
         assert_eq!(parsed.streams[0].codec_name.as_deref(), Some("flac"));
-        assert_eq!(parsed.format.unwrap().tags.get("TITLE").unwrap(), "Song Title");
+        assert_eq!(
+            parsed.format.unwrap().tags.get("TITLE").unwrap(),
+            "Song Title"
+        );
     }
 }

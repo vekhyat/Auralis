@@ -67,7 +67,9 @@ impl<'a> BoltReader<'a> {
     fn read_meta_page(data: &[u8], page_id: usize, page_size: usize) -> Result<Meta, StoreError> {
         let offset = page_id * page_size;
         if data.len() < offset + page_size {
-            return Err(StoreError::LegacyParse("Buffer too short for meta page".into()));
+            return Err(StoreError::LegacyParse(
+                "Buffer too short for meta page".into(),
+            ));
         }
 
         let flags = u16::from_le_bytes([data[offset + 8], data[offset + 9]]);
@@ -94,8 +96,7 @@ impl<'a> BoltReader<'a> {
         // root bucket: root: u64 (8 bytes), sequence: u64 (8 bytes)
         let root_pgid =
             u64::from_le_bytes(data[meta_offset + 16..meta_offset + 24].try_into().unwrap());
-        let txid =
-            u64::from_le_bytes(data[meta_offset + 40..meta_offset + 48].try_into().unwrap());
+        let txid = u64::from_le_bytes(data[meta_offset + 40..meta_offset + 48].try_into().unwrap());
 
         Ok(Meta {
             magic,
@@ -176,7 +177,9 @@ impl<'a> BoltReader<'a> {
                 let val_end = val_start + vsize;
 
                 if self.data.len() < val_end {
-                    return Err(StoreError::LegacyParse("Key/val slice out of bounds".into()));
+                    return Err(StoreError::LegacyParse(
+                        "Key/val slice out of bounds".into(),
+                    ));
                 }
 
                 let key = self.data[key_start..key_end].to_vec();
@@ -192,9 +195,8 @@ impl<'a> BoltReader<'a> {
                     ));
                 }
 
-                let child_pgid = u64::from_le_bytes(
-                    self.data[elem_offset..elem_offset + 8].try_into().unwrap(),
-                );
+                let child_pgid =
+                    u64::from_le_bytes(self.data[elem_offset..elem_offset + 8].try_into().unwrap());
                 self.traverse_bucket(child_pgid, out)?;
             }
         }

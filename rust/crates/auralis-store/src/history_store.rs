@@ -51,10 +51,7 @@ impl HistoryStore {
             .map_err(|e| StoreError::Redb(e.to_string()))?;
 
         let mut items = Vec::new();
-        for item in table
-            .iter()
-            .map_err(|e| StoreError::Redb(e.to_string()))?
-        {
+        for item in table.iter().map_err(|e| StoreError::Redb(e.to_string()))? {
             let (_k, v) = item.map_err(|e| StoreError::Redb(e.to_string()))?;
             if let Ok(parsed) = serde_json::from_slice::<HistoryItem>(v.value()) {
                 items.push(parsed);
@@ -84,15 +81,10 @@ impl HistoryStore {
                 .map_err(|e| StoreError::Redb(e.to_string()))?;
 
             // Prune if over capacity
-            let count = table
-                .len()
-                .map_err(|e| StoreError::Redb(e.to_string()))? as usize;
+            let count = table.len().map_err(|e| StoreError::Redb(e.to_string()))? as usize;
             if count > MAX_HISTORY_ITEMS {
                 let mut all: Vec<(String, i64)> = Vec::with_capacity(count);
-                for entry in table
-                    .iter()
-                    .map_err(|e| StoreError::Redb(e.to_string()))?
-                {
+                for entry in table.iter().map_err(|e| StoreError::Redb(e.to_string()))? {
                     let (k, v) = entry.map_err(|e| StoreError::Redb(e.to_string()))?;
                     if let Ok(parsed) = serde_json::from_slice::<HistoryItem>(v.value()) {
                         all.push((k.value().to_string(), parsed.timestamp));
@@ -151,10 +143,7 @@ impl HistoryStore {
             .map_err(|e| StoreError::Redb(e.to_string()))?;
 
         let mut items = Vec::new();
-        for item in table
-            .iter()
-            .map_err(|e| StoreError::Redb(e.to_string()))?
-        {
+        for item in table.iter().map_err(|e| StoreError::Redb(e.to_string()))? {
             let (_k, v) = item.map_err(|e| StoreError::Redb(e.to_string()))?;
             if let Ok(parsed) = serde_json::from_slice::<FetchHistoryItem>(v.value()) {
                 items.push(parsed);
@@ -182,15 +171,10 @@ impl HistoryStore {
                 .insert(item.id.as_str(), bytes.as_slice())
                 .map_err(|e| StoreError::Redb(e.to_string()))?;
 
-            let count = table
-                .len()
-                .map_err(|e| StoreError::Redb(e.to_string()))? as usize;
+            let count = table.len().map_err(|e| StoreError::Redb(e.to_string()))? as usize;
             if count > MAX_HISTORY_ITEMS {
                 let mut all: Vec<(String, i64)> = Vec::with_capacity(count);
-                for entry in table
-                    .iter()
-                    .map_err(|e| StoreError::Redb(e.to_string()))?
-                {
+                for entry in table.iter().map_err(|e| StoreError::Redb(e.to_string()))? {
                     let (k, v) = entry.map_err(|e| StoreError::Redb(e.to_string()))?;
                     if let Ok(parsed) = serde_json::from_slice::<FetchHistoryItem>(v.value()) {
                         all.push((k.value().to_string(), parsed.timestamp));

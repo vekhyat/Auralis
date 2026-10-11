@@ -18,7 +18,10 @@ pub enum TagWriteMode {
 
 pub fn read_audio_tags(path: &Path) -> Result<AudioMetadata> {
     let tagged_file = Probe::open(path)?.read()?;
-    let tag = match tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
+    let tag = match tagged_file
+        .primary_tag()
+        .or_else(|| tagged_file.first_tag())
+    {
         Some(t) => t,
         None => return Ok(AudioMetadata::default()),
     };

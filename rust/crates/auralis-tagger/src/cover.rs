@@ -46,9 +46,7 @@ pub async fn download_cover_art(url: &str, output_path: &Path) -> Result<()> {
     }
 
     let target_url = upgrade_spotify_cover_url(url);
-    let client = reqwest::Client::builder()
-        .user_agent("Auralis")
-        .build()?;
+    let client = reqwest::Client::builder().user_agent("Auralis").build()?;
 
     let bytes = client.get(&target_url).send().await?.bytes().await?;
     std::fs::write(output_path, &bytes)?;

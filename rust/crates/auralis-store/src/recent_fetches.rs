@@ -30,7 +30,9 @@ impl RecentFetchesStore {
 
         let data = std::fs::read(&self.path)?;
         let trimmed = std::str::from_utf8(&data)
-            .map_err(|e| auralis_core::error::AuralisError::Store(StoreError::LegacyParse(e.to_string())))?
+            .map_err(|e| {
+                auralis_core::error::AuralisError::Store(StoreError::LegacyParse(e.to_string()))
+            })?
             .trim();
         if trimmed.is_empty() {
             return Ok(Vec::new());
@@ -52,7 +54,9 @@ impl RecentFetchesStore {
         let mut items = if self.path.exists() {
             let data = std::fs::read(&self.path)?;
             let trimmed = std::str::from_utf8(&data)
-                .map_err(|e| auralis_core::error::AuralisError::Store(StoreError::LegacyParse(e.to_string())))?
+                .map_err(|e| {
+                    auralis_core::error::AuralisError::Store(StoreError::LegacyParse(e.to_string()))
+                })?
                 .trim();
             if !trimmed.is_empty() {
                 serde_json::from_str::<Vec<RecentFetchItem>>(trimmed)?

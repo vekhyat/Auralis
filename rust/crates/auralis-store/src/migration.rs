@@ -240,8 +240,14 @@ mod tests {
         let queue_item_bytes = serde_json::to_vec(&queue_item).unwrap();
         let queue_order_bytes = serde_json::to_vec(&vec!["item-123".to_string()]).unwrap();
         let queue_db_bytes = build_test_bbolt_db(&[
-            (LEGACY_QUEUE_ITEMS_BUCKET.as_bytes(), &[(b"item-123", &queue_item_bytes)]),
-            (LEGACY_QUEUE_META_BUCKET.as_bytes(), &[(b"order", &queue_order_bytes)]),
+            (
+                LEGACY_QUEUE_ITEMS_BUCKET.as_bytes(),
+                &[(b"item-123", &queue_item_bytes)],
+            ),
+            (
+                LEGACY_QUEUE_META_BUCKET.as_bytes(),
+                &[(b"order", &queue_order_bytes)],
+            ),
         ]);
         std::fs::write(dir.join(LEGACY_QUEUE_DB_FILE), &queue_db_bytes).unwrap();
 
@@ -261,15 +267,17 @@ mod tests {
             timestamp: 1700000000,
         };
         let hist_bytes = serde_json::to_vec(&history_item).unwrap();
-        let history_db_bytes = build_test_bbolt_db(&[
-            (LEGACY_DOWNLOAD_HISTORY_BUCKET.as_bytes(), &[(b"hist-001", &hist_bytes)]),
-        ]);
+        let history_db_bytes = build_test_bbolt_db(&[(
+            LEGACY_DOWNLOAD_HISTORY_BUCKET.as_bytes(),
+            &[(b"hist-001", &hist_bytes)],
+        )]);
         std::fs::write(dir.join(LEGACY_HISTORY_DB_FILE), &history_db_bytes).unwrap();
 
         // 3. Build isrc_cache.db
-        let isrc_db_bytes = build_test_bbolt_db(&[
-            (LEGACY_ISRC_CACHE_BUCKET.as_bytes(), &[(b"spotify:track:abc1", b"USPR37300012")]),
-        ]);
+        let isrc_db_bytes = build_test_bbolt_db(&[(
+            LEGACY_ISRC_CACHE_BUCKET.as_bytes(),
+            &[(b"spotify:track:abc1", b"USPR37300012")],
+        )]);
         std::fs::write(dir.join(LEGACY_ISRC_CACHE_DB_FILE), &isrc_db_bytes).unwrap();
 
         // 4. Build library_index.db
@@ -293,8 +301,14 @@ mod tests {
         };
         let root_bytes = serde_json::to_vec(&root_state).unwrap();
         let lib_db_bytes = build_test_bbolt_db(&[
-            (LEGACY_LIBRARY_INDEX_ENTRIES_BUCKET.as_bytes(), &[(b"eagles.flac", &lib_bytes)]),
-            (LEGACY_LIBRARY_INDEX_ROOTS_BUCKET.as_bytes(), &[(b"/music", &root_bytes)]),
+            (
+                LEGACY_LIBRARY_INDEX_ENTRIES_BUCKET.as_bytes(),
+                &[(b"eagles.flac", &lib_bytes)],
+            ),
+            (
+                LEGACY_LIBRARY_INDEX_ROOTS_BUCKET.as_bytes(),
+                &[(b"/music", &root_bytes)],
+            ),
         ]);
         std::fs::write(dir.join(LEGACY_LIBRARY_INDEX_DB_FILE), &lib_db_bytes).unwrap();
 
@@ -324,10 +338,20 @@ mod tests {
 
         // Verify LibraryIndexStore round-trip
         let l_store = LibraryIndexStore::open(&dir.join(LIBRARY_INDEX_REDB_FILE)).unwrap();
-        let entry = l_store.get_entry("eagles.flac").unwrap().expect("entry exists");
+        let entry = l_store
+            .get_entry("eagles.flac")
+            .unwrap()
+            .expect("entry exists");
         assert_eq!(entry.filename, "eagles.flac");
         assert_eq!(entry.spotify_id, "spotify-eagles");
-        assert_eq!(l_store.get_root_state("/music").unwrap().unwrap().scanned_at, 1700000002);
+        assert_eq!(
+            l_store
+                .get_root_state("/music")
+                .unwrap()
+                .unwrap()
+                .scanned_at,
+            1700000002
+        );
 
         // Verify original .db files are renamed to .db.migrated.bak and NEVER deleted
         assert!(!dir.join(LEGACY_QUEUE_DB_FILE).exists());
@@ -363,7 +387,10 @@ mod tests {
 
         // Migration must return Err
         let res = migrate_legacy_stores(dir);
-        assert!(res.is_err(), "corrupt legacy database must surface an error");
+        assert!(
+            res.is_err(),
+            "corrupt legacy database must surface an error"
+        );
 
         // Original file must still exist with the exact same bytes (NOT deleted)
         assert!(queue_file.exists());

@@ -63,7 +63,11 @@ pub fn parse_lrc(content: &str) -> Vec<LyricsLine> {
             };
 
             let total_ms = (minutes * 60 + seconds) * 1000 + millis;
-            let words = caps.get(4).map(|m| m.as_str().trim()).unwrap_or("").to_string();
+            let words = caps
+                .get(4)
+                .map(|m| m.as_str().trim())
+                .unwrap_or("")
+                .to_string();
 
             lines.push(LyricsLine {
                 start_time_ms: total_ms.to_string(),
@@ -131,9 +135,7 @@ pub async fn fetch_lrclib_lyrics(
     album_name: Option<&str>,
     duration_secs: Option<u32>,
 ) -> Result<Option<LyricsResponse>> {
-    let client = reqwest::Client::builder()
-        .user_agent("Auralis")
-        .build()?;
+    let client = reqwest::Client::builder().user_agent("Auralis").build()?;
 
     let mut url = format!(
         "https://lrclib.net/api/get?artist_name={}&track_name={}",

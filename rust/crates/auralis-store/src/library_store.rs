@@ -3,9 +3,7 @@
 use crate::tables::{TABLE_LIBRARY_ENTRIES, TABLE_LIBRARY_ROOTS};
 use auralis_core::error::store::StoreError;
 use auralis_core::error::Result;
-use auralis_core::models::{
-    LibraryIndexEntry, LibraryIndexLookupRequest, LibraryIndexRootState,
-};
+use auralis_core::models::{LibraryIndexEntry, LibraryIndexLookupRequest, LibraryIndexRootState};
 use redb::{Database, ReadableDatabase, ReadableTable};
 use std::collections::HashSet;
 use std::path::Path;
@@ -181,10 +179,7 @@ impl LibraryIndexStore {
             .collect();
 
         let mut matches = Vec::new();
-        for item in table
-            .iter()
-            .map_err(|e| StoreError::Redb(e.to_string()))?
-        {
+        for item in table.iter().map_err(|e| StoreError::Redb(e.to_string()))? {
             let (_k, v) = item.map_err(|e| StoreError::Redb(e.to_string()))?;
             let Ok(entry) = serde_json::from_slice::<LibraryIndexEntry>(v.value()) else {
                 continue;

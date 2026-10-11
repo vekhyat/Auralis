@@ -9,8 +9,8 @@ pub fn restrict_private_file(file_path: &Path) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::{CloseHandle, LocalFree, GENERIC_ALL, HANDLE};
     use windows_sys::Win32::Security::Authorization::{
-        SetEntriesInAclW, SetNamedSecurityInfoW, EXPLICIT_ACCESS_W,
-        SE_FILE_OBJECT, SET_ACCESS, TRUSTEE_IS_SID, TRUSTEE_IS_USER, TRUSTEE_W,
+        SetEntriesInAclW, SetNamedSecurityInfoW, EXPLICIT_ACCESS_W, SET_ACCESS, SE_FILE_OBJECT,
+        TRUSTEE_IS_SID, TRUSTEE_IS_USER, TRUSTEE_W,
     };
     use windows_sys::Win32::Security::{
         GetTokenInformation, TokenUser, DACL_SECURITY_INFORMATION,
@@ -44,7 +44,13 @@ pub fn restrict_private_file(file_path: &Path) -> io::Result<()> {
         let _token_guard = HandleGuard(token);
 
         let mut length_needed: u32 = 0;
-        let _ = GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut length_needed);
+        let _ = GetTokenInformation(
+            token,
+            TokenUser,
+            std::ptr::null_mut(),
+            0,
+            &mut length_needed,
+        );
         if length_needed == 0 {
             return Err(io::Error::last_os_error());
         }

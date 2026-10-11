@@ -9,8 +9,7 @@ use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
 
 const RELEASES_API_URL: &str = "https://api.github.com/repos/spotbye/Dependencies/releases";
-const RELEASE_DOWNLOAD_URL: &str =
-    "https://github.com/spotbye/Dependencies/releases/download";
+const RELEASE_DOWNLOAD_URL: &str = "https://github.com/spotbye/Dependencies/releases/download";
 const RELEASE_TAG_PREFIX: &str = "FFmpeg-";
 
 #[derive(Debug, Deserialize)]
@@ -130,11 +129,7 @@ pub fn extract_executable_from_zip<R: Read + Seek>(
 
     let temp_file = tempfile::Builder::new()
         .prefix(".auralis-exec-")
-        .tempfile_in(
-            dest_path
-                .parent()
-                .unwrap_or_else(|| Path::new(".")),
-        )?;
+        .tempfile_in(dest_path.parent().unwrap_or_else(|| Path::new(".")))?;
 
     let mut file = temp_file.as_file();
     std::io::copy(&mut entry, &mut file)?;
@@ -162,9 +157,7 @@ where
 
     progress(5, "Checking for latest FFmpeg release...");
 
-    let client = reqwest::Client::builder()
-        .user_agent("Auralis")
-        .build()?;
+    let client = reqwest::Client::builder().user_agent("Auralis").build()?;
 
     let releases: Vec<GithubRelease> = client
         .get(RELEASES_API_URL)
@@ -250,7 +243,11 @@ mod tests {
         let expected = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
         assert!(verify_archive_sha256(sample, expected).is_ok());
         assert!(verify_archive_sha256(sample, &format!("sha256:{}", expected)).is_ok());
-        assert!(verify_archive_sha256(sample, "0000000000000000000000000000000000000000000000000000000000000000").is_err());
+        assert!(verify_archive_sha256(
+            sample,
+            "0000000000000000000000000000000000000000000000000000000000000000"
+        )
+        .is_err());
     }
 
     #[test]

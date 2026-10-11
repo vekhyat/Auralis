@@ -124,15 +124,18 @@ pub fn parse_replaygain_stderr(stderr: &str) -> Result<ReplayGainRawResult> {
     let json_slice = &stderr[start..=end];
     let stats: ReplayGainLoudnormStats = serde_json::from_str(json_slice)?;
 
-    let integrated = stats.input_i.parse::<f64>().map_err(|e| {
-        FfmpegError::ExecutionFailed(format!("Failed to parse input_i: {}", e))
-    })?;
-    let true_peak = stats.input_tp.parse::<f64>().map_err(|e| {
-        FfmpegError::ExecutionFailed(format!("Failed to parse input_tp: {}", e))
-    })?;
-    let lra = stats.input_lra.parse::<f64>().map_err(|e| {
-        FfmpegError::ExecutionFailed(format!("Failed to parse input_lra: {}", e))
-    })?;
+    let integrated = stats
+        .input_i
+        .parse::<f64>()
+        .map_err(|e| FfmpegError::ExecutionFailed(format!("Failed to parse input_i: {}", e)))?;
+    let true_peak = stats
+        .input_tp
+        .parse::<f64>()
+        .map_err(|e| FfmpegError::ExecutionFailed(format!("Failed to parse input_tp: {}", e)))?;
+    let lra = stats
+        .input_lra
+        .parse::<f64>()
+        .map_err(|e| FfmpegError::ExecutionFailed(format!("Failed to parse input_lra: {}", e)))?;
     let thresh = stats.input_thresh.parse::<f64>().map_err(|e| {
         FfmpegError::ExecutionFailed(format!("Failed to parse input_thresh: {}", e))
     })?;

@@ -98,7 +98,10 @@ mod tests {
         assert_eq!(config_path, Path::new(&temp_path).join("config.json"));
 
         let fetches_path = get_recent_fetches_path();
-        assert_eq!(fetches_path, Path::new(&temp_path).join("recent_fetches.json"));
+        assert_eq!(
+            fetches_path,
+            Path::new(&temp_path).join("recent_fetches.json")
+        );
 
         unsafe {
             std::env::remove_var("AURALIS_APP_DIR");

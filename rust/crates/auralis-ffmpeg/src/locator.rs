@@ -64,9 +64,9 @@ pub fn run_version_check(path: &Path) -> Result<()> {
     cmd.arg("-version");
     configure_command(&mut cmd);
 
-    let output = cmd.output().map_err(|e| {
-        FfmpegError::ExecutionFailed(format!("Failed to run version check: {}", e))
-    })?;
+    let output = cmd
+        .output()
+        .map_err(|e| FfmpegError::ExecutionFailed(format!("Failed to run version check: {}", e)))?;
 
     if !output.status.success() {
         return Err(FfmpegError::ExecutionFailed(format!(
@@ -97,9 +97,7 @@ pub fn resolve_executable(name: &str) -> Result<PathBuf> {
         let next_path = next_dir.join(&binary_name);
         if next_path.is_file() {
             let _ = std::fs::copy(&next_path, &local_path);
-            if validate_executable(&local_path).is_ok()
-                && run_version_check(&local_path).is_ok()
-            {
+            if validate_executable(&local_path).is_ok() && run_version_check(&local_path).is_ok() {
                 return Ok(local_path);
             }
         }

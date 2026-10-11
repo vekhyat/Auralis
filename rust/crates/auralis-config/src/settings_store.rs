@@ -2,9 +2,7 @@
 
 use crate::atomic_file::write_file_atomic;
 use crate::file_acl::restrict_private_file;
-use crate::layout::{
-    default_settings, flatten_config_settings, marshal_config_settings,
-};
+use crate::layout::{default_settings, flatten_config_settings, marshal_config_settings};
 use crate::paths::get_config_path;
 use crate::sanitizer::sanitize_settings_map;
 use auralis_core::error::{AuralisError, Result};
@@ -33,9 +31,7 @@ impl SettingsStore {
     }
 
     fn path(&self) -> PathBuf {
-        self.config_path
-            .clone()
-            .unwrap_or_else(get_config_path)
+        self.config_path.clone().unwrap_or_else(get_config_path)
     }
 
     /// Loads settings from disk.
