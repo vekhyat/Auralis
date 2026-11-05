@@ -1,0 +1,175 @@
+{
+  "checked_at_utc": "2026-10-02T19:15:54.5208343Z",
+  "client_date": "2026-10-03",
+  "implementation_model": "grok-4.7",
+  "fixture": {
+    "title": "Come Together",
+    "artist": "The Beatles",
+    "scope": "One sample per route; title/artist and duration checks, not identical-release certification"
+  },
+  "routing": {
+    "tidal": "custom instance when configured, then Antra, then gateways",
+    "qobuz": "custom instance when configured, then Antra, then gateways; Antra ISRC lookup before signed catalog",
+    "amazon": "community/Zarz first, Antra fallback retained but current sample cannot decode"
+  },
+  "download_results": [
+    {
+      "service": "tidal",
+      "route": "antra",
+      "stage": "passed",
+      "track_id": "55130631",
+      "title": "Come Together",
+      "artist": "The Beatles",
+      "bytes": 28673631,
+      "duration_seconds": 259.946667,
+      "codec": "flac",
+      "sample_rate": "44100",
+      "elapsed_seconds": 59.0542353
+    },
+    {
+      "service": "qobuz",
+      "route": "antra",
+      "stage": "passed",
+      "track_id": "30369895",
+      "title": "Come Together",
+      "artist": "The Beatles",
+      "bytes": 26294630,
+      "duration_seconds": 259.946667,
+      "codec": "flac",
+      "sample_rate": "44100",
+      "elapsed_seconds": 29.0839401
+    },
+    {
+      "service": "amazon",
+      "route": "antra",
+      "stage": "download",
+      "track_id": "B07FSSGBJV",
+      "title": "Come Together",
+      "artist": "The Beatles",
+      "error": "protected stream was not readable audio",
+      "elapsed_seconds": 14.4229753,
+      "identity_evidence": "provider resolved the externally verified fixture Spotify URL"
+    },
+    {
+      "service": "deezer",
+      "route": "antra",
+      "stage": "passed",
+      "track_id": "116348128",
+      "title": "Come Together (Remastered 2009)",
+      "artist": "The Beatles",
+      "bytes": 26215927,
+      "duration_seconds": 259.666667,
+      "codec": "flac",
+      "sample_rate": "44100",
+      "elapsed_seconds": 21.0566551
+    },
+    {
+      "service": "apple",
+      "route": "antra",
+      "stage": "passed",
+      "track_id": "6818177515",
+      "title": "Come Together (Remastered 2009)",
+      "artist": "The Beatles",
+      "bytes": 26477433,
+      "duration_seconds": 259.666667,
+      "codec": "alac",
+      "sample_rate": "44100",
+      "elapsed_seconds": 30.170463
+    },
+    {
+      "service": "jiosaavn",
+      "route": "official/community",
+      "stage": "passed",
+      "track_id": "buPhYncP",
+      "title": "Come Together (Remastered 2009)",
+      "artist": "The Beatles",
+      "bytes": 10584254,
+      "duration_seconds": 259.946009,
+      "codec": "aac",
+      "sample_rate": "44100",
+      "elapsed_seconds": 1.8800975,
+      "identity_evidence": "official selected-track details"
+    }
+  ],
+  "text_search_results": [
+    {
+      "service": "tidal",
+      "route": "antra",
+      "stage": "search_passed",
+      "track_id": "55130631",
+      "title": "Come Together",
+      "artist": "The Beatles",
+      "elapsed_seconds": 5.674598,
+      "identity_evidence": "provider search title and artist"
+    },
+    {
+      "service": "qobuz",
+      "route": "antra",
+      "stage": "search_passed",
+      "track_id": "64868955",
+      "title": "Come Together",
+      "artist": "The Beatles",
+      "elapsed_seconds": 1.1885555,
+      "identity_evidence": "provider search title and artist"
+    },
+    {
+      "service": "deezer",
+      "route": "antra",
+      "stage": "search_passed",
+      "track_id": "116348452",
+      "title": "Come Together (Remastered 2009)",
+      "artist": "The Beatles",
+      "elapsed_seconds": 0.9912498,
+      "identity_evidence": "provider search title and artist"
+    },
+    {
+      "service": "apple",
+      "route": "antra",
+      "stage": "search",
+      "error": "apple text search HTTP 404",
+      "elapsed_seconds": 1.3391829
+    }
+  ],
+  "gateway_bootstraps": [
+    {
+      "gateway": "spotbye",
+      "provider": "shared",
+      "http_status": 200,
+      "challenge_returned": true,
+      "session_returned": false
+    },
+    {
+      "gateway": "zarz",
+      "provider": "tidal",
+      "http_status": 200,
+      "challenge_returned": true,
+      "session_returned": false
+    },
+    {
+      "gateway": "zarz",
+      "provider": "qobuz",
+      "http_status": 200,
+      "challenge_returned": true,
+      "session_returned": false
+    },
+    {
+      "gateway": "zarz",
+      "provider": "amazon",
+      "http_status": 200,
+      "challenge_returned": true,
+      "session_returned": false
+    }
+  ],
+  "gateway_downloads_verified": false,
+  "validation": [
+    "go test ./... passed",
+    "go vet ./... passed",
+    "Live successful samples fully decoded using ffmpeg -xerror"
+  ],
+  "limits": [
+    "Amazon mirror stream failed the existing decryption pipeline and is not counted as working",
+    "Apple title/artist query for the fixture returned an upstream catalogue miss; ISRC download succeeded",
+    "Fresh SpotBye and Zarz bootstraps returned verification challenges",
+    "Atmos and catalogue-wide success were not verified"
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-02T19:11:17Z",
+  "title": "Design System: Auralis Artwork Library",
+  "extensions": {
+    "shadows": [],
+    "motion": [{ "name": "cover-lift", "value": "transform 200ms", "purpose": "Lift real artwork 4px on hover; disabled under reduced motion." }],
+    "breakpoints": [{ "name": "stack-search", "value": "1100px" }, { "name": "icon-destinations", "value": "760px" }]
+  },
+  "components": [
+    {
+      "name": "Download button", "kind": "button", "refersTo": "button-primary",
+      "description": "Submit music to the automatic worker.",
+      "html": "<button class=\"ds-download\">Download</button>",
+      "css": ".ds-download{background:var(--primary);color:var(--primary-foreground);border:0;border-radius:6px;padding:8px 16px;font:500 14px system-ui;cursor:pointer}.ds-download:hover{opacity:.9}.ds-download:focus-visible{outline:2px solid var(--ring);outline-offset:3px}.ds-download:disabled{opacity:.5;cursor:default}"
+    },
+    {
+      "name": "Outline control", "kind": "button",
+      "description": "Pause, resume, or open a folder.",
+      "html": "<button class=\"ds-outline\">Resume</button>",
+      "css": ".ds-outline{background:var(--background);color:var(--foreground);border:1px solid var(--border);border-radius:6px;padding:8px 16px;font:500 14px system-ui;cursor:pointer}.ds-outline:hover{background:var(--accent)}.ds-outline:focus-visible{outline:2px solid var(--ring);outline-offset:3px}"
+    },
+    {
+      "name": "Omnibar", "kind": "input", "refersTo": "search-input",
+      "description": "Paste a Spotify link or search the catalog.",
+      "html": "<input class=\"ds-search\" aria-label=\"Find music\" placeholder=\"Paste a link, or search music\" />",
+      "css": ".ds-search{height:40px;width:100%;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--foreground);padding:0 12px;font:400 13px system-ui;caret-color:var(--primary)}.ds-search::placeholder{color:var(--muted-foreground)}.ds-search:hover{border-color:var(--primary)}.ds-search:focus-visible{outline:2px solid var(--ring);outline-offset:2px}"
+    },
+    {
+      "name": "Destination", "kind": "nav",
+      "description": "Stable navigation with a quiet active wash.",
+      "html": "<button class=\"ds-destination\" aria-current=\"page\">Downloads</button>",
+      "css": ".ds-destination{display:flex;align-items:center;width:160px;height:44px;padding:0 12px;border:0;border-radius:8px;background:color-mix(in oklab,var(--primary) 10%,transparent);color:var(--primary);font:600 14px system-ui;cursor:pointer}.ds-destination:hover{background:color-mix(in oklab,var(--primary) 15%,transparent)}.ds-destination:focus-visible{outline:2px solid var(--ring);outline-offset:2px}"
+    },
+    {
+      "name": "Artwork fallback", "kind": "card",
+      "description": "Square fallback when artwork is absent; real images replace it.",
+      "html": "<button class=\"ds-artwork\" aria-label=\"Inspect music\"><svg width=\"40\" height=\"40\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.25\" aria-hidden=\"true\"><path d=\"M9 18V5l12-2v13M9 5l12-2\"/><circle cx=\"6\" cy=\"18\" r=\"3\"/><circle cx=\"18\" cy=\"16\" r=\"3\"/></svg></button>",
+      "css": ".ds-artwork{display:grid;place-items:center;width:200px;aspect-ratio:1;background:var(--secondary);color:var(--muted-foreground);border:0;border-radius:8px;cursor:pointer;transition:transform 200ms}.ds-artwork:hover{transform:translateY(-4px)}.ds-artwork:focus-visible{outline:2px solid var(--ring);outline-offset:4px}@media(prefers-reduced-motion:reduce){.ds-artwork{transition:none}.ds-artwork:hover{transform:none}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Choose music by its artwork, download once, and keep exploring.",
+    "overview": "A Windows Go/Wails/React utility with artwork-led browsing and a persistent download strip. Cool-paper chrome and Prussian focus keep music visible while the automatic worker manages transfers.",
+    "keyCharacteristics": ["Real artwork", "Immediate downloads", "Persistent controls", "Compact tracks", "Two skins"],
+    "rules": [{ "name": "One worker", "body": "Use the shared lease and persistent store; explicit pause survives additions.", "section": "components" }],
+    "dos": ["Use prominent artwork", "Keep transfer controls available", "Respect explicit pause"],
+    "donts": ["Do not require Start Queue for new downloads", "Do not migrate to Electron", "Do not represent preview fixtures as user data"]
+  }
+}
